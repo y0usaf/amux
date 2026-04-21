@@ -1,4 +1,6 @@
-use super::*;
+use crate::render::TextRenderer;
+
+use super::App;
 
 pub(super) const TOPBAR_ROWS: i32 = 2;
 pub(super) const SIDEBAR_COLS: i32 = 26;

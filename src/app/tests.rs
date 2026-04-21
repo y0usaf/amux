@@ -1,0 +1,116 @@
+use std::path::PathBuf;
+
+use crate::pi::{PiSessionStage, PiSidecarSnapshot};
+use crate::state::Session;
+
+use super::{project_actions, sidebar, sidecar_sync};
+
+fn snapshot(stage: PiSessionStage, queued: bool) -> PiSidecarSnapshot {
+    PiSidecarSnapshot {
+        kind: Some("snapshot".into()),
+        session_id: "pi-session-1".into(),
+        harness_session_id: Some("local-session-1".into()),
+        session_file: Some(PathBuf::from("/tmp/pi-session-1.jsonl")),
+        session_name: Some("Test session".into()),
+        stage,
+        queued,
+        tool_name: None,
+        ts_ms: 1,
+    }
+}
+
+#[test]
+fn idle_snapshot_does_not_bind_empty_draft() {
+    let session = Session::new_draft();
+    assert!(!sidecar_sync::should_bind_sidecar_session(
+        &session,
+        &snapshot(PiSessionStage::Idle, false)
+    ));
+}
+
+#[test]
+fn active_snapshot_binds_new_session() {
+    let session = Session::new_draft();
+    assert!(sidecar_sync::should_bind_sidecar_session(
+        &session,
+        &snapshot(PiSessionStage::Thinking, false)
+    ));
+}
+
+#[test]
+fn queued_snapshot_binds_new_session() {
+    let session = Session::new_draft();
+    assert!(sidecar_sync::should_bind_sidecar_session(
+        &session,
+        &snapshot(PiSessionStage::Idle, true)
+    ));
+}
+
+#[test]
+fn unmaterialized_sidecar_session_does_not_reorder() {
+    assert_eq!(
+        sidecar_sync::sidecar_order_update(false, true, false, false),
+        sidecar_sync::SidecarOrderUpdate::None
+    );
+    assert_eq!(
+        sidecar_sync::sidecar_order_update(true, false, false, false),
+        sidecar_sync::SidecarOrderUpdate::None
+    );
+}
+
+#[test]
+fn sidecar_session_promotes_once_materialized() {
+    assert_eq!(
+        sidecar_sync::sidecar_order_update(false, true, false, true),
+        sidecar_sync::SidecarOrderUpdate::Promote
+    );
+    assert_eq!(
+        sidecar_sync::sidecar_order_update(true, true, false, true),
+        sidecar_sync::SidecarOrderUpdate::Promote
+    );
+    assert_eq!(
+        sidecar_sync::sidecar_order_update(true, false, false, true),
+        sidecar_sync::SidecarOrderUpdate::Promote
+    );
+    assert_eq!(
+        sidecar_sync::sidecar_order_update(true, false, true, true),
+        sidecar_sync::SidecarOrderUpdate::Touch
+    );
+}
+
+#[test]
+fn sidebar_status_prefers_active_over_notification() {
+    let mut session = Session::new_draft();
+    session.runtime.running = true;
+    session.runtime.unread = true;
+
+    assert_eq!(
+        sidebar::session_sidebar_status(&session),
+        Some(sidebar::SidebarStatusKind::Active)
+    );
+}
+
+#[test]
+fn notification_status_uses_full_braille_glyph() {
+    assert_eq!(
+        sidebar::sidebar_status_glyph(sidebar::SidebarStatusKind::Notification, 0),
+        sidebar::SIDEBAR_NOTIFICATION_GLYPH
+    );
+}
+
+#[test]
+fn project_path_normalization_preserves_order() {
+    let paths = project_actions::normalize_unique_project_paths(vec![
+        PathBuf::from("/tmp/project-b"),
+        PathBuf::from("/tmp/project-a"),
+        PathBuf::from("/tmp/project-b"),
+    ]);
+
+    assert_eq!(
+        paths,
+        vec![
+            PathBuf::from("/tmp/project-b"),
+            PathBuf::from("/tmp/project-a")
+        ]
+    );
+}

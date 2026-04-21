@@ -17,9 +17,6 @@ pub use sort::compare_sessions;
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use super::{compare_sessions, PersistedState, Session};
 
     #[test]
@@ -57,27 +54,13 @@ mod tests {
     }
 
     #[test]
-    fn running_session_stays_hidden_until_session_file_exists() {
+    fn running_session_renders_before_session_file_exists() {
         let mut session = Session::new_draft();
         session.draft = false;
         session.runtime.running = true;
 
-        assert!(!session.should_render_in_sidebar());
-
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "pi-harness-sidebar-materialized-{}-{unique}.jsonl",
-            std::process::id()
-        ));
-        fs::write(&path, "{}\n").unwrap();
-        session.session_file = Some(path.clone());
-
         assert!(session.should_render_in_sidebar());
-
-        let _ = fs::remove_file(path);
+        assert!(session.counts_for_activity_ordering());
     }
 
     #[test]
