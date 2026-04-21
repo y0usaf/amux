@@ -104,12 +104,10 @@ impl Session {
 
     pub fn should_render_in_sidebar(&self) -> bool {
         !self.is_ephemeral_draft()
-            && (self.has_materialized_session_file()
-                || (!self.runtime.running && !self.runtime.queued))
     }
 
     pub fn counts_for_activity_ordering(&self) -> bool {
-        self.has_materialized_session_file()
+        !self.is_ephemeral_draft()
     }
 
     pub fn matches_scan(&self, scan: &ScannedSession) -> bool {

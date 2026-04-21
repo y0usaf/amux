@@ -1,4 +1,6 @@
-use super::*;
+use crate::render::Color;
+use crate::state::Session;
+use crate::terminal::TerminalStatus;
 
 pub(super) const FONT_SIZE: f32 = 15.0;
 pub(super) const UI_SCALE_DEFAULT: f32 = 1.0;

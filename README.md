@@ -38,8 +38,8 @@ Notes:
 - `Ctrl+Delete` → archive selected session
 - `Ctrl+R` → reload Pi sessions from disk
 - `Ctrl+Shift+Delete` / `Ctrl+Shift+D` → remove selected project
-- `Ctrl+H` / `Ctrl+L` → prev/next project
-- `Ctrl+K` / `Ctrl+J` → prev/next session
+- `Ctrl+Left` / `Ctrl+Right` → prev/next project
+- `Ctrl+Up` / `Ctrl+Down` → prev/next session
 - drag in terminal → highlight text + auto-copy selection (`Clipboard` + Linux `Primary`)
 - `Ctrl+Shift+C` / `Cmd+C` → copy current terminal selection
 - `Ctrl+V` / `Cmd+V` / `Shift+Insert` → paste clipboard into terminal
@@ -63,10 +63,20 @@ If no project path is passed, the app falls back to persisted projects, then cur
 ```json
 {
   "ui_scale": 1.0,
-  "font_family": null
+  "font_family": null,
+  "keybinds": {
+    "project_prev": "ctrl+h",
+    "project_next": "ctrl+l",
+    "session_prev": "ctrl+k",
+    "session_next": "ctrl+j"
+  }
 }
 ```
 
+- missing `keybinds.*` → built-in defaults
+- value shape = string or string array
+- multi-stroke chords are space-separated, e.g. `"ctrl+p n"`
+- key names use tokens like `left/right/up/down`, `delete`, `insert`, `equal`, `plus`, `minus`
 - `font_family=null`/missing → system default monospace via fontconfig
 - if set → prefer that family; missing symbols/glyphs still use fontconfig fallbacks
 

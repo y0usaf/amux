@@ -1,5 +1,9 @@
-use super::theme::{ACCENT, RUNNING, SELECTION, TEXT, WARNING};
-use super::*;
+use crate::render::{Color, TextRenderer};
+use crate::state::Session;
+
+use super::layout::{Rect, SIDEBAR_PAD_Y};
+use super::theme::{ACCENT, MUTED, RUNNING, SELECTION, TEXT, WARNING};
+use super::App;
 
 pub(super) const SIDEBAR_SPINNER_FRAMES: &[&str] =
     &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
