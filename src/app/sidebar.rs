@@ -37,6 +37,109 @@ pub(super) struct SidebarRow {
     pub(super) status: Option<SidebarStatusKind>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// anchor_row = selected project's header when one exists; selected_row = active row.
+pub(super) struct SidebarSelectionSpan {
+    pub(super) anchor_row: usize,
+    pub(super) selected_row: usize,
+}
+
+fn clamp_scroll_into_range(current_scroll: usize, min_scroll: usize, max_scroll: usize) -> usize {
+    if min_scroll <= max_scroll {
+        current_scroll.clamp(min_scroll, max_scroll)
+    } else {
+        max_scroll
+    }
+}
+
+fn sync_sidebar_scroll_to_row(
+    current_scroll: usize,
+    row_count: usize,
+    visible_rows: usize,
+    row_index: usize,
+) -> usize {
+    let max_scroll = row_count.saturating_sub(visible_rows);
+    if visible_rows == 0 {
+        return current_scroll.min(max_scroll);
+    }
+
+    let min_scroll = row_index.saturating_add(1).saturating_sub(visible_rows);
+    clamp_scroll_into_range(
+        current_scroll.min(max_scroll),
+        min_scroll,
+        row_index.min(max_scroll),
+    )
+}
+
+fn sync_sidebar_scroll_to_selection_span(
+    current_scroll: usize,
+    row_count: usize,
+    visible_rows: usize,
+    span: SidebarSelectionSpan,
+) -> usize {
+    // Selection sync rule: keep the selected project's header visible alongside the
+    // selected row when possible; otherwise reserve a sticky header row for it.
+    let max_scroll = row_count.saturating_sub(visible_rows);
+    let current_scroll = current_scroll.min(max_scroll);
+    if visible_rows == 0 {
+        return current_scroll;
+    }
+
+    if span.anchor_row >= span.selected_row {
+        return sync_sidebar_scroll_to_row(
+            current_scroll,
+            row_count,
+            visible_rows,
+            span.selected_row,
+        );
+    }
+
+    let min_scroll = span
+        .selected_row
+        .saturating_add(1)
+        .saturating_sub(visible_rows);
+    let max_scroll_with_anchor = span.anchor_row.min(max_scroll);
+    if min_scroll <= max_scroll_with_anchor {
+        return clamp_scroll_into_range(current_scroll, min_scroll, max_scroll_with_anchor);
+    }
+
+    if visible_rows < 2 {
+        return sync_sidebar_scroll_to_row(
+            current_scroll,
+            row_count,
+            visible_rows,
+            span.selected_row,
+        );
+    }
+
+    let sticky_min_scroll = span
+        .selected_row
+        .saturating_add(2)
+        .saturating_sub(visible_rows)
+        .max(span.anchor_row.saturating_add(1))
+        .min(max_scroll);
+    clamp_scroll_into_range(
+        current_scroll,
+        sticky_min_scroll,
+        span.selected_row.min(max_scroll),
+    )
+}
+
+pub(super) fn sticky_sidebar_anchor_row(
+    scroll: usize,
+    visible_rows: usize,
+    span: SidebarSelectionSpan,
+) -> Option<usize> {
+    if visible_rows < 2 || span.anchor_row >= span.selected_row || span.anchor_row >= scroll {
+        return None;
+    }
+
+    let body_visible_rows = visible_rows - 1;
+    let body_last_visible = scroll + body_visible_rows.saturating_sub(1);
+    (span.selected_row >= scroll && span.selected_row <= body_last_visible)
+        .then_some(span.anchor_row)
+}
+
 pub(super) fn session_sidebar_status(session: &Session) -> Option<SidebarStatusKind> {
     if session.runtime.running {
         Some(SidebarStatusKind::Active)
@@ -173,6 +276,45 @@ impl App {
         })
     }
 
+    pub(super) fn selected_sidebar_selection_span(
+        &self,
+        rows: &[SidebarRow],
+    ) -> Option<SidebarSelectionSpan> {
+        let selected_row = self.selected_sidebar_row_index(rows)?;
+        let anchor_row = rows
+            .iter()
+            .position(|row| matches!(row.kind, SidebarRowKind::Project(index) if index == self.selected_project))
+            .unwrap_or(selected_row);
+        Some(SidebarSelectionSpan {
+            anchor_row,
+            selected_row,
+        })
+    }
+
+    pub(super) fn sticky_sidebar_anchor_row_index(
+        &self,
+        rows: &[SidebarRow],
+        visible_rows: usize,
+    ) -> Option<usize> {
+        self.selected_sidebar_selection_span(rows)
+            .and_then(|span| sticky_sidebar_anchor_row(self.sidebar_scroll, visible_rows, span))
+    }
+
+    pub(super) fn sidebar_row_index_at_visible_row(
+        &self,
+        rows: &[SidebarRow],
+        visible_rows: usize,
+        visible_row: usize,
+    ) -> Option<usize> {
+        let sticky_row = self.sticky_sidebar_anchor_row_index(rows, visible_rows);
+        let row_index = match sticky_row {
+            Some(anchor_row) if visible_row == 0 => anchor_row,
+            Some(_) => self.sidebar_scroll + visible_row.saturating_sub(1),
+            None => self.sidebar_scroll + visible_row,
+        };
+        rows.get(row_index).map(|_| row_index)
+    }
+
     pub(super) fn clamp_sidebar_scroll(&mut self, row_count: usize, visible_rows: usize) {
         let max_scroll = row_count.saturating_sub(visible_rows);
         self.sidebar_scroll = self.sidebar_scroll.min(max_scroll);
@@ -184,22 +326,15 @@ impl App {
         visible_rows: usize,
     ) {
         self.clamp_sidebar_scroll(rows.len(), visible_rows);
-        if visible_rows == 0 {
-            return;
-        }
-
-        let Some(selected_index) = self.selected_sidebar_row_index(rows) else {
+        let Some(span) = self.selected_sidebar_selection_span(rows) else {
             return;
         };
-        if selected_index < self.sidebar_scroll {
-            self.sidebar_scroll = selected_index;
-            return;
-        }
-
-        let last_visible = self.sidebar_scroll + visible_rows.saturating_sub(1);
-        if selected_index > last_visible {
-            self.sidebar_scroll = selected_index + 1 - visible_rows;
-        }
+        self.sidebar_scroll = sync_sidebar_scroll_to_selection_span(
+            self.sidebar_scroll,
+            rows.len(),
+            visible_rows,
+            span,
+        );
     }
 
     pub(super) fn scroll_sidebar_by_rows(
@@ -230,5 +365,78 @@ impl App {
 
     pub(super) fn sync_sidebar_to_selection(&mut self) {
         self.sidebar_sync_to_selection = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::Session;
+
+    #[test]
+    fn status_color_maps_each_kind() {
+        assert_eq!(sidebar_status_color(SidebarStatusKind::Active), RUNNING);
+        assert_eq!(sidebar_status_color(SidebarStatusKind::Queued), WARNING);
+        assert_eq!(
+            sidebar_status_color(SidebarStatusKind::Notification),
+            ACCENT
+        );
+    }
+
+    #[test]
+    fn session_sidebar_status_returns_none_without_flags() {
+        let session = Session::new_draft();
+        assert_eq!(session_sidebar_status(&session), None);
+    }
+
+    #[test]
+    fn spinner_glyph_wraps_after_last_frame() {
+        let now_ms = SIDEBAR_SPINNER_FRAME_MS * SIDEBAR_SPINNER_FRAMES.len() as u64;
+        assert_eq!(
+            sidebar_status_glyph(SidebarStatusKind::Active, now_ms),
+            SIDEBAR_SPINNER_FRAMES[0]
+        );
+        assert_eq!(
+            sidebar_status_glyph(SidebarStatusKind::Queued, now_ms + SIDEBAR_SPINNER_FRAME_MS),
+            SIDEBAR_SPINNER_FRAMES[1]
+        );
+    }
+
+    #[test]
+    fn selection_sync_keeps_project_header_visible_with_selected_session() {
+        assert_eq!(
+            sync_sidebar_scroll_to_selection_span(
+                0,
+                32,
+                5,
+                SidebarSelectionSpan {
+                    anchor_row: 10,
+                    selected_row: 12,
+                },
+            ),
+            8
+        );
+    }
+
+    #[test]
+    fn selection_sync_uses_sticky_header_space_for_deep_session() {
+        let span = SidebarSelectionSpan {
+            anchor_row: 10,
+            selected_row: 15,
+        };
+        let scroll = sync_sidebar_scroll_to_selection_span(0, 32, 5, span);
+
+        assert_eq!(scroll, 12);
+        assert_eq!(sticky_sidebar_anchor_row(scroll, 5, span), Some(10));
+    }
+
+    #[test]
+    fn sticky_header_hides_when_selected_session_is_not_in_body() {
+        let span = SidebarSelectionSpan {
+            anchor_row: 10,
+            selected_row: 15,
+        };
+
+        assert_eq!(sticky_sidebar_anchor_row(16, 5, span), None);
     }
 }

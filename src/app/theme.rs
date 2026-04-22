@@ -152,3 +152,128 @@ fn color_components(color: Color) -> (u8, u8, u8) {
         (value & 0xff) as u8,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ansi_index_to_color, brighten, clamp_ui_scale, color_components, fade_toward, status_color,
+        terminal_cell_colors, ACCENT, CURSOR, ERROR, MUTED, RUNNING, TERM_BG, TERM_FG,
+        TERM_SELECTION_BG, TERM_SELECTION_FG, UI_SCALE_MAX, UI_SCALE_MIN, WARNING,
+    };
+    use crate::render::Color;
+    use crate::state::Session;
+    use crate::terminal::TerminalStatus;
+
+    fn session_with_runtime(running: bool, queued: bool) -> Session {
+        let mut session = Session::new_draft();
+        session.runtime.running = running;
+        session.runtime.queued = queued;
+        session
+    }
+
+    fn cell_from_bytes(bytes: &[u8]) -> vt100::Cell {
+        let mut parser = vt100::Parser::new(1, 8, 0);
+        parser.process(bytes);
+        parser.screen().cell(0, 0).unwrap().clone()
+    }
+
+    #[test]
+    fn clamp_ui_scale_respects_bounds_and_interior_values() {
+        assert_eq!(clamp_ui_scale(UI_SCALE_MIN - 1.0), UI_SCALE_MIN);
+        assert_eq!(clamp_ui_scale(1.5), 1.5);
+        assert_eq!(clamp_ui_scale(UI_SCALE_MAX + 1.0), UI_SCALE_MAX);
+    }
+
+    #[test]
+    fn status_color_prioritizes_session_runtime_over_terminal_status() {
+        let running = session_with_runtime(true, false);
+        let queued = session_with_runtime(false, true);
+
+        assert_eq!(
+            status_color(Some(&running), Some(&TerminalStatus::Error("boom".into()))),
+            RUNNING
+        );
+        assert_eq!(
+            status_color(Some(&queued), Some(&TerminalStatus::Running)),
+            WARNING
+        );
+    }
+
+    #[test]
+    fn status_color_falls_back_to_terminal_status_when_session_is_idle() {
+        let idle = session_with_runtime(false, false);
+
+        assert_eq!(
+            status_color(Some(&idle), Some(&TerminalStatus::Error("boom".into()))),
+            ERROR
+        );
+        assert_eq!(
+            status_color(None, Some(&TerminalStatus::Exited("0".into()))),
+            WARNING
+        );
+        assert_eq!(status_color(None, Some(&TerminalStatus::Launching)), ACCENT);
+        assert_eq!(status_color(None, Some(&TerminalStatus::Running)), ACCENT);
+        assert_eq!(status_color(None, Some(&TerminalStatus::Empty)), MUTED);
+        assert_eq!(status_color(None, None), MUTED);
+    }
+
+    #[test]
+    fn ansi_index_to_color_handles_base_cube_and_grayscale_ranges() {
+        assert_eq!(ansi_index_to_color(1), Color::rgb(0xf7, 0x76, 0x8e));
+        assert_eq!(ansi_index_to_color(16), Color::rgb(0, 0, 0));
+        assert_eq!(ansi_index_to_color(21), Color::rgb(0, 0, 255));
+        assert_eq!(ansi_index_to_color(51), Color::rgb(0, 255, 255));
+        assert_eq!(ansi_index_to_color(231), Color::rgb(255, 255, 255));
+        assert_eq!(ansi_index_to_color(232), Color::rgb(8, 8, 8));
+        assert_eq!(ansi_index_to_color(255), Color::rgb(238, 238, 238));
+    }
+
+    #[test]
+    fn brighten_and_fade_toward_adjust_channels_as_expected() {
+        assert_eq!(
+            brighten(Color::rgb(250, 1, 240), 20),
+            Color::rgb(255, 21, 255)
+        );
+        assert_eq!(
+            fade_toward(Color::rgb(10, 20, 30), Color::rgb(110, 120, 130), 0),
+            Color::rgb(10, 20, 30)
+        );
+        assert_eq!(
+            fade_toward(Color::rgb(10, 20, 30), Color::rgb(110, 120, 130), 255),
+            Color::rgb(110, 120, 130)
+        );
+    }
+
+    #[test]
+    fn color_components_extract_rgb_channels() {
+        assert_eq!(
+            color_components(Color::rgb(0x12, 0x34, 0x56)),
+            (0x12, 0x34, 0x56)
+        );
+    }
+
+    #[test]
+    fn terminal_cell_colors_apply_selection_and_cursor_after_style_processing() {
+        let bold_dim_inverse = cell_from_bytes(b"\x1b[1;2;7mX");
+        let selected = terminal_cell_colors(&bold_dim_inverse, false, true);
+        let cursor = terminal_cell_colors(&bold_dim_inverse, true, false);
+
+        assert_eq!(selected, (TERM_SELECTION_FG, TERM_SELECTION_BG));
+        assert_eq!(cursor, (Color::rgb(9, 12, 18), CURSOR));
+    }
+
+    #[test]
+    fn terminal_cell_colors_apply_inverse_bold_and_dim_for_unselected_cells() {
+        let plain = cell_from_bytes(b"X");
+        let styled = cell_from_bytes(b"\x1b[31;44;1;2;7mX");
+
+        assert_eq!(
+            terminal_cell_colors(&plain, false, false),
+            (TERM_FG, TERM_BG)
+        );
+        assert_eq!(
+            terminal_cell_colors(&styled, false, false),
+            (Color::rgb(175, 143, 201), Color::rgb(247, 118, 142))
+        );
+    }
+}

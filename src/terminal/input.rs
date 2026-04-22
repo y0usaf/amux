@@ -111,7 +111,7 @@ fn control_bytes(key: &str) -> Option<Vec<u8>> {
     }
 
     let bytes = match lower.as_str() {
-        "space" | "2" => vec![0],
+        "space" | "2" | "@" => vec![0],
         "3" | "[" => vec![0x1b],
         "4" | "\\" => vec![0x1c],
         "5" | "]" => vec![0x1d],
@@ -128,5 +128,45 @@ fn cursor_key_bytes(application_cursor: bool, suffix: u8) -> Vec<u8> {
         vec![0x1b, b'O', suffix]
     } else {
         vec![0x1b, b'[', suffix]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{control_bytes, cursor_key_bytes};
+
+    #[test]
+    fn control_bytes_maps_ascii_letters_case_insensitively() {
+        assert_eq!(control_bytes("a"), Some(vec![0x01]));
+        assert_eq!(control_bytes("Z"), Some(vec![0x1a]));
+    }
+
+    #[test]
+    fn control_bytes_maps_special_ctrl_combinations() {
+        assert_eq!(control_bytes("space"), Some(vec![0x00]));
+        assert_eq!(control_bytes("2"), Some(vec![0x00]));
+        assert_eq!(control_bytes("@"), Some(vec![0x00]));
+        assert_eq!(control_bytes("["), Some(vec![0x1b]));
+        assert_eq!(control_bytes("3"), Some(vec![0x1b]));
+        assert_eq!(control_bytes("\\"), Some(vec![0x1c]));
+        assert_eq!(control_bytes("]"), Some(vec![0x1d]));
+        assert_eq!(control_bytes("^"), Some(vec![0x1e]));
+        assert_eq!(control_bytes("_"), Some(vec![0x1f]));
+        assert_eq!(control_bytes("8"), Some(vec![0x7f]));
+    }
+
+    #[test]
+    fn control_bytes_rejects_non_control_inputs() {
+        assert_eq!(control_bytes(""), None);
+        assert_eq!(control_bytes("ab"), None);
+        assert_eq!(control_bytes("é"), None);
+        assert_eq!(control_bytes("1"), None);
+        assert_eq!(control_bytes("enter"), None);
+    }
+
+    #[test]
+    fn cursor_key_bytes_switches_between_normal_and_application_modes() {
+        assert_eq!(cursor_key_bytes(false, b'A'), b"\x1b[A".to_vec());
+        assert_eq!(cursor_key_bytes(true, b'D'), b"\x1bOD".to_vec());
     }
 }

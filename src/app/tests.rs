@@ -99,6 +99,73 @@ fn notification_status_uses_full_braille_glyph() {
 }
 
 #[test]
+fn sidebar_status_prefers_queued_over_notification() {
+    let mut session = Session::new_draft();
+    session.runtime.queued = true;
+    session.runtime.unread = true;
+
+    assert_eq!(
+        sidebar::session_sidebar_status(&session),
+        Some(sidebar::SidebarStatusKind::Queued)
+    );
+}
+
+#[test]
+fn spinner_glyph_advances_with_frame_interval() {
+    let first = sidebar::sidebar_status_glyph(sidebar::SidebarStatusKind::Active, 0);
+    let second = sidebar::sidebar_status_glyph(
+        sidebar::SidebarStatusKind::Active,
+        sidebar::SIDEBAR_SPINNER_FRAME_MS,
+    );
+
+    assert_eq!(first, sidebar::SIDEBAR_SPINNER_FRAMES[0]);
+    assert_eq!(second, sidebar::SIDEBAR_SPINNER_FRAMES[1]);
+}
+
+#[test]
+fn materialized_session_always_binds_even_when_idle() {
+    let mut session = Session::new_draft();
+    session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
+
+    assert!(sidecar_sync::should_bind_sidecar_session(
+        &session,
+        &snapshot(PiSessionStage::Idle, false)
+    ));
+}
+
+#[test]
+fn sidecar_order_update_only_touches_after_trackable_running_session_finishes() {
+    assert_eq!(
+        sidecar_sync::sidecar_order_update(true, false, true, false),
+        sidecar_sync::SidecarOrderUpdate::None
+    );
+    assert_eq!(
+        sidecar_sync::sidecar_order_update(false, false, true, true),
+        sidecar_sync::SidecarOrderUpdate::None
+    );
+}
+
+#[test]
+fn adjust_session_index_after_removal_only_shifts_later_rows_in_same_project() {
+    assert_eq!(
+        super::App::adjust_session_index_after_removal(0, 3, Some((0, 1))),
+        2
+    );
+    assert_eq!(
+        super::App::adjust_session_index_after_removal(0, 1, Some((0, 1))),
+        1
+    );
+    assert_eq!(
+        super::App::adjust_session_index_after_removal(1, 3, Some((0, 1))),
+        3
+    );
+    assert_eq!(
+        super::App::adjust_session_index_after_removal(0, 3, None),
+        3
+    );
+}
+
+#[test]
 fn project_path_normalization_preserves_order() {
     let paths = project_actions::normalize_unique_project_paths(vec![
         PathBuf::from("/tmp/project-b"),
