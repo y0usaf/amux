@@ -51,6 +51,17 @@ impl PersistedState {
             .map(|path| normalize_project_path(&path).to_string_lossy().into_owned())
             .filter(|path| seen.insert(path.clone()))
             .collect();
+
+        if let Some(selected_project) = self.selected_project.as_ref() {
+            let normalized = normalize_project_path(&PathBuf::from(selected_project))
+                .to_string_lossy()
+                .into_owned();
+            self.selected_project = self
+                .projects
+                .iter()
+                .any(|project| project == &normalized)
+                .then_some(normalized);
+        }
     }
 }
 

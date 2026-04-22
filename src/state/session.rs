@@ -12,6 +12,13 @@ pub struct SessionRuntime {
     pub queued: bool,
     pub tool_name: Option<String>,
     pub unread: bool,
+    pub last_sidecar_ts_ms: u64,
+}
+
+impl SessionRuntime {
+    pub fn is_active(&self) -> bool {
+        self.running || self.queued
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -71,10 +78,12 @@ impl Session {
     }
 
     pub fn apply_scan(&mut self, scan: ScannedSession) {
-        self.name = scan.name;
+        if self.should_adopt_name(&scan.name) {
+            self.name = scan.name.clone();
+        }
         self.pi_session_id = Some(scan.session_id);
         self.session_file = Some(scan.session_file);
-        self.created_at_ms = scan.created_at_ms;
+        self.created_at_ms = self.created_at_ms.min(scan.created_at_ms);
         self.updated_at_ms = self.updated_at_ms.max(scan.updated_at_ms);
         self.draft = false;
     }
@@ -96,8 +105,7 @@ impl Session {
         self.draft
             && self.pi_session_id.is_none()
             && self.session_file.is_none()
-            && !self.runtime.running
-            && !self.runtime.queued
+            && !self.runtime.is_active()
             && self.runtime.status.is_none()
             && !self.runtime.unread
     }

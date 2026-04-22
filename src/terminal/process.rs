@@ -30,7 +30,15 @@ pub(crate) fn targets_share_process(
                 && current.sidecar_extension_path == next.sidecar_extension_path
                 && current.sidecar_socket_path == next.sidecar_socket_path
                 && current.harness_session_id == next.harness_session_id
-                && current.cwd == next.cwd)
+                && current.cwd == next.cwd
+                && session_files_share_process(current.session_file.as_deref(), next.session_file.as_deref()))
+}
+
+fn session_files_share_process(
+    current: Option<&std::path::Path>,
+    next: Option<&std::path::Path>,
+) -> bool {
+    current == next || current.is_none() || next.is_none()
 }
 
 pub(crate) struct HostProcess {

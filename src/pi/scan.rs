@@ -34,7 +34,11 @@ pub fn scan_live_sessions(project_path: &Path) -> Vec<ScannedSession> {
         });
     }
 
-    sessions.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+    sessions.sort_by(|a, b| {
+        b.updated_at_ms
+            .cmp(&a.updated_at_ms)
+            .then_with(|| a.session_id.cmp(&b.session_id))
+    });
     sessions
 }
 
@@ -58,6 +62,9 @@ fn session_meta_from_path(path: &Path) -> Option<ScanMeta> {
 
     let session_id = header.get("id")?.as_str()?.to_string();
     let cwd = PathBuf::from(header.get("cwd")?.as_str()?);
+    if !cwd.is_absolute() {
+        return None;
+    }
     let created_at_ms = parse_rfc3339_ms(header.get("timestamp")?.as_str()?)?;
 
     let mut meta = ScanMeta {
@@ -99,7 +106,9 @@ fn session_meta_from_path(path: &Path) -> Option<ScanMeta> {
                 let Some(message) = value.get("message") else {
                     continue;
                 };
-                has_messages = true;
+                if title_source_from_user_message(message).is_some() {
+                    has_messages = true;
+                }
                 if meta.first_user_message.is_empty() {
                     if let Some(text) = title_source_from_user_message(message) {
                         if !text.trim().is_empty() {
@@ -150,8 +159,14 @@ fn jsonl_files_in_dir(dir: &Path) -> Vec<PathBuf> {
     };
     let mut files: Vec<_> = entries
         .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
+        .filter_map(|entry| {
+            let path = entry.path();
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_file() {
+                return None;
+            }
+            (path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")).then_some(path)
+        })
         .collect();
     files.sort();
     files
@@ -178,4 +193,242 @@ fn parse_rfc3339_ms(value: &str) -> Option<u64> {
     chrono::DateTime::parse_from_rfc3339(value)
         .ok()
         .and_then(|dt| u64::try_from(dt.timestamp_millis()).ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support;
+    use std::ffi::OsString;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::MutexGuard;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct EnvGuard {
+        _lock: MutexGuard<'static, ()>,
+        old: Option<OsString>,
+    }
+
+    impl EnvGuard {
+        fn set_home(value: &Path) -> Self {
+            let lock = test_support::env_lock();
+            let old = std::env::var_os("HOME");
+            std::env::set_var("HOME", value);
+            Self { _lock: lock, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.old {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let unique = format!(
+                "pi-harness-scan-tests-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            );
+            let path = std::env::temp_dir().join(unique);
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn session_meta_requires_session_header_and_user_message_event() {
+        let dir = TestDir::new();
+        let path = dir.path().join("session.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"session\",\"id\":\"abc\",\"cwd\":\"/tmp/project\",\"timestamp\":\"2024-01-01T00:00:00Z\"}\n",
+                "{\"type\":\"session_info\",\"name\":\"Named\",\"timestamp\":\"2024-01-01T00:00:01Z\"}\n"
+            ),
+        )
+        .unwrap();
+
+        assert!(session_meta_from_path(&path).is_none());
+    }
+
+    #[test]
+    fn session_meta_rejects_relative_cwd() {
+        let dir = TestDir::new();
+        let path = dir.path().join("session.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"session\",\"id\":\"abc\",\"cwd\":\".\",\"timestamp\":\"2024-01-01T00:00:00Z\"}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        assert!(session_meta_from_path(&path).is_none());
+    }
+
+    #[test]
+    fn session_meta_ignores_assistant_only_sessions() {
+        let dir = TestDir::new();
+        let path = dir.path().join("session.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"session\",\"id\":\"abc\",\"cwd\":\"/tmp/project\",\"timestamp\":\"2024-01-01T00:00:00Z\"}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":\"ignored\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        assert!(session_meta_from_path(&path).is_none());
+    }
+
+    #[test]
+    fn session_meta_uses_first_user_text_from_text_blocks_and_max_timestamp() {
+        let dir = TestDir::new();
+        let path = dir.path().join("session.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"session\",\"id\":\"abc\",\"cwd\":\"/tmp/project\",\"timestamp\":\"2024-01-01T00:00:00Z\"}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:03Z\",\"message\":{\"role\":\"assistant\",\"content\":\"ignored\"}}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:02Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool\",\"text\":\"ignored\"},{\"type\":\"text\",\"text\":\"first line\"},{\"type\":\"text\",\"text\":\"second line\"}]}}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:05Z\",\"message\":{\"role\":\"user\",\"content\":\"later\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let meta = session_meta_from_path(&path).unwrap();
+        assert_eq!(meta.session_id, "abc");
+        assert_eq!(meta.cwd, PathBuf::from("/tmp/project"));
+        assert_eq!(meta.name, None);
+        assert_eq!(meta.first_user_message, "first line\nsecond line");
+        assert_eq!(
+            meta.updated_at_ms,
+            parse_rfc3339_ms("2024-01-01T00:00:05Z").unwrap()
+        );
+    }
+
+    #[test]
+    fn first_jsonl_value_skips_blank_and_non_json_lines() {
+        let mut input = std::io::Cursor::new(
+            b"\nnot-json\n {still not json}\n{\"type\":\"session\",\"id\":\"ok\"}\n",
+        );
+        let value = first_jsonl_value(&mut input).unwrap();
+        assert_eq!(value.get("id").and_then(Value::as_str), Some("ok"));
+    }
+
+    #[test]
+    fn extract_text_from_blocks_joins_only_text_blocks() {
+        let blocks = vec![
+            serde_json::json!({"type": "tool", "text": "ignored"}),
+            serde_json::json!({"type": "text", "text": "hello"}),
+            serde_json::json!({"type": "text", "text": "world"}),
+            serde_json::json!({"type": "text", "value": "ignored"}),
+        ];
+
+        assert_eq!(extract_text_from_blocks(&blocks), "hello\nworld");
+    }
+
+    #[test]
+    fn scan_live_sessions_filters_by_project_and_sorts_newest_first() {
+        let home = TestDir::new();
+        let _guard = EnvGuard::set_home(home.path());
+        let project = home.path().join("work/project");
+        fs::create_dir_all(&project).unwrap();
+        let live_dir = live_project_dir(&project).unwrap();
+        fs::create_dir_all(&live_dir).unwrap();
+
+        fs::write(
+            live_dir.join("a.jsonl"),
+            "{\"type\":\"session\",\"id\":\"a\",\"cwd\":\"/tmp/placeholder\",\"timestamp\":\"2024-01-01T00:00:00Z\"}\n"
+                .replace("/tmp/placeholder", &project.to_string_lossy())
+                + "{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"older\"}}\n",
+        )
+        .unwrap();
+        fs::write(
+            live_dir.join("b.jsonl"),
+            "{\"type\":\"session\",\"id\":\"b\",\"cwd\":\"/tmp/placeholder\",\"timestamp\":\"2024-01-01T00:00:00Z\"}\n"
+                .replace("/tmp/placeholder", &project.to_string_lossy())
+                + concat!(
+                    "{\"type\":\"session_info\",\"name\":\"Named\",\"timestamp\":\"2024-01-01T00:00:02Z\"}\n",
+                    "{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:03Z\",\"message\":{\"role\":\"user\",\"content\":\"newer\"}}\n"
+                ),
+        )
+        .unwrap();
+        fs::write(
+            live_dir.join("foreign.jsonl"),
+            "{\"type\":\"session\",\"id\":\"foreign\",\"cwd\":\"/tmp/other-project\",\"timestamp\":\"2024-01-01T00:00:00Z\"}\n{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:04Z\",\"message\":{\"role\":\"user\",\"content\":\"ignored\"}}\n",
+        )
+        .unwrap();
+
+        let sessions = scan_live_sessions(&project);
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].session_id, "b");
+        assert_eq!(sessions[0].name, "Named");
+        assert_eq!(sessions[1].session_id, "a");
+        assert_eq!(sessions[1].name, "older");
+        assert!(sessions.iter().all(|session| session.cwd == project));
+    }
+
+    #[test]
+    fn scan_live_sessions_breaks_equal_timestamp_ties_by_session_id() {
+        let home = TestDir::new();
+        let _guard = EnvGuard::set_home(home.path());
+        let project = home.path().join("work/project");
+        fs::create_dir_all(&project).unwrap();
+        let live_dir = live_project_dir(&project).unwrap();
+        fs::create_dir_all(&live_dir).unwrap();
+
+        for session_id in ["b", "a"] {
+            fs::write(
+                live_dir.join(format!("{session_id}.jsonl")),
+                format!(
+                    "{{\"type\":\"session\",\"id\":\"{}\",\"cwd\":\"{}\",\"timestamp\":\"2024-01-01T00:00:00Z\"}}\n{{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:01Z\",\"message\":{{\"role\":\"user\",\"content\":\"{}\"}}}}\n",
+                    session_id,
+                    project.to_string_lossy(),
+                    session_id,
+                ),
+            )
+            .unwrap();
+        }
+
+        let sessions = scan_live_sessions(&project);
+        let ids: Vec<_> = sessions
+            .iter()
+            .map(|session| session.session_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn jsonl_files_in_dir_skips_non_files() {
+        let dir = TestDir::new();
+        fs::create_dir_all(dir.path().join("nested.jsonl")).unwrap();
+        fs::write(dir.path().join("real.jsonl"), "{}").unwrap();
+
+        let files = jsonl_files_in_dir(dir.path());
+        assert_eq!(files, vec![dir.path().join("real.jsonl")]);
+    }
 }

@@ -1,8 +1,18 @@
 use std::collections::HashSet;
 
+use crate::state::Project;
 use crate::terminal::{TerminalController, TerminalStatus, TerminalTarget};
 
 use super::App;
+
+fn restartable_terminal_session_ids(project: &Project) -> Vec<String> {
+    project
+        .sessions
+        .iter()
+        .filter(|session| !session.runtime.is_active())
+        .map(|session| session.local_id.clone())
+        .collect()
+}
 
 impl App {
     fn terminal_target_for_session(
@@ -54,7 +64,7 @@ impl App {
             .projects
             .get(project_index)
             .and_then(|project| project.sessions.get(session_index))
-            .is_some_and(|session| session.runtime.running)
+            .is_some_and(|session| session.runtime.is_active())
         {
             return;
         }
@@ -85,12 +95,7 @@ impl App {
             return;
         };
 
-        let session_ids: Vec<String> = project
-            .sessions
-            .iter()
-            .filter(|session| !session.runtime.running)
-            .map(|session| session.local_id.clone())
-            .collect();
+        let session_ids = restartable_terminal_session_ids(project);
 
         for session_id in session_ids {
             let Some(terminal) = self.terminals.get_mut(&session_id) else {
@@ -140,5 +145,36 @@ impl App {
         }
 
         self.update_window_title();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::restartable_terminal_session_ids;
+    use crate::state::{Project, Session};
+
+    #[test]
+    fn queued_sessions_are_not_restartable() {
+        let mut project = Project::new(PathBuf::from("/tmp/project"));
+
+        let idle = Session::new_draft();
+
+        let mut queued = Session::new_draft();
+        queued.runtime.queued = true;
+
+        let mut running = Session::new_draft();
+        running.runtime.running = true;
+
+        let idle_id = idle.local_id.clone();
+        let queued_id = queued.local_id.clone();
+        let running_id = running.local_id.clone();
+        project.sessions = vec![idle, queued, running];
+
+        let restartable = restartable_terminal_session_ids(&project);
+        assert_eq!(restartable, vec![idle_id]);
+        assert!(!restartable.contains(&queued_id));
+        assert!(!restartable.contains(&running_id));
     }
 }
