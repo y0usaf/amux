@@ -32,6 +32,33 @@ pub struct TextRenderer {
     font_pattern: String,
 }
 
+fn truncate_with_ellipsis_impl(text: &str, max_cells: usize) -> String {
+    if max_cells == 0 {
+        return String::new();
+    }
+
+    let visible = text.split('\n').next().unwrap_or("");
+    let total_cells: usize = visible.chars().map(|c| char_cell_width(c) as usize).sum();
+    if total_cells <= max_cells {
+        return visible.to_string();
+    }
+    if max_cells == 1 {
+        return "…".to_string();
+    }
+
+    let mut used = 0usize;
+    let mut end = 0usize;
+    for (idx, ch) in visible.char_indices() {
+        let w = char_cell_width(ch) as usize;
+        if used + w > max_cells - 1 {
+            break;
+        }
+        used += w;
+        end = idx + ch.len_utf8();
+    }
+    format!("{}…", &visible[..end])
+}
+
 impl TextRenderer {
     pub fn load(font_size: f32) -> Result<Self> {
         Self::with_font_family(None, font_size)
@@ -91,18 +118,7 @@ impl TextRenderer {
     }
 
     pub fn truncate_with_ellipsis(&self, text: &str, max_cells: usize) -> String {
-        if max_cells == 0 {
-            return String::new();
-        }
-        let total_cells: usize = text.chars().map(|c| char_cell_width(c) as usize).sum();
-        if total_cells <= max_cells {
-            return self.fit_text(text, max_cells).to_string();
-        }
-        if max_cells == 1 {
-            return "…".to_string();
-        }
-        let head = self.fit_text(text, max_cells - 1);
-        format!("{head}…")
+        truncate_with_ellipsis_impl(text, max_cells)
     }
 
     pub(super) fn glyph(&mut self, ch: char) -> &CachedGlyph {
@@ -230,7 +246,7 @@ fn estimate_cell_width(metrics: &Metrics) -> i32 {
 }
 
 pub(crate) fn blend_over(dst: u32, src: u32, coverage: u8) -> u32 {
-    let sa = (((src >> 24) & 0xFF) as u32 * coverage as u32 + 127) / 255;
+    let sa = (((src >> 24) & 0xFF) * coverage as u32 + 127) / 255;
     if sa == 0 {
         return dst;
     }
@@ -257,4 +273,73 @@ pub(crate) fn char_cell_width(ch: char) -> i32 {
     unicode_width::UnicodeWidthChar::width(ch)
         .unwrap_or(1)
         .max(1) as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blend_over_respects_zero_and_full_coverage() {
+        assert_eq!(blend_over(0x11223344, 0xFFABCDEF, 0), 0x11223344);
+        assert_eq!(blend_over(0x00000000, 0xFFABCDEF, 255), 0xFFABCDEF);
+    }
+
+    #[test]
+    fn blend_over_scales_source_alpha_by_coverage() {
+        assert_eq!(blend_over(0x00000000, 0x80FF0000, 128), 0x40_40_00_00);
+    }
+
+    #[test]
+    fn estimate_cell_width_prefers_visible_bitmap_extent() {
+        let metrics = Metrics {
+            xmin: 3,
+            ymin: 0,
+            width: 8,
+            height: 10,
+            advance_width: 4.2,
+            advance_height: 0.0,
+            bounds: fontdue::OutlineBounds {
+                xmin: 0.0,
+                ymin: 0.0,
+                width: 0.0,
+                height: 0.0,
+            },
+        };
+
+        assert_eq!(estimate_cell_width(&metrics), 11);
+    }
+
+    #[test]
+    fn estimate_cell_width_respects_advance_width_floor() {
+        let metrics = Metrics {
+            xmin: -2,
+            ymin: 0,
+            width: 3,
+            height: 10,
+            advance_width: 6.1,
+            advance_height: 0.0,
+            bounds: fontdue::OutlineBounds {
+                xmin: 0.0,
+                ymin: 0.0,
+                width: 0.0,
+                height: 0.0,
+            },
+        };
+
+        assert_eq!(estimate_cell_width(&metrics), 7);
+    }
+
+    #[test]
+    fn char_cell_width_never_returns_less_than_one() {
+        assert_eq!(char_cell_width('a'), 1);
+        assert_eq!(char_cell_width('\0'), 1);
+        assert_eq!(char_cell_width('界'), 2);
+    }
+
+    #[test]
+    fn truncate_with_ellipsis_stops_at_newline_without_counting_following_lines() {
+        assert_eq!(truncate_with_ellipsis_impl("abc\ndef", 3), "abc");
+        assert_eq!(truncate_with_ellipsis_impl("abcd\nef", 3), "ab…");
+    }
 }

@@ -41,6 +41,9 @@ impl App {
         } else {
             self.clamp_sidebar_scroll(sidebar_rows.len(), sidebar_visible_rows);
         }
+        let sticky_sidebar_anchor = self
+            .sticky_sidebar_anchor_row_index(&sidebar_rows, sidebar_visible_rows)
+            .and_then(|row_index| sidebar_rows.get(row_index));
 
         let topbar_title = match (self.current_project(), self.current_session()) {
             (Some(project), Some(session)) => format!("{} / {}", project.name, session.name),
@@ -155,6 +158,7 @@ impl App {
             layout.sidebar,
             &sidebar_rows,
             self.sidebar_scroll,
+            sticky_sidebar_anchor,
             sidebar_status_now_ms,
         );
         render_terminal_frame(
@@ -238,6 +242,7 @@ fn render_sidebar_frame(
     rect: Rect,
     rows: &[SidebarRow],
     scroll: usize,
+    sticky_row: Option<&SidebarRow>,
     now_ms: u64,
 ) {
     let cell_w = text.metrics.cell_width;
@@ -247,52 +252,51 @@ fn render_sidebar_frame(
     let visible_rows = ((rect.h - layout::SIDEBAR_PAD_Y * 2 * cell_h).max(0) / cell_h) as usize;
     let shows_scrollbar = visible_rows > 0 && rows.len() > visible_rows;
     let scrollbar_reserve_px = if shows_scrollbar { 8 } else { 0 };
+    let sticky_rows = usize::from(sticky_row.is_some());
 
-    for (index, row) in rows.iter().skip(scroll).take(visible_rows).enumerate() {
-        let y = start_y + index as i32 * cell_h;
-        if let Some(bg) = row.bg {
-            frame.rect(rect.x + 6, y, rect.w - 12, cell_h, bg);
-        }
-
-        let status = row.status.map(|status| {
-            (
-                sidebar_status_glyph(status, now_ms),
-                sidebar_status_color(status),
-            )
-        });
-        let reserved_px = if status.is_some() { cell_w * 2 } else { 0 };
-        let line = text.truncate_with_ellipsis(
-            &row.text,
-            (((rect.w - layout::SIDEBAR_PAD_X * 2 * cell_w - scrollbar_reserve_px - reserved_px)
-                .max(0)
-                / cell_w) as usize)
-                .max(match row.kind {
-                    SidebarRowKind::ActionOpenProject | SidebarRowKind::Project(_) => 8,
-                    SidebarRowKind::Label | SidebarRowKind::Session { .. } => 0,
-                }),
+    if let Some(row) = sticky_row {
+        render_sidebar_row(
+            frame,
+            text,
+            rect,
+            start_x,
+            start_y,
+            cell_w,
+            cell_h,
+            scrollbar_reserve_px,
+            row,
+            now_ms,
         );
-        let x = match row.kind {
-            SidebarRowKind::ActionOpenProject | SidebarRowKind::Project(_) => {
-                centered_text_x(rect, text, &line)
-            }
-            SidebarRowKind::Label | SidebarRowKind::Session { .. } => start_x,
-        };
-        frame.text(text, x, y, row.fg, &line);
+    }
 
-        if let Some((glyph, color)) = status {
-            let glyph_x = rect.x + rect.w
-                - layout::SIDEBAR_PAD_X * cell_w
-                - scrollbar_reserve_px
-                - text.measure_text(glyph);
-            frame.text(text, glyph_x, y, color, glyph);
-        }
+    for (index, row) in rows
+        .iter()
+        .skip(scroll)
+        .take(visible_rows.saturating_sub(sticky_rows))
+        .enumerate()
+    {
+        render_sidebar_row(
+            frame,
+            text,
+            rect,
+            start_x,
+            start_y + (index + sticky_rows) as i32 * cell_h,
+            cell_w,
+            cell_h,
+            scrollbar_reserve_px,
+            row,
+            now_ms,
+        );
     }
 
     render_vertical_scrollbar(
         frame,
-        rect.x + rect.w - 5,
-        start_y,
-        (visible_rows as i32 * cell_h).max(0),
+        Rect {
+            x: rect.x + rect.w - 5,
+            y: start_y,
+            w: 1,
+            h: (visible_rows as i32 * cell_h).max(0),
+        },
         visible_rows,
         rows.len(),
         scroll,
@@ -300,28 +304,81 @@ fn render_sidebar_frame(
     );
 }
 
+fn render_sidebar_row(
+    frame: &mut Frame<'_>,
+    text: &mut TextRenderer,
+    rect: Rect,
+    start_x: i32,
+    y: i32,
+    cell_w: i32,
+    cell_h: i32,
+    scrollbar_reserve_px: i32,
+    row: &SidebarRow,
+    now_ms: u64,
+) {
+    if let Some(bg) = row.bg {
+        frame.rect(rect.x + 6, y, rect.w - 12, cell_h, bg);
+    }
+
+    let status = row.status.map(|status| {
+        (
+            sidebar_status_glyph(status, now_ms),
+            sidebar_status_color(status),
+        )
+    });
+    let reserved_px = if status.is_some() { cell_w * 2 } else { 0 };
+    let line = text.truncate_with_ellipsis(
+        &row.text,
+        (((rect.w - layout::SIDEBAR_PAD_X * 2 * cell_w - scrollbar_reserve_px - reserved_px).max(0)
+            / cell_w) as usize)
+            .max(match row.kind {
+                SidebarRowKind::ActionOpenProject | SidebarRowKind::Project(_) => 8,
+                SidebarRowKind::Label | SidebarRowKind::Session { .. } => 0,
+            }),
+    );
+    let x = match row.kind {
+        SidebarRowKind::ActionOpenProject | SidebarRowKind::Project(_) => {
+            centered_text_x(rect, text, &line)
+        }
+        SidebarRowKind::Label | SidebarRowKind::Session { .. } => start_x,
+    };
+    frame.text(text, x, y, row.fg, &line);
+
+    if let Some((glyph, color)) = status {
+        let glyph_x = rect.x + rect.w
+            - layout::SIDEBAR_PAD_X * cell_w
+            - scrollbar_reserve_px
+            - text.measure_text(glyph);
+        frame.text(text, glyph_x, y, color, glyph);
+    }
+}
+
 fn render_vertical_scrollbar(
     frame: &mut Frame<'_>,
-    track_x: i32,
-    track_y: i32,
-    track_h: i32,
+    track: Rect,
     visible_items: usize,
     total_items: usize,
     scroll_from_top: usize,
     min_thumb_h: i32,
 ) {
-    if track_h <= 0 || visible_items == 0 || total_items <= visible_items {
+    if track.h <= 0 || visible_items == 0 || total_items <= visible_items {
         return;
     }
 
-    frame.rect(track_x, track_y, 1, track_h, BORDER);
+    frame.rect(track.x, track.y, track.w.max(1), track.h, BORDER);
 
-    let thumb_h = ((track_h as i64 * visible_items as i64) / total_items as i64)
+    let thumb_h = ((track.h as i64 * visible_items as i64) / total_items as i64)
         .max(i64::from(min_thumb_h.max(1))) as i32;
     let max_scroll = total_items.saturating_sub(visible_items).max(1);
-    let thumb_y = track_y
-        + (((track_h - thumb_h).max(0) as i64 * scroll_from_top as i64) / max_scroll as i64) as i32;
-    frame.rect(track_x, thumb_y, 1, thumb_h.min(track_h), MUTED);
+    let thumb_y = track.y
+        + (((track.h - thumb_h).max(0) as i64 * scroll_from_top as i64) / max_scroll as i64) as i32;
+    frame.rect(
+        track.x,
+        thumb_y,
+        track.w.max(1),
+        thumb_h.min(track.h),
+        MUTED,
+    );
 }
 
 fn terminal_max_scrollback(screen: &vt100::Screen) -> usize {
@@ -344,9 +401,12 @@ fn render_terminal_scrollback(
 
     render_vertical_scrollbar(
         frame,
-        rect.x + rect.w + TERMINAL_PAD - 5,
-        rect.y,
-        rect.h,
+        Rect {
+            x: rect.x + rect.w + TERMINAL_PAD - 5,
+            y: rect.y,
+            w: 1,
+            h: rect.h,
+        },
         visible_rows,
         visible_rows.saturating_add(max_scroll),
         max_scroll.saturating_sub(screen.scrollback()),

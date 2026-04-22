@@ -116,6 +116,7 @@ impl App {
                     )
                 })
                 .flatten();
+            let sidebar_rows = self.sidebar_rows();
             let sidebar_row_index = if layout
                 .sidebar
                 .contains(self.cursor_pos.0, self.cursor_pos.1)
@@ -123,16 +124,21 @@ impl App {
                 let local_y = self.cursor_pos.1 as i32
                     - layout.sidebar.y
                     - SIDEBAR_PAD_Y * text.metrics.cell_height;
-                Some(self.sidebar_scroll + (local_y / text.metrics.cell_height).max(0) as usize)
+                let visible_row = (local_y / text.metrics.cell_height).max(0) as usize;
+                self.sidebar_row_index_at_visible_row(
+                    &sidebar_rows,
+                    self.sidebar_visible_rows(layout.sidebar, text),
+                    visible_row,
+                )
             } else {
                 None
             };
-            Some((terminal_point, sidebar_row_index))
+            Some((terminal_point, sidebar_rows, sidebar_row_index))
         } else {
             None
         };
 
-        if let Some((terminal_point, sidebar_row_index)) = click {
+        if let Some((terminal_point, sidebar_rows, sidebar_row_index)) = click {
             if let Some(point) = terminal_point {
                 if let Some(terminal) = self.current_terminal_mut() {
                     terminal.begin_selection(point);
@@ -143,8 +149,7 @@ impl App {
             }
 
             if let Some(row_index) = sidebar_row_index {
-                let rows = self.sidebar_rows();
-                if let Some(row) = rows.get(row_index) {
+                if let Some(row) = sidebar_rows.get(row_index) {
                     match row.kind {
                         SidebarRowKind::ActionOpenProject => self.open_project_picker(),
                         SidebarRowKind::Project(index) => self.select_project(index),
