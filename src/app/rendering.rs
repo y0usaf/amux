@@ -1,4 +1,4 @@
-use std::num::NonZeroU32;
+use std::{fmt::Write as _, num::NonZeroU32};
 
 use crate::render::{Color, Frame, TextRenderer};
 use crate::terminal::{terminal_selection_span, TerminalSelectionRange, TerminalStatus};
@@ -7,8 +7,8 @@ use crate::util::now_millis;
 use super::layout::{self, Rect, TERMINAL_PAD};
 use super::sidebar::{sidebar_status_color, sidebar_status_glyph, SidebarRow, SidebarRowKind};
 use super::theme::{
-    status_color, terminal_cell_colors, BG, BORDER, MUTED, SURFACE, SURFACE_ALT, TERM_BG, TEXT,
-    WARNING,
+    screen_cell_colors, status_color, BG, BORDER, MUTED, SURFACE, SURFACE_ALT, TERM_BG, TERM_FG,
+    TEXT, WARNING,
 };
 use super::App;
 
@@ -219,20 +219,46 @@ fn render_topbar_frame(
     status: &str,
     status_fg: Color,
 ) {
-    let max_cells = ((rect.w - layout::PANEL_PAD * 2).max(0) / text.metrics.cell_width) as usize;
-    let title_text = text.truncate_with_ellipsis(title, max_cells.max(8));
-    let status_text = text.truncate_with_ellipsis(status, max_cells.max(8));
-    let title_x = centered_text_x(rect, text, &title_text);
-    let status_x = centered_text_x(rect, text, &status_text);
-    let y = rect.y + layout::PANEL_PAD;
+    let content_rect = Rect {
+        x: rect.x + layout::PANEL_PAD,
+        y: rect.y + layout::PANEL_PAD,
+        w: (rect.w - layout::PANEL_PAD * 2).max(0),
+        h: layout::TOPBAR_ROWS * text.metrics.cell_height,
+    };
+    let cols = screen_cols(content_rect, text);
+    let rows = layout::TOPBAR_ROWS.max(0) as usize;
+    let Some(screen) = build_synthetic_screen(rows, cols, |ansi| {
+        let title_text = text.truncate_with_ellipsis(title, cols);
+        let status_text = text.truncate_with_ellipsis(status, cols);
+        push_positioned_text(
+            ansi,
+            1,
+            centered_screen_col(cols, &title_text),
+            TEXT,
+            None,
+            &title_text,
+        );
+        push_positioned_text(
+            ansi,
+            2,
+            centered_screen_col(cols, &status_text),
+            status_fg,
+            None,
+            &status_text,
+        );
+    }) else {
+        return;
+    };
 
-    frame.text(text, title_x, y, TEXT, &title_text);
-    frame.text(
+    render_screen_frame(
+        frame,
         text,
-        status_x,
-        y + text.metrics.cell_height,
-        status_fg,
-        &status_text,
+        content_rect,
+        &screen,
+        None,
+        TEXT,
+        SURFACE,
+        false,
     );
 }
 
@@ -245,47 +271,80 @@ fn render_sidebar_frame(
     sticky_row: Option<&SidebarRow>,
     now_ms: u64,
 ) {
-    let cell_w = text.metrics.cell_width;
-    let cell_h = text.metrics.cell_height;
-    let start_x = rect.x + layout::SIDEBAR_PAD_X * cell_w;
+    let cell_w = text.metrics.cell_width.max(1);
+    let cell_h = text.metrics.cell_height.max(1);
     let start_y = rect.y + layout::SIDEBAR_PAD_Y * cell_h;
     let visible_rows = ((rect.h - layout::SIDEBAR_PAD_Y * 2 * cell_h).max(0) / cell_h) as usize;
     let shows_scrollbar = visible_rows > 0 && rows.len() > visible_rows;
     let scrollbar_reserve_px = if shows_scrollbar { 8 } else { 0 };
-    let sticky_rows = usize::from(sticky_row.is_some());
+    let content_rect = Rect {
+        x: rect.x + layout::SIDEBAR_PAD_X * cell_w,
+        y: start_y,
+        w: (rect.w - layout::SIDEBAR_PAD_X * 2 * cell_w - scrollbar_reserve_px).max(0),
+        h: (visible_rows as i32 * cell_h).max(0),
+    };
+    let cols = screen_cols(content_rect, text);
 
-    if let Some(row) = sticky_row {
-        render_sidebar_row(
+    if let Some(screen) = build_synthetic_screen(visible_rows, cols, |ansi| {
+        for (screen_row, row) in visible_sidebar_rows(rows, scroll, sticky_row, visible_rows)
+            .into_iter()
+            .enumerate()
+        {
+            let screen_row = screen_row + 1;
+            if let Some(bg) = row.bg {
+                fill_screen_row(ansi, screen_row, cols, bg);
+            }
+
+            match row.kind {
+                SidebarRowKind::Label => {}
+                SidebarRowKind::ActionOpenProject | SidebarRowKind::Project(_) => {
+                    let value = text.truncate_with_ellipsis(&row.text, cols);
+                    push_positioned_text(
+                        ansi,
+                        screen_row,
+                        centered_screen_col(cols, &value),
+                        row.fg,
+                        row.bg,
+                        &value,
+                    );
+                }
+                SidebarRowKind::Session { .. } => {
+                    let status = row.status.map(|status| {
+                        (
+                            sidebar_status_glyph(status, now_ms),
+                            sidebar_status_color(status),
+                        )
+                    });
+                    let reserved_cells = status
+                        .map(|(glyph, _)| display_cell_width(glyph) + 1)
+                        .unwrap_or(0);
+                    let value =
+                        text.truncate_with_ellipsis(&row.text, cols.saturating_sub(reserved_cells));
+                    push_positioned_text(ansi, screen_row, 1, row.fg, row.bg, &value);
+
+                    if let Some((glyph, color)) = status {
+                        push_positioned_text(
+                            ansi,
+                            screen_row,
+                            cols.saturating_sub(display_cell_width(glyph)) + 1,
+                            color,
+                            row.bg,
+                            glyph,
+                        );
+                    }
+                }
+            }
+        }
+    }) {
+        render_screen_frame(
             frame,
             text,
-            rect,
-            start_x,
-            start_y,
-            cell_w,
-            cell_h,
-            scrollbar_reserve_px,
-            row,
-            now_ms,
-        );
-    }
-
-    for (index, row) in rows
-        .iter()
-        .skip(scroll)
-        .take(visible_rows.saturating_sub(sticky_rows))
-        .enumerate()
-    {
-        render_sidebar_row(
-            frame,
-            text,
-            rect,
-            start_x,
-            start_y + (index + sticky_rows) as i32 * cell_h,
-            cell_w,
-            cell_h,
-            scrollbar_reserve_px,
-            row,
-            now_ms,
+            content_rect,
+            &screen,
+            None,
+            TEXT,
+            SURFACE_ALT,
+            false,
         );
     }
 
@@ -304,53 +363,112 @@ fn render_sidebar_frame(
     );
 }
 
-fn render_sidebar_row(
-    frame: &mut Frame<'_>,
-    text: &mut TextRenderer,
-    rect: Rect,
-    start_x: i32,
-    y: i32,
-    cell_w: i32,
-    cell_h: i32,
-    scrollbar_reserve_px: i32,
-    row: &SidebarRow,
-    now_ms: u64,
-) {
-    if let Some(bg) = row.bg {
-        frame.rect(rect.x + 6, y, rect.w - 12, cell_h, bg);
+fn build_synthetic_screen(
+    rows: usize,
+    cols: usize,
+    build: impl FnOnce(&mut String),
+) -> Option<vt100::Screen> {
+    if rows == 0 || cols == 0 {
+        return None;
     }
 
-    let status = row.status.map(|status| {
-        (
-            sidebar_status_glyph(status, now_ms),
-            sidebar_status_color(status),
-        )
-    });
-    let reserved_px = if status.is_some() { cell_w * 2 } else { 0 };
-    let line = text.truncate_with_ellipsis(
-        &row.text,
-        (((rect.w - layout::SIDEBAR_PAD_X * 2 * cell_w - scrollbar_reserve_px - reserved_px).max(0)
-            / cell_w) as usize)
-            .max(match row.kind {
-                SidebarRowKind::ActionOpenProject | SidebarRowKind::Project(_) => 8,
-                SidebarRowKind::Label | SidebarRowKind::Session { .. } => 0,
-            }),
+    let mut parser = vt100::Parser::new(rows as u16, cols as u16, 0);
+    let mut input = String::from("\x1b[?25l");
+    build(&mut input);
+    parser.process(input.as_bytes());
+    Some(parser.screen().clone())
+}
+
+fn visible_sidebar_rows<'a>(
+    rows: &'a [SidebarRow],
+    scroll: usize,
+    sticky_row: Option<&'a SidebarRow>,
+    visible_rows: usize,
+) -> Vec<&'a SidebarRow> {
+    let sticky_rows = usize::from(sticky_row.is_some());
+    let mut visible = Vec::with_capacity(visible_rows);
+    if let Some(row) = sticky_row {
+        visible.push(row);
+    }
+    visible.extend(
+        rows.iter()
+            .skip(scroll)
+            .take(visible_rows.saturating_sub(sticky_rows)),
     );
-    let x = match row.kind {
-        SidebarRowKind::ActionOpenProject | SidebarRowKind::Project(_) => {
-            centered_text_x(rect, text, &line)
-        }
-        SidebarRowKind::Label | SidebarRowKind::Session { .. } => start_x,
-    };
-    frame.text(text, x, y, row.fg, &line);
+    visible
+}
 
-    if let Some((glyph, color)) = status {
-        let glyph_x = rect.x + rect.w
-            - layout::SIDEBAR_PAD_X * cell_w
-            - scrollbar_reserve_px
-            - text.measure_text(glyph);
-        frame.text(text, glyph_x, y, color, glyph);
+fn screen_cols(rect: Rect, text: &TextRenderer) -> usize {
+    ((rect.w.max(0) / text.metrics.cell_width.max(1)).max(0)) as usize
+}
+
+fn display_cell_width(value: &str) -> usize {
+    value
+        .chars()
+        .map(|ch| {
+            unicode_width::UnicodeWidthChar::width(ch)
+                .unwrap_or(1)
+                .max(1)
+        })
+        .sum()
+}
+
+fn centered_screen_col(cols: usize, value: &str) -> usize {
+    cols.saturating_sub(display_cell_width(value)) / 2 + 1
+}
+
+fn fill_screen_row(out: &mut String, row: usize, cols: usize, bg: Color) {
+    if cols == 0 {
+        return;
     }
+    push_cursor_move(out, row, 1);
+    push_ansi_bg(out, bg);
+    out.push_str(&" ".repeat(cols));
+    out.push_str("\x1b[0m");
+}
+
+fn push_positioned_text(
+    out: &mut String,
+    row: usize,
+    col: usize,
+    fg: Color,
+    bg: Option<Color>,
+    value: &str,
+) {
+    if value.is_empty() || col == 0 {
+        return;
+    }
+
+    push_cursor_move(out, row, col);
+    if let Some(bg) = bg {
+        push_ansi_bg(out, bg);
+    }
+    push_ansi_fg(out, fg);
+    out.push_str(value);
+    out.push_str("\x1b[0m");
+}
+
+fn push_cursor_move(out: &mut String, row: usize, col: usize) {
+    let _ = write!(out, "\x1b[{row};{col}H");
+}
+
+fn push_ansi_fg(out: &mut String, color: Color) {
+    let (r, g, b) = color_rgb(color);
+    let _ = write!(out, "\x1b[38;2;{r};{g};{b}m");
+}
+
+fn push_ansi_bg(out: &mut String, color: Color) {
+    let (r, g, b) = color_rgb(color);
+    let _ = write!(out, "\x1b[48;2;{r};{g};{b}m");
+}
+
+fn color_rgb(color: Color) -> (u8, u8, u8) {
+    let value = color.argb();
+    (
+        ((value >> 16) & 0xff) as u8,
+        ((value >> 8) & 0xff) as u8,
+        (value & 0xff) as u8,
+    )
 }
 
 fn render_vertical_scrollbar(
@@ -414,10 +532,6 @@ fn render_terminal_scrollback(
     );
 }
 
-fn centered_text_x(rect: Rect, text: &TextRenderer, value: &str) -> i32 {
-    rect.x + ((rect.w - text.measure_text(value)).max(0) / 2)
-}
-
 fn render_terminal_frame(
     frame: &mut Frame<'_>,
     text: &mut TextRenderer,
@@ -425,9 +539,31 @@ fn render_terminal_frame(
     screen: &vt100::Screen,
     selection: Option<TerminalSelectionRange>,
 ) {
+    let cursor_visible = screen.scrollback() == 0 && !screen.hide_cursor();
+    render_screen_frame(
+        frame,
+        text,
+        rect,
+        screen,
+        selection,
+        TERM_FG,
+        TERM_BG,
+        cursor_visible,
+    );
+}
+
+fn render_screen_frame(
+    frame: &mut Frame<'_>,
+    text: &mut TextRenderer,
+    rect: Rect,
+    screen: &vt100::Screen,
+    selection: Option<TerminalSelectionRange>,
+    default_fg: Color,
+    default_bg: Color,
+    cursor_visible: bool,
+) {
     let (rows, cols) = screen.size();
     let (cursor_row, cursor_col) = screen.cursor_position();
-    let cursor_visible = screen.scrollback() == 0 && !screen.hide_cursor();
 
     for row in 0..rows {
         let y = rect.y + i32::from(row) * text.metrics.cell_height;
@@ -463,7 +599,7 @@ fn render_terminal_frame(
                 end > col && start < cell_end
             });
             let cursor_here = cursor_visible && row == cursor_row && col == cursor_col;
-            let (fg, bg) = terminal_cell_colors(cell, cursor_here, selected);
+            let (fg, bg) = screen_cell_colors(cell, cursor_here, selected, default_fg, default_bg);
             frame.rect(
                 x,
                 y,

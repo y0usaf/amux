@@ -20,7 +20,7 @@ const ERROR: Color = Color::rgb(244, 133, 133);
 pub(super) const SELECTION: Color = Color::rgb(28, 34, 46);
 const CURSOR: Color = Color::rgb(188, 204, 255);
 pub(super) const TERM_BG: Color = Color::rgb(10, 13, 18);
-const TERM_FG: Color = Color::rgb(214, 219, 227);
+pub(super) const TERM_FG: Color = Color::rgb(214, 219, 227);
 const TERM_SELECTION_BG: Color = Color::rgb(53, 92, 173);
 const TERM_SELECTION_FG: Color = Color::rgb(245, 248, 255);
 
@@ -48,13 +48,15 @@ pub(super) fn status_color(
     }
 }
 
-pub(super) fn terminal_cell_colors(
+pub(super) fn screen_cell_colors(
     cell: &vt100::Cell,
     cursor_here: bool,
     selected: bool,
+    default_fg: Color,
+    default_bg: Color,
 ) -> (Color, Color) {
-    let mut fg = terminal_color(cell.fgcolor(), TERM_FG);
-    let mut bg = terminal_color(cell.bgcolor(), TERM_BG);
+    let mut fg = terminal_color(cell.fgcolor(), default_fg);
+    let mut bg = terminal_color(cell.bgcolor(), default_bg);
 
     if cell.inverse() {
         std::mem::swap(&mut fg, &mut bg);
@@ -73,6 +75,14 @@ pub(super) fn terminal_cell_colors(
     }
 
     (fg, bg)
+}
+
+pub(super) fn terminal_cell_colors(
+    cell: &vt100::Cell,
+    cursor_here: bool,
+    selected: bool,
+) -> (Color, Color) {
+    screen_cell_colors(cell, cursor_here, selected, TERM_FG, TERM_BG)
 }
 
 fn terminal_color(color: vt100::Color, default: Color) -> Color {
