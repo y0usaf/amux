@@ -116,7 +116,14 @@ pub const ACTION_SPECS: &[ActionSpec] = &[
         name: "zoom_in",
         label: "zoom in",
         group: "view",
-        defaults: &["ctrl+equal", "ctrl+plus", "cmd+equal", "cmd+plus"],
+        defaults: &[
+            "ctrl+equal",
+            "ctrl+plus",
+            "ctrl+shift+plus",
+            "cmd+equal",
+            "cmd+plus",
+            "cmd+shift+plus",
+        ],
     },
     ActionSpec {
         action: AppAction::ZoomOut,
