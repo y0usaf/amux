@@ -20,6 +20,17 @@ pub fn project_name_from_path(path: &Path) -> String {
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
         .map(ToOwned::to_owned)
+        .or_else(|| {
+            path.components()
+                .rev()
+                .find_map(|component| match component {
+                    std::path::Component::Normal(name) => name
+                        .to_str()
+                        .filter(|name| !name.trim().is_empty())
+                        .map(ToOwned::to_owned),
+                    _ => None,
+                })
+        })
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
@@ -37,9 +48,66 @@ pub fn is_default_session_name(name: &str) -> bool {
 }
 
 fn title_from_text(text: &str) -> Option<String> {
-    let first_line = text.lines().find(|line| !line.trim().is_empty())?.trim();
-    if first_line.starts_with("# AGENTS.md instructions") {
-        return None;
+    let title = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("# AGENTS.md instructions"))?;
+    Some(truncate_text(title, 42))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn truncate_text_handles_zero_one_and_unicode_boundaries() {
+        assert_eq!(truncate_text("hello", 0), "");
+        assert_eq!(truncate_text("hello", 1), "…");
+        assert_eq!(truncate_text("é漢字", 2), "é…");
+        assert_eq!(truncate_text("é漢", 3), "é漢");
     }
-    Some(truncate_text(first_line, 42))
+
+    #[test]
+    fn project_name_from_path_falls_back_for_root_and_empty_names() {
+        assert_eq!(project_name_from_path(Path::new("/tmp/project")), "project");
+        assert_eq!(
+            project_name_from_path(Path::new("/tmp/project/")),
+            "project"
+        );
+        assert_eq!(project_name_from_path(Path::new("/")), "/");
+        assert_eq!(project_name_from_path(Path::new("   ")), "   ");
+    }
+
+    #[test]
+    fn session_name_uses_first_non_empty_line_and_skips_agents_header() {
+        assert_eq!(
+            session_name_from_text("\n\n  My session title  \nbody"),
+            "My session title"
+        );
+        assert_eq!(
+            session_name_from_text("# AGENTS.md instructions\nreal title"),
+            "real title"
+        );
+        assert_eq!(session_name_from_text("# AGENTS.md instructions"), "");
+    }
+
+    #[test]
+    fn session_name_is_truncated_to_42_chars() {
+        let title = "12345678901234567890123456789012345678901234567890";
+        assert_eq!(
+            session_name_from_text(title),
+            "12345678901234567890123456789012345678901…"
+        );
+    }
+
+    #[test]
+    fn default_session_name_detection_accepts_only_numeric_suffixes() {
+        assert!(is_default_session_name(""));
+        assert!(is_default_session_name(" Session "));
+        assert!(is_default_session_name("Session 12"));
+        assert!(!is_default_session_name("Session 12a"));
+        assert!(is_default_session_name("Session "));
+        assert!(!is_default_session_name("Other"));
+    }
 }

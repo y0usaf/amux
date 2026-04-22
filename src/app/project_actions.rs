@@ -7,7 +7,7 @@ use crate::pi;
 use crate::state::{merge_scanned_sessions, Project};
 use crate::util::{normalize_project_path, project_name_from_path};
 
-use super::App;
+use super::{selection::session_index_for_restore_key, App};
 
 pub(super) fn normalize_unique_project_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
@@ -85,10 +85,7 @@ impl App {
 
         let desired_session = session_key.or_else(|| self.persisted.selected_session.clone());
         self.selected_session = desired_session.as_deref().and_then(|key| {
-            self.projects[self.selected_project]
-                .sessions
-                .iter()
-                .position(|session| session.selection_key() == key || session.local_id == key)
+            session_index_for_restore_key(&self.projects[self.selected_project].sessions, key)
         });
 
         if self.selected_session.is_none() {
@@ -108,9 +105,8 @@ impl App {
             .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-        match pick_project_directory(&start_dir) {
-            Ok(Some(path)) => self.add_project(&path),
-            Ok(None) | Err(_) => {}
+        if let Ok(Some(path)) = pick_project_directory(&start_dir) {
+            self.add_project(&path);
         }
     }
 

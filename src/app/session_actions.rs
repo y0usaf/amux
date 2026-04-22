@@ -3,6 +3,14 @@ use crate::state::Session;
 
 use super::App;
 
+fn session_allows_manual_refresh(session: &Session) -> bool {
+    !session.runtime.is_active()
+}
+
+fn session_allows_archive(session: &Session) -> bool {
+    !session.runtime.is_active()
+}
+
 impl App {
     pub(super) fn archive_selected_session(&mut self) {
         let Some(project) = self.current_project() else {
@@ -15,21 +23,21 @@ impl App {
         let Some(session) = project.sessions.get(session_index) else {
             return;
         };
+        let project_index = self.selected_project;
+        let session_id = session.local_id.clone();
+        let session_file = session.session_file.clone();
 
-        if session.runtime.running {
-            self.set_note("cannot archive running session");
+        if !session_allows_archive(session) {
+            self.set_note("cannot archive active session");
             return;
         }
 
-        if let Some(path) = session.session_file.as_ref() {
+        if let Some(path) = session_file.as_ref() {
             if let Err(error) = pi::archive_session_file(path) {
                 self.set_note(error);
                 return;
             }
         }
-
-        let project_index = self.selected_project;
-        let session_id = session.local_id.clone();
         let next_selected_session = {
             let project = &mut self.projects[project_index];
             project.sessions.remove(session_index);
@@ -98,9 +106,6 @@ impl App {
         }
         self.selected_project = project_index;
         self.selected_session = Some(session_index);
-        if let Some(session) = self.current_session_mut() {
-            session.runtime.unread = false;
-        }
         self.sync_sidebar_to_selection();
         self.persist_selection();
         self.sync_terminals();
@@ -136,9 +141,9 @@ impl App {
 
         if self
             .current_session()
-            .is_some_and(|session| session.runtime.running)
+            .is_some_and(|session| !session_allows_manual_refresh(session))
         {
-            self.set_note("cannot refresh running session");
+            self.set_note("cannot refresh active session");
             return;
         }
 
@@ -157,5 +162,29 @@ impl App {
         for project_index in 0..self.projects.len() {
             self.restart_idle_terminals_for_project(project_index);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{session_allows_archive, session_allows_manual_refresh};
+    use crate::state::Session;
+
+    #[test]
+    fn queued_sessions_cannot_be_archived() {
+        let mut session = Session::new_draft();
+        assert!(session_allows_archive(&session));
+
+        session.runtime.queued = true;
+        assert!(!session_allows_archive(&session));
+    }
+
+    #[test]
+    fn queued_sessions_cannot_be_manually_refreshed() {
+        let mut session = Session::new_draft();
+        assert!(session_allows_manual_refresh(&session));
+
+        session.runtime.queued = true;
+        assert!(!session_allows_manual_refresh(&session));
     }
 }

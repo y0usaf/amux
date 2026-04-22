@@ -36,6 +36,15 @@ pub enum TerminalStatus {
     Error(String),
 }
 
+fn disconnected_terminal_status(status: &TerminalStatus) -> Option<TerminalStatus> {
+    match status {
+        TerminalStatus::Exited(_) | TerminalStatus::Error(_) => None,
+        TerminalStatus::Empty | TerminalStatus::Launching | TerminalStatus::Running => {
+            Some(TerminalStatus::Error("terminal disconnected".into()))
+        }
+    }
+}
+
 pub struct TerminalController {
     proxy: EventLoopProxy<()>,
     parser: Parser,
@@ -118,6 +127,7 @@ impl TerminalController {
                 let _ = killer.kill();
             }
         }
+        self.status = TerminalStatus::Empty;
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) {
@@ -147,13 +157,8 @@ impl TerminalController {
         let mut changed = false;
         let mut drop_process = false;
 
-        loop {
-            let recv = match self.process.as_ref() {
-                Some(process) => process.rx.try_recv(),
-                None => break,
-            };
-
-            match recv {
+        while let Some(process) = self.process.as_ref() {
+            match process.rx.try_recv() {
                 Ok(HostEvent::Output(bytes)) => {
                     self.clear_selection();
                     self.parser.process(&bytes);
@@ -176,6 +181,10 @@ impl TerminalController {
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
+                    if let Some(status) = disconnected_terminal_status(&self.status) {
+                        self.status = status;
+                        changed = true;
+                    }
                     drop_process = true;
                     break;
                 }
@@ -319,7 +328,8 @@ impl Drop for TerminalController {
 #[cfg(test)]
 mod tests {
     use super::{
-        targets_share_process, terminal_selection_span, TerminalSelectionPoint, TerminalTarget,
+        disconnected_terminal_status, targets_share_process, terminal_selection_span,
+        TerminalSelectionPoint, TerminalStatus, TerminalTarget,
     };
     use crate::terminal::selection::TerminalSelection;
     use std::path::PathBuf;
@@ -336,11 +346,30 @@ mod tests {
     }
 
     #[test]
-    fn session_file_change_reuses_existing_process() {
+    fn session_materialization_reuses_existing_process() {
         assert!(targets_share_process(
             Some(&target(None)),
             Some(&target(Some("/tmp/session.jsonl"))),
         ));
+    }
+
+    #[test]
+    fn disconnected_terminal_status_promotes_active_states_to_error() {
+        assert!(matches!(
+            disconnected_terminal_status(&TerminalStatus::Launching),
+            Some(TerminalStatus::Error(ref error)) if error == "terminal disconnected"
+        ));
+        assert!(matches!(
+            disconnected_terminal_status(&TerminalStatus::Running),
+            Some(TerminalStatus::Error(ref error)) if error == "terminal disconnected"
+        ));
+    }
+
+    #[test]
+    fn disconnected_terminal_status_preserves_terminal_end_states() {
+        assert!(disconnected_terminal_status(&TerminalStatus::Empty).is_some());
+        assert!(disconnected_terminal_status(&TerminalStatus::Exited("0".into())).is_none());
+        assert!(disconnected_terminal_status(&TerminalStatus::Error("boom".into())).is_none());
     }
 
     #[test]
@@ -375,5 +404,46 @@ mod tests {
         assert_eq!(terminal_selection_span(selection, 2, 10), Some((0, 10)));
         assert_eq!(terminal_selection_span(selection, 3, 10), Some((0, 8)));
         assert_eq!(terminal_selection_span(selection, 4, 10), None);
+    }
+
+    #[test]
+    fn target_without_session_file_still_reuses_same_process() {
+        let current = target(Some("/tmp/session-a.jsonl"));
+        let next = target(None);
+
+        assert!(targets_share_process(Some(&current), Some(&next)));
+    }
+
+    #[test]
+    fn different_materialized_session_files_force_restart() {
+        let current = target(Some("/tmp/session-a.jsonl"));
+        let next = target(Some("/tmp/session-b.jsonl"));
+
+        assert!(!targets_share_process(Some(&current), Some(&next)));
+    }
+
+    #[test]
+    fn target_change_in_harness_session_forces_restart() {
+        let current = target(Some("/tmp/session.jsonl"));
+        let mut next = target(Some("/tmp/session.jsonl"));
+        next.harness_session_id = "local-session-2".into();
+
+        assert!(!targets_share_process(Some(&current), Some(&next)));
+    }
+
+    #[test]
+    fn single_point_selection_normalizes_to_none() {
+        let mut selection = TerminalSelection::default();
+        selection.set(TerminalSelectionPoint { row: 2, col: 4 });
+
+        assert_eq!(selection.normalized(), None);
+    }
+
+    #[test]
+    fn selection_focus_updates_without_anchor_still_has_no_range() {
+        let mut selection = TerminalSelection::default();
+        selection.update_focus(TerminalSelectionPoint { row: 2, col: 4 });
+
+        assert_eq!(selection.normalized(), None);
     }
 }

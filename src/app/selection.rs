@@ -2,6 +2,12 @@ use crate::state::{Project, Session};
 
 use super::App;
 
+pub(super) fn session_index_for_restore_key(sessions: &[Session], key: &str) -> Option<usize> {
+    sessions
+        .iter()
+        .position(|session| session.selection_key() == key || session.local_id == key)
+}
+
 impl App {
     pub(super) fn current_project(&self) -> Option<&Project> {
         self.projects.get(self.selected_project)
@@ -14,11 +20,6 @@ impl App {
     pub(super) fn current_session(&self) -> Option<&Session> {
         let index = self.selected_session?;
         self.current_project()?.sessions.get(index)
-    }
-
-    pub(super) fn current_session_mut(&mut self) -> Option<&mut Session> {
-        let index = self.selected_session?;
-        self.current_project_mut()?.sessions.get_mut(index)
     }
 
     pub(super) fn current_session_visible_in_sidebar(&self) -> bool {
@@ -93,5 +94,42 @@ impl App {
             .current_session()
             .and_then(Session::persisted_selection_key);
         let _ = self.persisted.save_default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_index_for_restore_key_matches_persisted_selection_key() {
+        let mut session = Session::new_draft();
+        session.pi_session_id = Some("pi-session-1".into());
+        let sessions = vec![session];
+
+        assert_eq!(
+            session_index_for_restore_key(&sessions, "pi-session-1"),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn session_index_for_restore_key_matches_local_id_for_in_memory_restore() {
+        let mut session = Session::new_draft();
+        session.local_id = "local-session-1".into();
+        session.pi_session_id = Some("pi-session-1".into());
+        let sessions = vec![session];
+
+        assert_eq!(
+            session_index_for_restore_key(&sessions, "local-session-1"),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn session_index_for_restore_key_returns_none_for_unknown_key() {
+        let sessions = vec![Session::new_draft()];
+
+        assert_eq!(session_index_for_restore_key(&sessions, "missing"), None);
     }
 }
