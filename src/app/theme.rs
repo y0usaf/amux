@@ -11,16 +11,16 @@ pub(super) const BG: Color = Color::rgb(8, 10, 14);
 pub(super) const SURFACE: Color = Color::rgb(14, 17, 23);
 pub(super) const SURFACE_ALT: Color = Color::rgb(18, 22, 29);
 pub(super) const BORDER: Color = Color::rgb(42, 48, 60);
-pub(super) const TEXT: Color = Color::rgb(222, 227, 234);
-pub(super) const MUTED: Color = Color::rgb(124, 132, 146);
-pub(super) const ACCENT: Color = Color::rgb(128, 164, 255);
-pub(super) const RUNNING: Color = Color::rgb(116, 214, 168);
-pub(super) const WARNING: Color = Color::rgb(245, 196, 108);
-const ERROR: Color = Color::rgb(244, 133, 133);
+pub(super) const TEXT: Color = ansi_index_to_color_const(7);
+pub(super) const MUTED: Color = ansi_index_to_color_const(8);
+pub(super) const ACCENT: Color = ansi_index_to_color_const(12);
+pub(super) const RUNNING: Color = ansi_index_to_color_const(10);
+pub(super) const WARNING: Color = ansi_index_to_color_const(11);
+const ERROR: Color = ansi_index_to_color_const(9);
 pub(super) const SELECTION: Color = Color::rgb(28, 34, 46);
 const CURSOR: Color = Color::rgb(188, 204, 255);
 pub(super) const TERM_BG: Color = Color::rgb(10, 13, 18);
-pub(super) const TERM_FG: Color = Color::rgb(214, 219, 227);
+pub(super) const TERM_FG: Color = TEXT;
 const TERM_SELECTION_BG: Color = Color::rgb(53, 92, 173);
 const TERM_SELECTION_FG: Color = Color::rgb(245, 248, 255);
 
@@ -85,6 +85,24 @@ pub(super) fn terminal_cell_colors(
     screen_cell_colors(cell, cursor_here, selected, TERM_FG, TERM_BG)
 }
 
+pub(super) fn theme_palette_index(color: Color) -> Option<u8> {
+    if color == TEXT || color == TERM_FG {
+        Some(7)
+    } else if color == MUTED {
+        Some(8)
+    } else if color == ERROR {
+        Some(9)
+    } else if color == RUNNING {
+        Some(10)
+    } else if color == WARNING {
+        Some(11)
+    } else if color == ACCENT {
+        Some(12)
+    } else {
+        None
+    }
+}
+
 fn terminal_color(color: vt100::Color, default: Color) -> Color {
     match color {
         vt100::Color::Default => default,
@@ -93,7 +111,7 @@ fn terminal_color(color: vt100::Color, default: Color) -> Color {
     }
 }
 
-fn ansi_index_to_color(idx: u8) -> Color {
+const fn ansi_index_to_color_const(idx: u8) -> Color {
     let (r, g, b) = match idx {
         0 => (0x1d, 0x23, 0x2f),
         1 => (0xf7, 0x76, 0x8e),
@@ -116,14 +134,7 @@ fn ansi_index_to_color(idx: u8) -> Color {
             let r = index / 36;
             let g = (index % 36) / 6;
             let b = index % 6;
-            let conv = |component: u8| {
-                if component == 0 {
-                    0
-                } else {
-                    55 + component * 40
-                }
-            };
-            (conv(r), conv(g), conv(b))
+            (cube_component(r), cube_component(g), cube_component(b))
         }
         232..=255 => {
             let shade = 8 + (idx - 232) * 10;
@@ -131,6 +142,18 @@ fn ansi_index_to_color(idx: u8) -> Color {
         }
     };
     Color::rgb(r, g, b)
+}
+
+const fn cube_component(component: u8) -> u8 {
+    if component == 0 {
+        0
+    } else {
+        55 + component * 40
+    }
+}
+
+fn ansi_index_to_color(idx: u8) -> Color {
+    ansi_index_to_color_const(idx)
 }
 
 fn brighten(color: Color, amount: u8) -> Color {
