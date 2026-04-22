@@ -7,8 +7,8 @@ use crate::util::now_millis;
 use super::layout::{self, Rect, TERMINAL_PAD};
 use super::sidebar::{sidebar_status_color, sidebar_status_glyph, SidebarRow, SidebarRowKind};
 use super::theme::{
-    screen_cell_colors, status_color, BG, BORDER, MUTED, SURFACE, SURFACE_ALT, TERM_BG, TERM_FG,
-    TEXT, WARNING,
+    screen_cell_colors, status_color, theme_palette_index, ACCENT, BG, BORDER, MUTED, SURFACE,
+    SURFACE_ALT, TERM_BG, TERM_FG, TEXT, WARNING,
 };
 use super::App;
 
@@ -234,7 +234,7 @@ fn render_topbar_frame(
             ansi,
             1,
             centered_screen_col(cols, &title_text),
-            TEXT,
+            ACCENT,
             None,
             &title_text,
         );
@@ -453,11 +453,21 @@ fn push_cursor_move(out: &mut String, row: usize, col: usize) {
 }
 
 fn push_ansi_fg(out: &mut String, color: Color) {
+    if let Some(idx) = theme_palette_index(color) {
+        let _ = write!(out, "\x1b[38;5;{idx}m");
+        return;
+    }
+
     let (r, g, b) = color_rgb(color);
     let _ = write!(out, "\x1b[38;2;{r};{g};{b}m");
 }
 
 fn push_ansi_bg(out: &mut String, color: Color) {
+    if let Some(idx) = theme_palette_index(color) {
+        let _ = write!(out, "\x1b[48;5;{idx}m");
+        return;
+    }
+
     let (r, g, b) = color_rgb(color);
     let _ = write!(out, "\x1b[48;2;{r};{g};{b}m");
 }
