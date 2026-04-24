@@ -1,163 +1,17 @@
 use crate::pi::PiSidecarSnapshot;
-use crate::state::Session;
-use crate::terminal::TerminalStatus;
 use crate::util::now_millis;
 
+use super::sidecar_reducer::{apply_snapshot_to_session, reconcile_terminal_note};
 use super::App;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SidecarOrderUpdate {
-    None,
-    Touch,
-    Promote,
-}
-
-pub(super) fn should_bind_sidecar_session(session: &Session, snapshot: &PiSidecarSnapshot) -> bool {
-    session.pi_session_id.is_some()
-        || session.session_file.is_some()
-        || session.runtime.running
-        || session.runtime.queued
-        || snapshot.stage.is_active()
-        || snapshot.queued
-}
-
-pub(super) fn sidecar_order_update(
-    prev_running: bool,
-    running: bool,
-    prev_trackable: bool,
-    trackable: bool,
-) -> SidecarOrderUpdate {
-    if running {
-        if !trackable {
-            SidecarOrderUpdate::None
-        } else if !prev_running || !prev_trackable {
-            SidecarOrderUpdate::Promote
-        } else {
-            SidecarOrderUpdate::None
-        }
-    } else if prev_running {
-        if !trackable {
-            SidecarOrderUpdate::None
-        } else if !prev_trackable {
-            SidecarOrderUpdate::Promote
-        } else {
-            SidecarOrderUpdate::Touch
-        }
-    } else {
-        SidecarOrderUpdate::None
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct SidecarApplyResult {
-    reordered: bool,
-    promote_project: bool,
-}
-
-fn terminal_status_note(status: Option<&TerminalStatus>) -> Option<String> {
-    match status {
-        Some(TerminalStatus::Error(error)) => Some(format!("terminal: {error}")),
-        Some(TerminalStatus::Exited(status)) => Some(format!("terminal exited: {status}")),
-        Some(TerminalStatus::Empty | TerminalStatus::Launching | TerminalStatus::Running)
-        | None => None,
-    }
-}
-
-fn is_terminal_status_note(note: &str) -> bool {
-    note.starts_with("terminal: ") || note.starts_with("terminal exited: ")
-}
-
-fn reconcile_terminal_note(
-    current_note: Option<&str>,
-    status: Option<&TerminalStatus>,
-) -> Option<String> {
-    match terminal_status_note(status) {
-        Some(note) => Some(note),
-        None => current_note
-            .filter(|note| !is_terminal_status_note(note))
-            .map(ToOwned::to_owned),
-    }
-}
-
-fn apply_snapshot_to_session(
-    session: &mut Session,
-    snapshot: &PiSidecarSnapshot,
-    selected: bool,
-    now_ms: u64,
-) -> SidecarApplyResult {
-    let prev_running = session.runtime.running;
-    let prev_queued = session.runtime.queued;
-    let prev_unread = session.runtime.unread;
-    if snapshot.ts_ms == 0 {
-        let clears_known_activity = session.runtime.last_sidecar_ts_ms > 0
-            && (prev_running || prev_queued)
-            && !snapshot.stage.is_active()
-            && !snapshot.queued;
-        if session.runtime.last_sidecar_ts_ms > 0 && !clears_known_activity {
-            return SidecarApplyResult::default();
-        }
-    } else if snapshot.ts_ms < session.runtime.last_sidecar_ts_ms {
-        return SidecarApplyResult::default();
-    }
-
-    let timestamp = snapshot.ts_ms.max(now_ms);
-    let prev_trackable = session.counts_for_activity_ordering();
-    let should_bind = should_bind_sidecar_session(session, snapshot);
-
-    if should_bind {
-        session.pi_session_id = Some(snapshot.session_id.clone());
-        if let Some(path) = snapshot.session_file.clone() {
-            session.session_file = Some(path);
-        }
-        if let Some(name) = snapshot
-            .session_name
-            .as_ref()
-            .map(|name| name.trim())
-            .filter(|name| !name.is_empty())
-        {
-            if session.should_adopt_name(name) && session.name != name {
-                session.name = name.to_string();
-            }
-        }
-        session.draft = false;
-    }
-
-    session.runtime.running = snapshot.stage.is_active();
-    session.runtime.status = snapshot.stage.as_runtime_status().map(ToOwned::to_owned);
-    session.runtime.queued = snapshot.queued;
-    session.runtime.tool_name = snapshot.tool_name.clone();
-    if snapshot.ts_ms > 0 {
-        session.runtime.last_sidecar_ts_ms = session.runtime.last_sidecar_ts_ms.max(snapshot.ts_ms);
-    }
-
-    let mut result = SidecarApplyResult::default();
-    let trackable = session.counts_for_activity_ordering();
-    match sidecar_order_update(
-        prev_running,
-        session.runtime.running,
-        prev_trackable,
-        trackable,
-    ) {
-        SidecarOrderUpdate::Promote => {
-            session.promote_at(timestamp);
-            result.reordered = true;
-            result.promote_project = true;
-        }
-        SidecarOrderUpdate::Touch => {
-            session.touch_at(timestamp);
-            result.reordered = true;
-        }
-        SidecarOrderUpdate::None => {}
-    }
-
-    if session.runtime.is_active() && !(prev_running || prev_queued) {
-        session.runtime.unread = false;
-    } else if prev_running && !session.runtime.running && trackable {
-        session.runtime.unread = if selected { prev_unread } else { true };
-    }
-
-    result
-}
+#[cfg(test)]
+pub(super) use super::sidecar_reducer::{
+    should_bind_sidecar_session, sidecar_order_update, SidecarApplyResult, SidecarOrderUpdate,
+};
+#[cfg(test)]
+use crate::state::Session;
+#[cfg(test)]
+use crate::terminal::TerminalStatus;
 
 impl App {
     fn apply_sidecar_snapshot(&mut self, snapshot: PiSidecarSnapshot) {
@@ -166,7 +20,7 @@ impl App {
         }
 
         let mut matched = None;
-        for (project_index, project) in self.projects.iter().enumerate() {
+        for (project_index, project) in self.workspace.projects().iter().enumerate() {
             for (session_index, session) in project.sessions.iter().enumerate() {
                 if session.matches_identity(
                     snapshot.harness_session_id.as_deref(),
@@ -185,18 +39,18 @@ impl App {
         let Some((project_index, session_index)) = matched else {
             return;
         };
-        let selected =
-            self.selected_project == project_index && self.selected_session == Some(session_index);
+        let selected = self.workspace.selected_project_index() == project_index
+            && self.workspace.selected_session_index() == Some(session_index);
         let selected_session_key = self
             .current_session()
             .map(|session| session.local_id.clone());
         let update = {
-            let session = &mut self.projects[project_index].sessions[session_index];
+            let session = &mut self.workspace.projects_mut()[project_index].sessions[session_index];
             apply_snapshot_to_session(session, &snapshot, selected, now_millis())
         };
 
         if update.reordered {
-            self.projects[project_index].sort_sessions();
+            self.workspace.projects_mut()[project_index].sort_sessions();
             self.restore_selection(None, selected_session_key);
         }
         if update.promote_project {
@@ -207,16 +61,7 @@ impl App {
     }
 
     pub(super) fn process_background_events(&mut self) {
-        let selected_session_id = self
-            .current_session()
-            .map(|session| session.local_id.clone());
-        let mut changed = false;
-        for (session_id, terminal) in self.terminals.iter_mut() {
-            let terminal_changed = terminal.drain_events();
-            if terminal_changed && selected_session_id.as_deref() == Some(session_id.as_str()) {
-                changed = true;
-            }
-        }
+        let mut changed = self.drain_terminal_events();
         while let Some(snapshot) = self.sidecar.try_recv() {
             self.apply_sidecar_snapshot(snapshot);
             changed = true;
@@ -359,6 +204,22 @@ mod tests {
             reconcile_terminal_note(None, Some(&TerminalStatus::Exited("1".into()))),
             Some("terminal exited: 1".into())
         );
+    }
+
+    #[test]
+    fn non_tool_snapshot_clears_stale_tool_name() {
+        let mut session = Session::new_draft();
+        session.pi_session_id = Some("pi-session-1".into());
+        session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
+        session.draft = false;
+        session.runtime.tool_name = Some("Clipboard".into());
+
+        let mut next = snapshot(crate::pi::PiSessionStage::Thinking, 150);
+        next.tool_name = Some("Clipboard".into());
+        apply_snapshot_to_session(&mut session, &next, false, 250);
+
+        assert_eq!(session.runtime.status.as_deref(), Some("thinking"));
+        assert_eq!(session.runtime.tool_name, None);
     }
 
     #[test]
