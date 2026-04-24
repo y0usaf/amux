@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::pi::{live_project_dir, ScannedSession};
+use crate::pi::live_project_dir;
+use crate::state::ScannedSession;
 use crate::util::{normalize_project_path, session_name_from_text};
 
 pub fn scan_live_sessions(project_path: &Path) -> Vec<ScannedSession> {
@@ -106,15 +107,12 @@ fn session_meta_from_path(path: &Path) -> Option<ScanMeta> {
                 let Some(message) = value.get("message") else {
                     continue;
                 };
-                if title_source_from_user_message(message).is_some() {
-                    has_messages = true;
-                }
-                if meta.first_user_message.is_empty() {
-                    if let Some(text) = title_source_from_user_message(message) {
-                        if !text.trim().is_empty() {
-                            meta.first_user_message = text;
-                        }
-                    }
+                let Some(text) = title_source_from_user_message(message) else {
+                    continue;
+                };
+                has_messages = true;
+                if meta.first_user_message.is_empty() && !text.trim().is_empty() {
+                    meta.first_user_message = text;
                 }
             }
             _ => {}

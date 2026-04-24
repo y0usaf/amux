@@ -1,5 +1,4 @@
-use crate::pi::ScannedSession;
-use crate::state::{compare_sessions, Session};
+use crate::state::{compare_sessions, ScannedSession, Session};
 
 pub fn merge_scanned_sessions(current: &mut Vec<Session>, scanned: Vec<ScannedSession>) {
     let mut old = std::mem::take(current);
