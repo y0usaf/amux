@@ -1,64 +1,18 @@
-use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::pi;
-use crate::state::{merge_scanned_sessions, Project};
-use crate::util::{normalize_project_path, project_name_from_path};
+use super::App;
 
-use super::{selection::session_index_for_restore_key, App};
-
+#[cfg(test)]
 pub(super) fn normalize_unique_project_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    let mut unique = Vec::with_capacity(paths.len());
-
-    for path in paths.into_iter().map(|path| normalize_project_path(&path)) {
-        if seen.insert(path.clone()) {
-            unique.push(path);
-        }
-    }
-
-    unique
+    super::workspace::normalize_unique_project_paths(paths)
 }
 
 impl App {
     pub(super) fn reload_projects_from_disk(&mut self) {
-        let selected_project_key = self
-            .current_project()
-            .map(|project| project.selection_key());
-        let selected_session_key = self
-            .current_session()
-            .map(|session| session.selection_key());
-
-        let mut project_paths: Vec<PathBuf> = if !self.persisted.projects.is_empty() {
-            self.persisted.projects.iter().map(PathBuf::from).collect()
-        } else if !self.initial_project_paths.is_empty() {
-            self.initial_project_paths.clone()
-        } else {
-            vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))]
-        };
-
-        project_paths = normalize_unique_project_paths(project_paths);
-
-        let mut next_projects = Vec::with_capacity(project_paths.len());
-        for path in project_paths {
-            let mut project = self
-                .projects
-                .iter()
-                .find(|project| project.path == path)
-                .cloned()
-                .unwrap_or_else(|| Project::new(path.clone()));
-            project.path = path.clone();
-            project.name = project_name_from_path(&path);
-            merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&path));
-            project.sort_sessions();
-            next_projects.push(project);
-        }
-        self.projects = next_projects;
-
-        self.restore_selection(selected_project_key, selected_session_key);
-        self.persist_selection();
+        self.workspace.reload_projects_from_disk();
+        self.sync_sidebar_to_selection();
     }
 
     pub(super) fn restore_selection(
@@ -66,35 +20,7 @@ impl App {
         project_key: Option<String>,
         session_key: Option<String>,
     ) {
-        if self.projects.is_empty() {
-            self.selected_project = 0;
-            self.selected_session = None;
-            self.sync_sidebar_to_selection();
-            return;
-        }
-
-        let persisted_project = project_key.or_else(|| self.persisted.selected_project.clone());
-        self.selected_project = persisted_project
-            .as_deref()
-            .and_then(|key| {
-                self.projects
-                    .iter()
-                    .position(|project| project.selection_key() == key)
-            })
-            .unwrap_or(0);
-
-        let desired_session = session_key.or_else(|| self.persisted.selected_session.clone());
-        self.selected_session = desired_session.as_deref().and_then(|key| {
-            session_index_for_restore_key(&self.projects[self.selected_project].sessions, key)
-        });
-
-        if self.selected_session.is_none() {
-            self.selected_session = if self.projects[self.selected_project].sessions.is_empty() {
-                self.ensure_default_session_for_project(self.selected_project)
-            } else {
-                Some(0)
-            };
-        }
+        self.workspace.restore_selection(project_key, session_key);
         self.sync_sidebar_to_selection();
     }
 
@@ -111,84 +37,30 @@ impl App {
     }
 
     pub(super) fn add_project(&mut self, path: &Path) {
-        let path = normalize_project_path(path);
-        if !path.exists() || !path.is_dir() {
-            self.set_note(format!("invalid project path: {}", path.display()));
-            return;
+        match self.workspace.add_project(path) {
+            Ok(()) => {
+                self.sync_sidebar_to_selection();
+                self.sync_terminals();
+            }
+            Err(error) => self.set_note(error),
         }
-        if self.projects.iter().any(|project| project.path == path) {
-            self.set_note("project already added");
-            return;
-        }
-
-        let _ = self.prepare_selection_change();
-        let mut project = Project::new(path.clone());
-        merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&path));
-        project.sort_sessions();
-        self.projects.push(project);
-        self.selected_project = self.projects.len().saturating_sub(1);
-        self.selected_session = self.ensure_default_session_for_project(self.selected_project);
-        self.sync_sidebar_to_selection();
-        self.persist_selection();
-        self.sync_terminals();
     }
 
     pub(super) fn promote_project_to_front(&mut self, project_index: usize) {
-        if project_index == 0 || project_index >= self.projects.len() {
-            return;
-        }
-
-        let selected_project_key = self
-            .current_project()
-            .map(|project| project.selection_key());
-        let selected_session_key = self
-            .current_session()
-            .map(|session| session.selection_key());
-        let project = self.projects.remove(project_index);
-        self.projects.insert(0, project);
-        self.restore_selection(selected_project_key, selected_session_key);
+        self.workspace.promote_project_to_front(project_index);
+        self.sync_sidebar_to_selection();
     }
 
     pub(super) fn remove_selected_project(&mut self) {
-        if self.projects.is_empty() {
-            return;
+        if self.workspace.remove_selected_project() {
+            self.sync_sidebar_to_selection();
+            self.sync_terminals();
         }
-        self.projects.remove(self.selected_project);
-        if self.projects.is_empty() {
-            self.selected_project = 0;
-            self.selected_session = None;
-        } else {
-            self.selected_project = self.selected_project.min(self.projects.len() - 1);
-            self.selected_session = self.ensure_default_session_for_project(self.selected_project);
-        }
-        self.sync_sidebar_to_selection();
-        self.persist_selection();
-        self.sync_terminals();
     }
 
     pub(super) fn refresh_project_from_scan(&mut self, project_index: usize) {
-        let Some(project_path) = self
-            .projects
-            .get(project_index)
-            .map(|project| project.path.clone())
-        else {
-            return;
-        };
-
-        let selected_project_key = self
-            .current_project()
-            .map(|project| project.selection_key());
-        let selected_session_key = self
-            .current_session()
-            .map(|session| session.selection_key());
-
-        if let Some(project) = self.projects.get_mut(project_index) {
-            merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&project_path));
-            project.sort_sessions();
-        }
-
-        self.restore_selection(selected_project_key, selected_session_key);
-        self.persist_selection();
+        self.workspace.refresh_project_from_scan(project_index);
+        self.sync_sidebar_to_selection();
     }
 }
 

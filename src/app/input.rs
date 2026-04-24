@@ -27,61 +27,42 @@ impl App {
 
     pub(super) fn clipboard_mut(&mut self) -> Option<&mut Clipboard> {
         if self.clipboard.is_none() {
-            match Clipboard::new() {
-                Ok(clipboard) => self.clipboard = Some(clipboard),
-                Err(error) => {
-                    self.set_note(format!("clipboard: {error}"));
-                    return None;
-                }
-            }
+            self.clipboard = Some(Clipboard::new().ok()?);
         }
         self.clipboard.as_mut()
     }
 
     pub(super) fn copy_text_to_clipboard(&mut self, text: String) -> bool {
-        let result: Result<(), String> = {
-            let Some(clipboard) = self.clipboard_mut() else {
-                return false;
-            };
-
-            #[cfg(all(
-                unix,
-                not(any(target_os = "macos", target_os = "android", target_os = "emscripten"))
-            ))]
-            {
-                match clipboard
-                    .set()
-                    .clipboard(LinuxClipboardKind::Clipboard)
-                    .text(text.as_str())
-                {
-                    Ok(()) => {
-                        let _ = clipboard
-                            .set()
-                            .clipboard(LinuxClipboardKind::Primary)
-                            .text(text.as_str());
-                        Ok(())
-                    }
-                    Err(error) => Err(format!("clipboard: {error}")),
-                }
-            }
-
-            #[cfg(not(all(
-                unix,
-                not(any(target_os = "macos", target_os = "android", target_os = "emscripten"))
-            )))]
-            {
-                clipboard
-                    .set_text(text)
-                    .map_err(|error| format!("clipboard: {error}"))
-            }
+        let Some(clipboard) = self.clipboard_mut() else {
+            return false;
         };
 
-        match result {
-            Ok(()) => true,
-            Err(error) => {
-                self.set_note(error);
-                false
+        #[cfg(all(
+            unix,
+            not(any(target_os = "macos", target_os = "android", target_os = "emscripten"))
+        ))]
+        {
+            if clipboard
+                .set()
+                .clipboard(LinuxClipboardKind::Clipboard)
+                .text(text.as_str())
+                .is_err()
+            {
+                return false;
             }
+            let _ = clipboard
+                .set()
+                .clipboard(LinuxClipboardKind::Primary)
+                .text(text.as_str());
+            true
+        }
+
+        #[cfg(not(all(
+            unix,
+            not(any(target_os = "macos", target_os = "android", target_os = "emscripten"))
+        )))]
+        {
+            clipboard.set_text(text).is_ok()
         }
     }
 
@@ -93,31 +74,25 @@ impl App {
     }
 
     pub(super) fn paste_current_terminal_clipboard(&mut self) -> bool {
-        let clipboard_text = {
+        let text = {
             let Some(clipboard) = self.clipboard_mut() else {
                 return false;
             };
-            clipboard
-                .get_text()
-                .map_err(|error| format!("clipboard: {error}"))
-        };
-        let text = match clipboard_text {
-            Ok(text) => text,
-            Err(error) => {
-                self.set_note(error);
+            let Ok(text) = clipboard.get_text() else {
                 return false;
-            }
+            };
+            text
         };
 
-        match self.current_terminal_mut() {
-            Some(terminal) => match terminal.paste_text(&text) {
-                Ok(pasted) => pasted,
-                Err(error) => {
-                    self.set_note(format!("terminal paste: {error}"));
-                    false
-                }
-            },
-            None => false,
+        let Some(terminal) = self.current_terminal_mut() else {
+            return false;
+        };
+        match terminal.paste_text(&text) {
+            Ok(pasted) => pasted,
+            Err(error) => {
+                self.set_note(format!("terminal paste: {error}"));
+                false
+            }
         }
     }
 
