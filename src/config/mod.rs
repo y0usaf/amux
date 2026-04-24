@@ -18,9 +18,13 @@ pub use actions::{action_spec, ActionSpec, AppAction, ACTION_SPECS};
 pub use keymap::{KeyChordState, Keymap, KeymapHint, KeymapMatch};
 pub use keys::{KeyModifiers, KeyStroke, KeyToken, NamedKeyToken};
 
+pub const PANEL_PADDING_PX_MIN: i32 = 0;
+pub const PANEL_PADDING_PX_MAX: i32 = 64;
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     pub ui_scale: Option<f32>,
+    pub panel_padding_px: Option<i32>,
     pub font_family: Option<String>,
     #[serde(default)]
     pub keybinds: BTreeMap<String, ConfigKeybind>,
@@ -96,6 +100,10 @@ impl AppConfig {
         self.font_family.as_deref()
     }
 
+    pub fn panel_padding_px(&self) -> Option<i32> {
+        self.panel_padding_px.map(clamp_panel_padding_px)
+    }
+
     pub fn keymap(&self) -> Keymap {
         Keymap::from_config(self)
     }
@@ -107,10 +115,15 @@ impl AppConfig {
             .map(str::trim)
             .filter(|family| !family.is_empty())
             .map(str::to_owned);
+        self.panel_padding_px = self.panel_padding_px.map(clamp_panel_padding_px);
         for binding in self.keybinds.values_mut() {
             binding.normalize();
         }
     }
+}
+
+pub fn clamp_panel_padding_px(panel_padding_px: i32) -> i32 {
+    panel_padding_px.clamp(PANEL_PADDING_PX_MIN, PANEL_PADDING_PX_MAX)
 }
 
 fn resolved_sequences(config: &AppConfig, spec: &ActionSpec) -> Vec<Vec<KeyStroke>> {
@@ -160,12 +173,7 @@ fn parse_key_sequence(text: &str) -> Result<Vec<KeyStroke>, String> {
         return Err("empty key sequence".to_string());
     }
 
-    let sequence: Result<Vec<_>, _> = text.split_whitespace().map(KeyStroke::parse).collect();
-    let sequence = sequence?;
-    if sequence.is_empty() {
-        return Err("empty key sequence".to_string());
-    }
-    Ok(sequence)
+    text.split_whitespace().map(KeyStroke::parse).collect()
 }
 
 pub fn default_config_path() -> PathBuf {
