@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 
-use crate::pi::ScannedSession;
+use crate::state::ScannedSession;
 use crate::util::{is_default_session_name, now_millis};
 
 #[derive(Clone, Debug, Default)]

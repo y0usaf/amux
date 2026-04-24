@@ -4,6 +4,8 @@ mod merge;
 mod persisted;
 #[path = "state/project.rs"]
 mod project;
+#[path = "state/scanned.rs"]
+mod scanned;
 #[path = "state/session.rs"]
 mod session;
 #[path = "state/sort.rs"]
@@ -12,12 +14,15 @@ mod sort;
 pub use merge::merge_scanned_sessions;
 pub use persisted::{default_state_path, PersistedState};
 pub use project::Project;
+pub use scanned::ScannedSession;
 pub use session::{Session, SessionRuntime};
 pub use sort::compare_sessions;
 
 #[cfg(test)]
 mod tests {
-    use super::{compare_sessions, merge_scanned_sessions, PersistedState, Session};
+    use super::{
+        compare_sessions, merge_scanned_sessions, PersistedState, ScannedSession, Session,
+    };
 
     #[test]
     fn promoted_session_sorts_above_newer_idle_session() {
@@ -158,7 +163,7 @@ mod tests {
         session.created_at_ms = 500;
         session.updated_at_ms = 500;
 
-        session.apply_scan(crate::pi::ScannedSession {
+        session.apply_scan(ScannedSession {
             session_id: "pi-session-1".into(),
             session_file: "/tmp/pi-session-1.jsonl".into(),
             cwd: "/tmp".into(),
@@ -180,7 +185,7 @@ mod tests {
 
     #[test]
     fn apply_scan_never_regresses_materialized_creation_timestamp() {
-        let mut session = Session::from_scan(crate::pi::ScannedSession {
+        let mut session = Session::from_scan(ScannedSession {
             session_id: "pi-session-1".into(),
             session_file: "/tmp/pi-session-1.jsonl".into(),
             cwd: "/tmp".into(),
@@ -190,7 +195,7 @@ mod tests {
         });
         session.updated_at_ms = 500;
 
-        session.apply_scan(crate::pi::ScannedSession {
+        session.apply_scan(ScannedSession {
             session_id: "pi-session-1".into(),
             session_file: "/tmp/pi-session-1.jsonl".into(),
             cwd: "/tmp".into(),
@@ -209,7 +214,7 @@ mod tests {
         session.name = "Pinned name".into();
         session.updated_at_ms = 500;
 
-        session.apply_scan(crate::pi::ScannedSession {
+        session.apply_scan(ScannedSession {
             session_id: "pi-session-1".into(),
             session_file: "/tmp/pi-session-1.jsonl".into(),
             cwd: "/tmp".into(),
@@ -282,7 +287,7 @@ mod tests {
         let mut current = vec![existing];
         merge_scanned_sessions(
             &mut current,
-            vec![crate::pi::ScannedSession {
+            vec![ScannedSession {
                 session_id: "pi-session-1".into(),
                 session_file: "/tmp/session.jsonl".into(),
                 cwd: "/tmp/project".into(),
@@ -311,7 +316,7 @@ mod tests {
         merge_scanned_sessions(
             &mut current,
             vec![
-                crate::pi::ScannedSession {
+                ScannedSession {
                     session_id: "pi-session-1".into(),
                     session_file: "/tmp/session.jsonl".into(),
                     cwd: "/tmp/project".into(),
@@ -319,7 +324,7 @@ mod tests {
                     updated_at_ms: 200,
                     name: "Imported".into(),
                 },
-                crate::pi::ScannedSession {
+                ScannedSession {
                     session_id: "pi-session-1".into(),
                     session_file: "/tmp/session.jsonl".into(),
                     cwd: "/tmp/project".into(),
@@ -396,7 +401,7 @@ mod tests {
         session.created_at_ms = 100;
         session.updated_at_ms = 500;
 
-        session.apply_scan(crate::pi::ScannedSession {
+        session.apply_scan(ScannedSession {
             session_id: "pi-session-1".into(),
             session_file: "/tmp/pi-session-1.jsonl".into(),
             cwd: "/tmp".into(),

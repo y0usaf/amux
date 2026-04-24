@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use crate::pi::{ARCHIVE_DIR_NAME, LIVE_ROOT_REL};
 use crate::util::{app_runtime_dir, normalize_project_path};
+
+pub(crate) const LIVE_ROOT_REL: &str = ".pi/agent/sessions";
+pub(crate) const ARCHIVE_DIR_NAME: &str = "ARCHIVE";
 
 pub fn socket_path() -> PathBuf {
     app_runtime_dir().join(format!("pi-sidecar-{}.sock", std::process::id()))
