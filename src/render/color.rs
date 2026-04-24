@@ -14,6 +14,16 @@ impl Color {
     pub const fn argb(self) -> u32 {
         self.0
     }
+
+    #[inline]
+    pub const fn rgb_components(self) -> (u8, u8, u8) {
+        let value = self.0;
+        (
+            ((value >> 16) & 0xff) as u8,
+            ((value >> 8) & 0xff) as u8,
+            (value & 0xff) as u8,
+        )
+    }
 }
 
 pub const BLACK: Color = Color::rgb(0, 0, 0);

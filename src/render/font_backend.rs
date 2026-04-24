@@ -174,36 +174,20 @@ fn font_search_roots() -> Vec<PathBuf> {
 }
 
 fn find_any_font_recursive(root: &Path) -> Option<FontMatch> {
-    let entries = fs::read_dir(root).ok()?;
-    let mut dirs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            if is_supported_font_file(&path) {
-                return Some(FontMatch {
-                    path,
-                    collection_index: 0,
-                });
-            }
-        } else if path.is_dir() {
-            dirs.push(path);
-        }
-    }
-    for dir in dirs {
-        if let Some(font_match) = find_any_font_recursive(&dir) {
-            return Some(font_match);
-        }
-    }
-    None
+    find_font_recursive(root, &|_| true)
 }
 
 fn find_font_with_glyph_recursive(root: &Path, ch: char) -> Option<FontMatch> {
+    find_font_recursive(root, &|path| font_file_has_glyph(path, ch))
+}
+
+fn find_font_recursive(root: &Path, matches: &impl Fn(&Path) -> bool) -> Option<FontMatch> {
     let entries = fs::read_dir(root).ok()?;
     let mut dirs = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file() {
-            if is_supported_font_file(&path) && font_file_has_glyph(&path, ch) {
+            if is_supported_font_file(&path) && matches(&path) {
                 return Some(FontMatch {
                     path,
                     collection_index: 0,
@@ -214,7 +198,7 @@ fn find_font_with_glyph_recursive(root: &Path, ch: char) -> Option<FontMatch> {
         }
     }
     for dir in dirs {
-        if let Some(font_match) = find_font_with_glyph_recursive(&dir, ch) {
+        if let Some(font_match) = find_font_recursive(&dir, matches) {
             return Some(font_match);
         }
     }
