@@ -68,12 +68,12 @@ pub(crate) fn terminal_selection_span(
     }
 
     let row_start = if row == selection.start.row {
-        selection.start.col
+        selection.start.col.min(cols)
     } else {
         0
     };
     let row_end = if row == selection.end.row {
-        selection.end.col
+        selection.end.col.min(cols)
     } else {
         cols
     };

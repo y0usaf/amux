@@ -82,10 +82,9 @@ fn translate_key(
             let text = text.as_str();
             if ctrl {
                 control_bytes(text)?
+            } else if text.contains('\u{7f}') || text == "\r" || text == "\n" {
+                return None;
             } else {
-                if text.contains('\u{7f}') || text == "\r" || text == "\n" {
-                    return None;
-                }
                 text.as_bytes().to_vec()
             }
         }
