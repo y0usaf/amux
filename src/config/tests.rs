@@ -177,6 +177,25 @@ fn whitespace_in_font_family_and_keybinds_is_normalized() {
 }
 
 #[test]
+fn panel_padding_px_defaults_and_normalizes_to_safe_range() {
+    assert_eq!(AppConfig::default().panel_padding_px(), None);
+
+    let mut compact = AppConfig {
+        panel_padding_px: Some(-4),
+        ..AppConfig::default()
+    };
+    compact.normalize();
+    assert_eq!(compact.panel_padding_px(), Some(PANEL_PADDING_PX_MIN));
+
+    let mut spacious = AppConfig {
+        panel_padding_px: Some(128),
+        ..AppConfig::default()
+    };
+    spacious.normalize();
+    assert_eq!(spacious.panel_padding_px(), Some(PANEL_PADDING_PX_MAX));
+}
+
+#[test]
 fn parse_key_sequence_rejects_empty_input() {
     assert_eq!(parse_key_sequence("   "), Err("empty key sequence".into()));
 }

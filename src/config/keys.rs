@@ -115,33 +115,17 @@ pub struct KeyModifiers {
 impl KeyModifiers {
     fn apply_token(&mut self, token: &str) -> Result<(), String> {
         let normalized = token.trim().to_ascii_lowercase();
-        match normalized.as_str() {
-            "ctrl" | "control" => {
-                if self.control {
-                    return Err(format!("duplicate modifier: {normalized}"));
-                }
-                self.control = true;
-            }
-            "shift" => {
-                if self.shift {
-                    return Err(format!("duplicate modifier: {normalized}"));
-                }
-                self.shift = true;
-            }
-            "alt" | "option" => {
-                if self.alt {
-                    return Err(format!("duplicate modifier: {normalized}"));
-                }
-                self.alt = true;
-            }
-            "cmd" | "command" | "super" | "meta" => {
-                if self.super_key {
-                    return Err(format!("duplicate modifier: {normalized}"));
-                }
-                self.super_key = true;
-            }
+        let enabled = match normalized.as_str() {
+            "ctrl" | "control" => &mut self.control,
+            "shift" => &mut self.shift,
+            "alt" | "option" => &mut self.alt,
+            "cmd" | "command" | "super" | "meta" => &mut self.super_key,
             other => return Err(format!("unknown modifier: {other}")),
+        };
+        if *enabled {
+            return Err(format!("duplicate modifier: {normalized}"));
         }
+        *enabled = true;
         Ok(())
     }
 }
