@@ -27,8 +27,8 @@ impl<'a> Frame<'a> {
         }
         let x0 = x.max(0) as usize;
         let y0 = y.max(0) as usize;
-        let x1 = (x + w).min(self.width as i32).max(0) as usize;
-        let y1 = (y + h).min(self.height as i32).max(0) as usize;
+        let x1 = x.saturating_add(w).min(self.width as i32).max(0) as usize;
+        let y1 = y.saturating_add(h).min(self.height as i32).max(0) as usize;
         if x0 >= x1 || y0 >= y1 {
             return;
         }
@@ -44,37 +44,39 @@ impl<'a> Frame<'a> {
         if w <= 0 || h <= 0 {
             return;
         }
-        self.hline(x, x + w - 1, y, color);
-        self.hline(x, x + w - 1, y + h - 1, color);
-        self.vline(x, y, y + h - 1, color);
-        self.vline(x + w - 1, y, y + h - 1, color);
+        let right = x.saturating_add(w.saturating_sub(1));
+        let bottom = y.saturating_add(h.saturating_sub(1));
+        self.hline(x, right, y, color);
+        self.hline(x, right, bottom, color);
+        self.vline(x, y, bottom, color);
+        self.vline(right, y, bottom, color);
     }
 
     pub fn hline(&mut self, x0: i32, x1: i32, y: i32, color: Color) {
-        if y < 0 || y >= self.height as i32 {
+        if self.width == 0 || y < 0 || y >= self.height as i32 {
             return;
         }
         let start = x0.min(x1).max(0) as usize;
-        let end = x0.max(x1).min(self.width as i32 - 1);
-        if start > end as usize {
+        let end = x0.max(x1).min(self.width as i32 - 1).max(0) as usize;
+        if start > end {
             return;
         }
         let row = y as usize * self.width;
-        for xx in start..=end as usize {
+        for xx in start..=end {
             self.pixels[row + xx] = color.argb();
         }
     }
 
     pub fn vline(&mut self, x: i32, y0: i32, y1: i32, color: Color) {
-        if x < 0 || x >= self.width as i32 {
+        if self.height == 0 || x < 0 || x >= self.width as i32 {
             return;
         }
         let start = y0.min(y1).max(0) as usize;
-        let end = y0.max(y1).min(self.height as i32 - 1);
-        if start > end as usize {
+        let end = y0.max(y1).min(self.height as i32 - 1).max(0) as usize;
+        if start > end {
             return;
         }
-        for yy in start..=end as usize {
+        for yy in start..=end {
             self.pixels[yy * self.width + x as usize] = color.argb();
         }
     }
