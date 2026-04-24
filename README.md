@@ -14,7 +14,7 @@ No GPUI. No TUI framework. Minimal config surface.
 
 ```text
 src/
-  app/       # app orchestration + input/layout/sidebar/theme
+  app/       # app shell + workspace/terminal/render/sidebar/sidecar components
   pi/        # Pi discovery/session scan/files/types
   render/    # color/frame/text/font backend
   sidecar/   # unix socket stream ingestion
@@ -63,6 +63,7 @@ If no project path is passed, the app falls back to persisted projects, then cur
 ```json
 {
   "ui_scale": 1.0,
+  "panel_padding_px": 4,
   "font_family": null,
   "keybinds": {
     "project_prev": "ctrl+h",
@@ -73,6 +74,7 @@ If no project path is passed, the app falls back to persisted projects, then cur
 }
 ```
 
+- `panel_padding_px` sets inner padding for the sidebar + top bar in renderer pixels (try `4`; missing/null uses tuned defaults; clamped to `0..=64`)
 - missing `keybinds.*` → built-in defaults
 - value shape = string or string array
 - multi-stroke chords are space-separated, e.g. `"ctrl+p n"`

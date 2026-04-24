@@ -74,10 +74,7 @@ function lineCount(text) {
 
 function nonEmptyLineCount(text) {
 	if (!text) return 0
-	return `${text}`
-		.split("\n")
-		.map((line) => line.trim())
-		.filter(Boolean).length
+	return `${text}`.split("\n").filter((line) => line.trim()).length
 }
 
 function firstNonEmptyLine(text) {

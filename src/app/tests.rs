@@ -146,26 +146,6 @@ fn sidecar_order_update_only_touches_after_trackable_running_session_finishes() 
 }
 
 #[test]
-fn adjust_session_index_after_removal_only_shifts_later_rows_in_same_project() {
-    assert_eq!(
-        super::App::adjust_session_index_after_removal(0, 3, Some((0, 1))),
-        2
-    );
-    assert_eq!(
-        super::App::adjust_session_index_after_removal(0, 1, Some((0, 1))),
-        1
-    );
-    assert_eq!(
-        super::App::adjust_session_index_after_removal(1, 3, Some((0, 1))),
-        3
-    );
-    assert_eq!(
-        super::App::adjust_session_index_after_removal(0, 3, None),
-        3
-    );
-}
-
-#[test]
 fn project_path_normalization_preserves_order() {
     let paths = project_actions::normalize_unique_project_paths(vec![
         PathBuf::from("/tmp/project-b"),
