@@ -1,8 +1,8 @@
 use crate::render::{Color, TextRenderer};
 use crate::state::Session;
 
-use super::layout::{Rect, SIDEBAR_PAD_Y};
-use super::theme::{ACCENT, MUTED, RUNNING, SELECTION, TEXT, WARNING};
+use super::layout::Rect;
+use super::theme::{ACCENT, MUTED, RUNNING, TEXT, WARNING};
 use super::App;
 
 pub(super) const SIDEBAR_SPINNER_FRAMES: &[&str] =
@@ -34,7 +34,14 @@ pub(super) struct SidebarRow {
     pub(super) text: String,
     pub(super) fg: Color,
     pub(super) bg: Option<Color>,
+    pub(super) inverted: bool,
     pub(super) status: Option<SidebarStatusKind>,
+}
+
+impl SidebarRow {
+    pub(super) fn is_hoverable(&self) -> bool {
+        !matches!(self.kind, SidebarRowKind::Label)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,7 +142,7 @@ pub(super) fn sticky_sidebar_anchor_row(
     }
 
     let body_visible_rows = visible_rows - 1;
-    let body_last_visible = scroll + body_visible_rows.saturating_sub(1);
+    let body_last_visible = scroll.saturating_add(body_visible_rows.saturating_sub(1));
     (span.selected_row >= scroll && span.selected_row <= body_last_visible)
         .then_some(span.anchor_row)
 }
@@ -173,44 +180,46 @@ pub(super) fn sidebar_status_glyph(status: SidebarStatusKind, now_ms: u64) -> &'
 
 impl App {
     pub(super) fn has_sidebar_spinner(&self) -> bool {
-        self.projects
+        self.workspace
+            .projects()
             .iter()
             .flat_map(|project| project.sessions.iter())
-            .any(|session| {
-                matches!(
-                    session_sidebar_status(session),
-                    Some(SidebarStatusKind::Active | SidebarStatusKind::Queued)
-                )
-            })
+            .any(|session| session.runtime.running || session.runtime.queued)
     }
 
     pub(super) fn sidebar_rows(&self) -> Vec<SidebarRow> {
+        let projects = self.workspace.projects();
+        let selected_project = self.workspace.selected_project_index();
+        let selected_session = self.workspace.selected_session_index();
         let mut rows = vec![SidebarRow {
             kind: SidebarRowKind::ActionOpenProject,
             text: "+ NEW PROJECT".to_string(),
             fg: ACCENT,
             bg: None,
+            inverted: projects.is_empty(),
             status: None,
         }];
         let selected_session_visible = self.current_session_visible_in_sidebar();
 
-        if !self.projects.is_empty() {
+        if !projects.is_empty() {
             rows.push(SidebarRow {
                 kind: SidebarRowKind::Label,
                 text: String::new(),
                 fg: MUTED,
                 bg: None,
+                inverted: false,
                 status: None,
             });
         }
 
-        for (project_index, project) in self.projects.iter().enumerate() {
-            let project_selected = project_index == self.selected_project;
+        for (project_index, project) in projects.iter().enumerate() {
+            let project_selected = project_index == selected_project;
             rows.push(SidebarRow {
                 kind: SidebarRowKind::Project(project_index),
                 text: project.name.to_uppercase(),
                 fg: if project_selected { ACCENT } else { TEXT },
-                bg: (project_selected && !selected_session_visible).then_some(SELECTION),
+                bg: None,
+                inverted: project_selected,
                 status: None,
             });
 
@@ -220,7 +229,7 @@ impl App {
                 }
                 let selected = project_selected
                     && selected_session_visible
-                    && Some(session_index) == self.selected_session;
+                    && Some(session_index) == selected_session;
                 let status = session_sidebar_status(session);
                 rows.push(SidebarRow {
                     kind: SidebarRowKind::Session {
@@ -233,17 +242,19 @@ impl App {
                     } else {
                         MUTED
                     }),
-                    bg: selected.then_some(SELECTION),
+                    bg: None,
+                    inverted: selected,
                     status,
                 });
             }
 
-            if project_index + 1 < self.projects.len() {
+            if project_index + 1 < projects.len() {
                 rows.push(SidebarRow {
                     kind: SidebarRowKind::Label,
                     text: String::new(),
                     fg: MUTED,
                     bg: None,
+                    inverted: false,
                     status: None,
                 });
             }
@@ -252,25 +263,32 @@ impl App {
         rows
     }
 
-    pub(super) fn sidebar_visible_rows(&self, rect: Rect, text: &TextRenderer) -> usize {
-        ((rect.h - SIDEBAR_PAD_Y * 2 * text.metrics.cell_height).max(0) / text.metrics.cell_height)
-            as usize
+    pub(super) fn sidebar_visible_rows(
+        &self,
+        rect: Rect,
+        text: &TextRenderer,
+        panel_pad: i32,
+    ) -> usize {
+        let cell_h = text.metrics.cell_height.max(1);
+        ((rect.h - panel_pad * 2).max(0) / cell_h) as usize
     }
 
     pub(super) fn selected_sidebar_row_index(&self, rows: &[SidebarRow]) -> Option<usize> {
         let selected_session_visible = self.current_session_visible_in_sidebar();
+        let selected_project = self.workspace.selected_project_index();
+        let selected_session = self.workspace.selected_session_index();
         rows.iter().position(|row| match row.kind {
-            SidebarRowKind::ActionOpenProject => self.projects.is_empty(),
+            SidebarRowKind::ActionOpenProject => self.workspace.projects().is_empty(),
             SidebarRowKind::Project(project_index) => {
-                project_index == self.selected_project && !selected_session_visible
+                project_index == selected_project && !selected_session_visible
             }
             SidebarRowKind::Session {
                 project_index,
                 session_index,
             } => {
                 selected_session_visible
-                    && project_index == self.selected_project
-                    && Some(session_index) == self.selected_session
+                    && project_index == selected_project
+                    && Some(session_index) == selected_session
             }
             SidebarRowKind::Label => false,
         })
@@ -281,9 +299,10 @@ impl App {
         rows: &[SidebarRow],
     ) -> Option<SidebarSelectionSpan> {
         let selected_row = self.selected_sidebar_row_index(rows)?;
+        let selected_project = self.workspace.selected_project_index();
         let anchor_row = rows
             .iter()
-            .position(|row| matches!(row.kind, SidebarRowKind::Project(index) if index == self.selected_project))
+            .position(|row| matches!(row.kind, SidebarRowKind::Project(index) if index == selected_project))
             .unwrap_or(selected_row);
         Some(SidebarSelectionSpan {
             anchor_row,
@@ -306,6 +325,10 @@ impl App {
         visible_rows: usize,
         visible_row: usize,
     ) -> Option<usize> {
+        if visible_row >= visible_rows {
+            return None;
+        }
+
         let sticky_row = self.sticky_sidebar_anchor_row_index(rows, visible_rows);
         let row_index = match sticky_row {
             Some(anchor_row) if visible_row == 0 => anchor_row,
@@ -313,6 +336,44 @@ impl App {
             None => self.sidebar_scroll + visible_row,
         };
         rows.get(row_index).map(|_| row_index)
+    }
+
+    pub(super) fn hovered_sidebar_row_index(
+        &self,
+        rect: Rect,
+        text: &TextRenderer,
+        rows: &[SidebarRow],
+        panel_pad: i32,
+    ) -> Option<usize> {
+        if !rect.contains(self.cursor_pos.0, self.cursor_pos.1) {
+            return None;
+        }
+
+        let cell_h = text.metrics.cell_height.max(1);
+        let local_y = self.cursor_pos.1 as i32 - rect.y - panel_pad;
+        if local_y < 0 {
+            return None;
+        }
+
+        let visible_row = (local_y / cell_h) as usize;
+        let row_index = self.sidebar_row_index_at_visible_row(
+            rows,
+            self.sidebar_visible_rows(rect, text, panel_pad),
+            visible_row,
+        )?;
+        rows.get(row_index)
+            .is_some_and(SidebarRow::is_hoverable)
+            .then_some(row_index)
+    }
+
+    pub(super) fn hovered_sidebar_row_index_for_cursor(&self) -> Option<usize> {
+        let (Some(window), Some(text)) = (&self.window, &self.text) else {
+            return None;
+        };
+        let size = window.inner_size();
+        let layout = self.compute_layout(size.width as i32, size.height as i32, text);
+        let rows = self.sidebar_rows();
+        self.hovered_sidebar_row_index(layout.sidebar, text, &rows, layout.spacing.panel_pad)
     }
 
     pub(super) fn clamp_sidebar_scroll(&mut self, row_count: usize, visible_rows: usize) {

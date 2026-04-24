@@ -17,7 +17,6 @@ pub(super) const ACCENT: Color = ansi_index_to_color_const(12);
 pub(super) const RUNNING: Color = ansi_index_to_color_const(10);
 pub(super) const WARNING: Color = ansi_index_to_color_const(11);
 const ERROR: Color = ansi_index_to_color_const(9);
-pub(super) const SELECTION: Color = Color::rgb(28, 34, 46);
 const CURSOR: Color = Color::rgb(188, 204, 255);
 pub(super) const TERM_BG: Color = Color::rgb(10, 13, 18);
 pub(super) const TERM_FG: Color = TEXT;
@@ -77,16 +76,8 @@ pub(super) fn screen_cell_colors(
     (fg, bg)
 }
 
-pub(super) fn terminal_cell_colors(
-    cell: &vt100::Cell,
-    cursor_here: bool,
-    selected: bool,
-) -> (Color, Color) {
-    screen_cell_colors(cell, cursor_here, selected, TERM_FG, TERM_BG)
-}
-
 pub(super) fn theme_palette_index(color: Color) -> Option<u8> {
-    if color == TEXT || color == TERM_FG {
+    if color == TEXT {
         Some(7)
     } else if color == MUTED {
         Some(8)
@@ -157,7 +148,7 @@ fn ansi_index_to_color(idx: u8) -> Color {
 }
 
 fn brighten(color: Color, amount: u8) -> Color {
-    let (r, g, b) = color_components(color);
+    let (r, g, b) = color.rgb_components();
     Color::rgb(
         r.saturating_add(amount),
         g.saturating_add(amount),
@@ -166,8 +157,8 @@ fn brighten(color: Color, amount: u8) -> Color {
 }
 
 fn fade_toward(color: Color, target: Color, mix: u8) -> Color {
-    let (r1, g1, b1) = color_components(color);
-    let (r2, g2, b2) = color_components(target);
+    let (r1, g1, b1) = color.rgb_components();
+    let (r2, g2, b2) = target.rgb_components();
     let blend = |a: u8, b: u8| -> u8 {
         let a = u16::from(a);
         let b = u16::from(b);
@@ -177,21 +168,12 @@ fn fade_toward(color: Color, target: Color, mix: u8) -> Color {
     Color::rgb(blend(r1, r2), blend(g1, g2), blend(b1, b2))
 }
 
-fn color_components(color: Color) -> (u8, u8, u8) {
-    let value = color.argb();
-    (
-        ((value >> 16) & 0xff) as u8,
-        ((value >> 8) & 0xff) as u8,
-        (value & 0xff) as u8,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        ansi_index_to_color, brighten, clamp_ui_scale, color_components, fade_toward, status_color,
-        terminal_cell_colors, ACCENT, CURSOR, ERROR, MUTED, RUNNING, TERM_BG, TERM_FG,
-        TERM_SELECTION_BG, TERM_SELECTION_FG, UI_SCALE_MAX, UI_SCALE_MIN, WARNING,
+        ansi_index_to_color, brighten, clamp_ui_scale, fade_toward, screen_cell_colors,
+        status_color, ACCENT, CURSOR, ERROR, MUTED, RUNNING, TERM_BG, TERM_FG, TERM_SELECTION_BG,
+        TERM_SELECTION_FG, UI_SCALE_MAX, UI_SCALE_MIN, WARNING,
     };
     use crate::render::Color;
     use crate::state::Session;
@@ -280,7 +262,7 @@ mod tests {
     #[test]
     fn color_components_extract_rgb_channels() {
         assert_eq!(
-            color_components(Color::rgb(0x12, 0x34, 0x56)),
+            Color::rgb(0x12, 0x34, 0x56).rgb_components(),
             (0x12, 0x34, 0x56)
         );
     }
@@ -288,8 +270,8 @@ mod tests {
     #[test]
     fn terminal_cell_colors_apply_selection_and_cursor_after_style_processing() {
         let bold_dim_inverse = cell_from_bytes(b"\x1b[1;2;7mX");
-        let selected = terminal_cell_colors(&bold_dim_inverse, false, true);
-        let cursor = terminal_cell_colors(&bold_dim_inverse, true, false);
+        let selected = screen_cell_colors(&bold_dim_inverse, false, true, TERM_FG, TERM_BG);
+        let cursor = screen_cell_colors(&bold_dim_inverse, true, false, TERM_FG, TERM_BG);
 
         assert_eq!(selected, (TERM_SELECTION_FG, TERM_SELECTION_BG));
         assert_eq!(cursor, (Color::rgb(9, 12, 18), CURSOR));
@@ -301,11 +283,11 @@ mod tests {
         let styled = cell_from_bytes(b"\x1b[31;44;1;2;7mX");
 
         assert_eq!(
-            terminal_cell_colors(&plain, false, false),
+            screen_cell_colors(&plain, false, false, TERM_FG, TERM_BG),
             (TERM_FG, TERM_BG)
         );
         assert_eq!(
-            terminal_cell_colors(&styled, false, false),
+            screen_cell_colors(&styled, false, false, TERM_FG, TERM_BG),
             (Color::rgb(175, 143, 201), Color::rgb(247, 118, 142))
         );
     }
