@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use winit::event_loop::EventLoopProxy;
@@ -9,7 +8,9 @@ use crate::pi;
 use crate::render::TextRenderer;
 use crate::sidecar::SidecarListener;
 
+use super::terminal_manager::TerminalManager;
 use super::theme::{self, FONT_SIZE, UI_SCALE_DEFAULT, UI_SCALE_STEP};
+use super::workspace::Workspace;
 use super::App;
 
 impl App {
@@ -19,9 +20,15 @@ impl App {
     ) -> anyhow::Result<Self> {
         let sidecar_socket_path = pi::socket_path();
         let sidecar = SidecarListener::start(proxy.clone(), sidecar_socket_path.clone())?;
-        let persisted = super::PersistedState::load_default().unwrap_or_default();
+        let terminal_manager = TerminalManager::new(
+            proxy.clone(),
+            pi::extension_path(),
+            sidecar_socket_path.clone(),
+        );
+        let persisted = crate::state::PersistedState::load_default().unwrap_or_default();
         let mut config = super::AppConfig::load_default().unwrap_or_default();
         let loaded_ui_scale = config.ui_scale.or(persisted.ui_scale);
+        let workspace = Workspace::new(initial_project_paths, persisted);
         let ui_scale = theme::clamp_ui_scale(loaded_ui_scale.unwrap_or(UI_SCALE_DEFAULT));
         let save_config = loaded_ui_scale.is_some() && config.ui_scale != Some(ui_scale);
         config.ui_scale = Some(ui_scale);
@@ -31,23 +38,16 @@ impl App {
         let keymap = config.keymap();
 
         let mut app = Self {
-            proxy,
-            initial_project_paths,
             config,
             keymap,
             key_chord_state: KeyChordState::default(),
-            persisted,
             window: None,
             context: None,
             surface: None,
             text: None,
-            terminals: HashMap::new(),
             sidecar,
-            sidecar_extension_path: pi::extension_path(),
-            sidecar_socket_path,
-            projects: Vec::new(),
-            selected_project: 0,
-            selected_session: None,
+            terminal_manager,
+            workspace,
             sidebar_scroll: 0,
             sidebar_sync_to_selection: true,
             sidebar_wheel_remainder: 0.0,
@@ -63,7 +63,7 @@ impl App {
         };
 
         app.reload_projects_from_disk();
-        if app.sidecar_extension_path.is_none() {
+        if !app.terminal_manager.has_sidecar_extension() {
             app.note = Some("sidecar extension not found".to_string());
         }
         Ok(app)

@@ -1,18 +1,14 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use arboard::Clipboard;
 use softbuffer::{Context, Surface};
-use winit::event_loop::{EventLoopProxy, OwnedDisplayHandle};
+use winit::event_loop::OwnedDisplayHandle;
 use winit::keyboard::ModifiersState;
 use winit::window::Window;
 
 use crate::config::{AppConfig, KeyChordState, Keymap};
 use crate::render::TextRenderer;
 use crate::sidecar::SidecarListener;
-use crate::state::{PersistedState, Project};
-use crate::terminal::TerminalController;
 
 mod core;
 mod events;
@@ -23,31 +19,27 @@ mod rendering;
 mod selection;
 mod session_actions;
 mod sidebar;
+mod sidecar_reducer;
 mod sidecar_sync;
+mod terminal_manager;
 mod terminal_sync;
 mod theme;
+mod workspace;
 
 #[cfg(test)]
 mod tests;
 
 pub struct App {
-    proxy: EventLoopProxy<()>,
-    initial_project_paths: Vec<PathBuf>,
     config: AppConfig,
     keymap: Keymap,
     key_chord_state: KeyChordState,
-    persisted: PersistedState,
     window: Option<Rc<Window>>,
     context: Option<Context<OwnedDisplayHandle>>,
     surface: Option<Surface<OwnedDisplayHandle, Rc<Window>>>,
     text: Option<TextRenderer>,
-    terminals: HashMap<String, TerminalController>,
     sidecar: SidecarListener,
-    sidecar_extension_path: Option<PathBuf>,
-    sidecar_socket_path: PathBuf,
-    projects: Vec<Project>,
-    selected_project: usize,
-    selected_session: Option<usize>,
+    terminal_manager: terminal_manager::TerminalManager,
+    workspace: workspace::Workspace,
     sidebar_scroll: usize,
     sidebar_sync_to_selection: bool,
     sidebar_wheel_remainder: f64,

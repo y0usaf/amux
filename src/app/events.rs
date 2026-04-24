@@ -11,7 +11,6 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{WindowAttributes, WindowId};
 
 use super::input::{take_wheel_lines, take_zoom_steps, terminal_selection_point_for_position};
-use super::layout::SIDEBAR_PAD_Y;
 use super::sidebar::{SidebarRowKind, SIDEBAR_SPINNER_FRAME_MS};
 use super::theme::UI_SCALE_STEP;
 use super::App;
@@ -68,7 +67,8 @@ impl App {
                 .sidebar
                 .contains(self.cursor_pos.0, self.cursor_pos.1)
             {
-                let visible_rows = self.sidebar_visible_rows(layout.sidebar, text);
+                let visible_rows =
+                    self.sidebar_visible_rows(layout.sidebar, text, layout.spacing.panel_pad);
                 let row_count = self.sidebar_rows().len();
                 let lines = take_wheel_lines(&delta, cell_h, &mut self.sidebar_wheel_remainder);
                 if lines != 0 {
@@ -121,13 +121,12 @@ impl App {
                 .sidebar
                 .contains(self.cursor_pos.0, self.cursor_pos.1)
             {
-                let local_y = self.cursor_pos.1 as i32
-                    - layout.sidebar.y
-                    - SIDEBAR_PAD_Y * text.metrics.cell_height;
+                let local_y =
+                    self.cursor_pos.1 as i32 - layout.sidebar.y - layout.spacing.panel_pad;
                 let visible_row = (local_y / text.metrics.cell_height).max(0) as usize;
                 self.sidebar_row_index_at_visible_row(
                     &sidebar_rows,
-                    self.sidebar_visible_rows(layout.sidebar, text),
+                    self.sidebar_visible_rows(layout.sidebar, text, layout.spacing.panel_pad),
                     visible_row,
                 )
             } else {
@@ -274,8 +273,19 @@ impl ApplicationHandler for App {
                 self.modifiers = modifiers.state();
             }
             WindowEvent::CursorMoved { position, .. } => {
+                let previous_hover = self.hovered_sidebar_row_index_for_cursor();
                 self.cursor_pos = (position.x, position.y);
                 self.handle_cursor_moved();
+                if previous_hover != self.hovered_sidebar_row_index_for_cursor() {
+                    self.request_redraw();
+                }
+            }
+            WindowEvent::CursorLeft { .. } => {
+                let previous_hover = self.hovered_sidebar_row_index_for_cursor();
+                self.cursor_pos = (-1.0, -1.0);
+                if previous_hover.is_some() {
+                    self.request_redraw();
+                }
             }
             WindowEvent::MouseWheel { delta, .. } => self.handle_mouse_wheel(delta),
             WindowEvent::MouseInput {
