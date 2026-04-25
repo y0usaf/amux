@@ -1,7 +1,7 @@
 use crate::render::{Color, TextRenderer};
 use crate::state::Session;
 
-use super::layout::Rect;
+use super::layout::{panel_content_rect, CellRect, Rect};
 use super::theme::{ACCENT, MUTED, RUNNING, TEXT, WARNING};
 use super::App;
 
@@ -263,14 +263,8 @@ impl App {
         rows
     }
 
-    pub(super) fn sidebar_visible_rows(
-        &self,
-        rect: Rect,
-        text: &TextRenderer,
-        panel_pad: i32,
-    ) -> usize {
-        let cell_h = text.metrics.cell_height.max(1);
-        ((rect.h - panel_pad * 2).max(0) / cell_h) as usize
+    pub(super) fn sidebar_visible_rows(&self, rect: CellRect, panel_pad_cells: i32) -> usize {
+        panel_content_rect(rect, panel_pad_cells).rows.max(0) as usize
     }
 
     pub(super) fn selected_sidebar_row_index(&self, rows: &[SidebarRow]) -> Option<usize> {
@@ -343,24 +337,21 @@ impl App {
         rect: Rect,
         text: &TextRenderer,
         rows: &[SidebarRow],
-        panel_pad: i32,
+        visible_rows: usize,
+        panel_pad_cells: i32,
     ) -> Option<usize> {
         if !rect.contains(self.cursor_pos.0, self.cursor_pos.1) {
             return None;
         }
 
         let cell_h = text.metrics.cell_height.max(1);
-        let local_y = self.cursor_pos.1 as i32 - rect.y - panel_pad;
+        let local_y = self.cursor_pos.1 as i32 - rect.y - (1 + panel_pad_cells) * cell_h;
         if local_y < 0 {
             return None;
         }
 
         let visible_row = (local_y / cell_h) as usize;
-        let row_index = self.sidebar_row_index_at_visible_row(
-            rows,
-            self.sidebar_visible_rows(rect, text, panel_pad),
-            visible_row,
-        )?;
+        let row_index = self.sidebar_row_index_at_visible_row(rows, visible_rows, visible_row)?;
         rows.get(row_index)
             .is_some_and(SidebarRow::is_hoverable)
             .then_some(row_index)
@@ -373,7 +364,15 @@ impl App {
         let size = window.inner_size();
         let layout = self.compute_layout(size.width as i32, size.height as i32, text);
         let rows = self.sidebar_rows();
-        self.hovered_sidebar_row_index(layout.sidebar, text, &rows, layout.spacing.panel_pad)
+        let visible_rows =
+            self.sidebar_visible_rows(layout.sidebar_cells, layout.spacing.panel_pad_cells);
+        self.hovered_sidebar_row_index(
+            layout.sidebar,
+            text,
+            &rows,
+            visible_rows,
+            layout.spacing.panel_pad_cells,
+        )
     }
 
     pub(super) fn clamp_sidebar_scroll(&mut self, row_count: usize, visible_rows: usize) {

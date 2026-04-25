@@ -76,6 +76,7 @@ pub(super) fn screen_cell_colors(
     (fg, bg)
 }
 
+#[cfg(test)]
 pub(super) fn theme_palette_index(color: Color) -> Option<u8> {
     if color == TEXT {
         Some(7)
