@@ -68,7 +68,7 @@ impl App {
                 .contains(self.cursor_pos.0, self.cursor_pos.1)
             {
                 let visible_rows =
-                    self.sidebar_visible_rows(layout.sidebar, text, layout.spacing.panel_pad);
+                    self.sidebar_visible_rows(layout.sidebar_cells, layout.spacing.panel_pad_cells);
                 let row_count = self.sidebar_rows().len();
                 let lines = take_wheel_lines(&delta, cell_h, &mut self.sidebar_wheel_remainder);
                 if lines != 0 {
@@ -121,12 +121,13 @@ impl App {
                 .sidebar
                 .contains(self.cursor_pos.0, self.cursor_pos.1)
             {
-                let local_y =
-                    self.cursor_pos.1 as i32 - layout.sidebar.y - layout.spacing.panel_pad;
+                let local_y = self.cursor_pos.1 as i32
+                    - layout.sidebar.y
+                    - (1 + layout.spacing.panel_pad_cells) * text.metrics.cell_height;
                 let visible_row = (local_y / text.metrics.cell_height).max(0) as usize;
                 self.sidebar_row_index_at_visible_row(
                     &sidebar_rows,
-                    self.sidebar_visible_rows(layout.sidebar, text, layout.spacing.panel_pad),
+                    self.sidebar_visible_rows(layout.sidebar_cells, layout.spacing.panel_pad_cells),
                     visible_row,
                 )
             } else {
