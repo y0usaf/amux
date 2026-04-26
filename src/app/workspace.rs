@@ -251,9 +251,6 @@ impl Workspace {
         let Some(session) = project.sessions.get(session_index) else {
             return Err("no session selected");
         };
-        if !session_is_idle(session) {
-            return Err("cannot archive active session");
-        }
 
         Ok(SessionArchiveTarget {
             project_index: self.selected_project,
@@ -424,8 +421,8 @@ pub(super) fn session_is_idle(session: &Session) -> bool {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{cycle_session_indices, session_is_idle};
-    use crate::state::{Project, Session};
+    use super::{cycle_session_indices, session_is_idle, Workspace};
+    use crate::state::{PersistedState, Project, Session};
 
     #[test]
     fn queued_sessions_are_not_idle() {
@@ -454,5 +451,23 @@ mod tests {
         project.sessions = vec![Session::new_draft()];
 
         assert_eq!(cycle_session_indices(&project), vec![0]);
+    }
+
+    #[test]
+    fn archive_target_allows_active_sessions() {
+        let mut project = Project::new(PathBuf::from("/tmp/project"));
+        let mut session = Session::new_draft();
+        session.local_id = "local-session-1".into();
+        session.runtime.running = true;
+        project.sessions = vec![session];
+
+        let mut workspace = Workspace::new(Vec::new(), PersistedState::default());
+        workspace.projects = vec![project];
+        workspace.selected_project = 0;
+        workspace.selected_session = Some(0);
+
+        let target = workspace.archive_target().unwrap();
+
+        assert_eq!(target.session_id, "local-session-1");
     }
 }
