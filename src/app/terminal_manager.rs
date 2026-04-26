@@ -49,7 +49,9 @@ impl TerminalManager {
     }
 
     pub(super) fn remove(&mut self, session_id: &str) {
-        self.controllers.remove(session_id);
+        if let Some(mut terminal) = self.controllers.remove(session_id) {
+            terminal.stop();
+        }
     }
 
     pub(super) fn resize_all(&mut self, rows: u16, cols: u16) {
