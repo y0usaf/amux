@@ -15,17 +15,27 @@ use serde::{Deserialize, Serialize};
 use crate::util::app_config_dir;
 
 pub use actions::{action_spec, ActionSpec, AppAction, ACTION_SPECS};
-pub use keymap::{KeyChordState, Keymap, KeymapHint, KeymapMatch};
+pub use keymap::{KeyChordState, Keymap, KeymapMatch};
 pub use keys::{KeyModifiers, KeyStroke, KeyToken, NamedKeyToken};
 
-pub const PANEL_PADDING_PX_MIN: i32 = 0;
-pub const PANEL_PADDING_PX_MAX: i32 = 64;
+pub const LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT: u8 = 50;
+pub const LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT: u8 = 13;
+pub const LAYOUT_BODY_HEIGHT_PERCENT_DEFAULT: u8 = 100;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LayoutWidthPercents {
+    pub terminal: u8,
+    pub sidebar: u8,
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AppConfig {
-    pub ui_scale: Option<f32>,
-    pub panel_padding_px: Option<i32>,
-    pub font_family: Option<String>,
+    pub terminal_width_percent: Option<u8>,
+    pub sidebar_width_percent: Option<u8>,
+    pub body_height_percent: Option<u8>,
+    pub tui_terminal_width_percent: Option<u8>,
+    pub tui_sidebar_width_percent: Option<u8>,
+    pub tui_body_height_percent: Option<u8>,
     #[serde(default)]
     pub keybinds: BTreeMap<String, ConfigKeybind>,
 }
@@ -96,34 +106,67 @@ impl AppConfig {
         Ok(())
     }
 
-    pub fn font_family(&self) -> Option<&str> {
-        self.font_family.as_deref()
-    }
-
-    pub fn panel_padding_px(&self) -> Option<i32> {
-        self.panel_padding_px.map(clamp_panel_padding_px)
-    }
-
     pub fn keymap(&self) -> Keymap {
         Keymap::from_config(self)
     }
 
+    pub fn layout_width_percents(&self) -> LayoutWidthPercents {
+        let widths = LayoutWidthPercents {
+            terminal: self
+                .terminal_width_percent
+                .or(self.tui_terminal_width_percent)
+                .unwrap_or(LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT),
+            sidebar: self
+                .sidebar_width_percent
+                .or(self.tui_sidebar_width_percent)
+                .unwrap_or(LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT),
+        };
+        if validate_layout_width_percents(widths) {
+            return widths;
+        }
+
+        log::warn!(
+            "invalid layout width percents: terminal_width_percent={} sidebar_width_percent={} (need terminal > sidebar and terminal + sidebar*2 < 100); using defaults",
+            widths.terminal,
+            widths.sidebar,
+        );
+        LayoutWidthPercents {
+            terminal: LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT,
+            sidebar: LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT,
+        }
+    }
+
+    pub fn layout_body_height_percent(&self) -> u8 {
+        let percent = self
+            .body_height_percent
+            .or(self.tui_body_height_percent)
+            .unwrap_or(LAYOUT_BODY_HEIGHT_PERCENT_DEFAULT);
+        if validate_layout_body_height_percent(percent) {
+            return percent;
+        }
+
+        log::warn!(
+            "invalid layout body height percent: body_height_percent={} (need 1..=100); using default",
+            percent,
+        );
+        LAYOUT_BODY_HEIGHT_PERCENT_DEFAULT
+    }
+
     fn normalize(&mut self) {
-        self.font_family = self
-            .font_family
-            .as_deref()
-            .map(str::trim)
-            .filter(|family| !family.is_empty())
-            .map(str::to_owned);
-        self.panel_padding_px = self.panel_padding_px.map(clamp_panel_padding_px);
         for binding in self.keybinds.values_mut() {
             binding.normalize();
         }
     }
 }
 
-pub fn clamp_panel_padding_px(panel_padding_px: i32) -> i32 {
-    panel_padding_px.clamp(PANEL_PADDING_PX_MIN, PANEL_PADDING_PX_MAX)
+pub fn validate_layout_width_percents(widths: LayoutWidthPercents) -> bool {
+    widths.sidebar > 0
+        && widths.terminal > widths.sidebar
+        && u16::from(widths.terminal) + u16::from(widths.sidebar) * 2 < 100
+}
+
+pub fn validate_layout_body_height_percent(percent: u8) -> bool {
+    (1..=100).contains(&percent)
 }
 
 fn resolved_sequences(config: &AppConfig, spec: &ActionSpec) -> Vec<Vec<KeyStroke>> {

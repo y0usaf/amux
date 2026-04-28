@@ -1,79 +1,16 @@
-use crate::pi::PiSidecarSnapshot;
-use crate::util::now_millis;
-
+#[cfg(test)]
 use super::sidecar_reducer::{apply_snapshot_to_session, reconcile_terminal_note};
-use super::App;
 
 #[cfg(test)]
 pub(super) use super::sidecar_reducer::{
     should_bind_sidecar_session, sidecar_order_update, SidecarApplyResult, SidecarOrderUpdate,
 };
 #[cfg(test)]
+use crate::pi::PiSidecarSnapshot;
+#[cfg(test)]
 use crate::state::Session;
 #[cfg(test)]
 use crate::terminal::TerminalStatus;
-
-impl App {
-    fn apply_sidecar_snapshot(&mut self, snapshot: PiSidecarSnapshot) {
-        if !snapshot.is_valid() {
-            return;
-        }
-
-        let mut matched = None;
-        for (project_index, project) in self.workspace.projects().iter().enumerate() {
-            for (session_index, session) in project.sessions.iter().enumerate() {
-                if session.matches_identity(
-                    snapshot.harness_session_id.as_deref(),
-                    &snapshot.session_id,
-                    snapshot.session_file.as_deref(),
-                ) {
-                    matched = Some((project_index, session_index));
-                    break;
-                }
-            }
-            if matched.is_some() {
-                break;
-            }
-        }
-
-        let Some((project_index, session_index)) = matched else {
-            return;
-        };
-        let selected = self.workspace.selected_project_index() == project_index
-            && self.workspace.selected_session_index() == Some(session_index);
-        let selected_session_key = self
-            .current_session()
-            .map(|session| session.local_id.clone());
-        let update = {
-            let session = &mut self.workspace.projects_mut()[project_index].sessions[session_index];
-            apply_snapshot_to_session(session, &snapshot, selected, now_millis())
-        };
-
-        if update.reordered {
-            self.workspace.projects_mut()[project_index].sort_sessions();
-            self.restore_selection(None, selected_session_key);
-        }
-        if update.promote_project {
-            self.promote_project_to_front(project_index);
-        }
-        self.persist_selection();
-        self.update_window_title();
-    }
-
-    pub(super) fn process_background_events(&mut self) {
-        let mut changed = self.drain_terminal_events();
-        while let Some(snapshot) = self.sidecar.try_recv() {
-            self.apply_sidecar_snapshot(snapshot);
-            changed = true;
-        }
-
-        self.note = reconcile_terminal_note(self.note.as_deref(), self.current_terminal_status());
-
-        if changed {
-            self.request_redraw();
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

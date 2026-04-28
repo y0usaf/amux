@@ -133,16 +133,17 @@ fn blank_single_override_disables_action_bindings() {
 #[test]
 fn conflicting_override_keeps_earlier_action_binding() {
     let mut config = AppConfig::default();
-    config
-        .keybinds
-        .insert("new_session".into(), ConfigKeybind::Single("ctrl+o".into()));
+    config.keybinds.insert(
+        "new_session".into(),
+        ConfigKeybind::Single("ctrl+left".into()),
+    );
 
     let keymap = config.keymap();
     let mut state = KeyChordState::default();
 
     assert_eq!(
-        keymap.advance(&mut state, KeyStroke::parse("ctrl+o").unwrap()),
-        KeymapMatch::Triggered(AppAction::OpenProjectPicker)
+        keymap.advance(&mut state, KeyStroke::parse("ctrl+left").unwrap()),
+        KeymapMatch::Triggered(AppAction::PreviousProject)
     );
     assert_eq!(
         keymap.advance(&mut state, KeyStroke::parse("ctrl+n").unwrap()),
@@ -151,11 +152,8 @@ fn conflicting_override_keeps_earlier_action_binding() {
 }
 
 #[test]
-fn whitespace_in_font_family_and_keybinds_is_normalized() {
-    let mut config = AppConfig {
-        font_family: Some("  Fira Code  ".into()),
-        ..AppConfig::default()
-    };
+fn whitespace_in_keybinds_is_normalized() {
+    let mut config = AppConfig::default();
     config.keybinds.insert(
         "new_session".into(),
         ConfigKeybind::Multiple(vec!["  ctrl+p n  ".into(), "   ".into()]),
@@ -163,7 +161,6 @@ fn whitespace_in_font_family_and_keybinds_is_normalized() {
 
     config.normalize();
 
-    assert_eq!(config.font_family(), Some("Fira Code"));
     let keymap = config.keymap();
     let mut state = KeyChordState::default();
     assert_eq!(
@@ -177,22 +174,63 @@ fn whitespace_in_font_family_and_keybinds_is_normalized() {
 }
 
 #[test]
-fn panel_padding_px_defaults_and_normalizes_to_safe_range() {
-    assert_eq!(AppConfig::default().panel_padding_px(), None);
+fn layout_width_percents_validate_centered_layout_formula() {
+    assert_eq!(
+        AppConfig::default().layout_width_percents(),
+        LayoutWidthPercents {
+            terminal: LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT,
+            sidebar: LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT,
+        }
+    );
+    assert!(validate_layout_width_percents(LayoutWidthPercents {
+        terminal: 50,
+        sidebar: 16,
+    }));
+    assert!(!validate_layout_width_percents(LayoutWidthPercents {
+        terminal: 30,
+        sidebar: 30,
+    }));
+    assert!(!validate_layout_width_percents(LayoutWidthPercents {
+        terminal: 70,
+        sidebar: 15,
+    }));
+}
 
-    let mut compact = AppConfig {
-        panel_padding_px: Some(-4),
+#[test]
+fn invalid_layout_width_percents_fall_back_to_defaults() {
+    let config = AppConfig {
+        tui_terminal_width_percent: Some(70),
+        tui_sidebar_width_percent: Some(15),
         ..AppConfig::default()
     };
-    compact.normalize();
-    assert_eq!(compact.panel_padding_px(), Some(PANEL_PADDING_PX_MIN));
 
-    let mut spacious = AppConfig {
-        panel_padding_px: Some(128),
+    assert_eq!(
+        config.layout_width_percents(),
+        LayoutWidthPercents {
+            terminal: LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT,
+            sidebar: LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT,
+        }
+    );
+}
+
+#[test]
+fn layout_body_height_percent_validates_range() {
+    assert_eq!(
+        AppConfig::default().layout_body_height_percent(),
+        LAYOUT_BODY_HEIGHT_PERCENT_DEFAULT
+    );
+    assert!(validate_layout_body_height_percent(1));
+    assert!(validate_layout_body_height_percent(100));
+    assert!(!validate_layout_body_height_percent(0));
+
+    let config = AppConfig {
+        tui_body_height_percent: Some(0),
         ..AppConfig::default()
     };
-    spacious.normalize();
-    assert_eq!(spacious.panel_padding_px(), Some(PANEL_PADDING_PX_MAX));
+    assert_eq!(
+        config.layout_body_height_percent(),
+        LAYOUT_BODY_HEIGHT_PERCENT_DEFAULT
+    );
 }
 
 #[test]
@@ -219,22 +257,4 @@ fn non_matching_second_stroke_falls_back_to_fresh_lookup() {
         KeymapMatch::Triggered(AppAction::PreviousProject)
     );
     assert!(state.pending().is_empty());
-}
-
-#[test]
-fn hints_for_prefix_include_child_action_metadata() {
-    let mut config = AppConfig::default();
-    config.keybinds.insert(
-        "new_session".into(),
-        ConfigKeybind::Single("ctrl+p n".into()),
-    );
-
-    let keymap = config.keymap();
-    let prefix = vec![KeyStroke::parse("ctrl+p").unwrap()];
-    let hints = keymap.hints_for_prefix(&prefix);
-
-    assert_eq!(hints.len(), 1);
-    assert_eq!(hints[0].stroke, KeyStroke::parse("n").unwrap());
-    assert_eq!(hints[0].action, Some(AppAction::NewSession));
-    assert!(!hints[0].has_children);
 }

@@ -1,6 +1,7 @@
 #[path = "app/mod.rs"]
 pub mod app;
 pub mod config;
+pub mod notify;
 pub mod pi;
 #[path = "render/mod.rs"]
 pub mod render;

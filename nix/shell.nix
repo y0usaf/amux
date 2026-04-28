@@ -6,22 +6,11 @@
   rustfmt,
   clippy,
   pkg-config,
-  fontconfig,
-  freetype,
-  libGL,
-  libxkbcommon,
-  vulkan-loader,
   wayland,
-  libxcb,
-  libx11,
-  libxcursor,
-  libxi,
-  libxrandr,
   libcap,
   xz,
   openssl,
   zlib,
-  zenity,
 }: let
   acpRuntimeLibs = [libcap xz openssl zlib];
 in
@@ -32,18 +21,7 @@ mkShell {
     rustfmt
     clippy
     pkg-config
-    fontconfig
-    freetype
-    libGL
-    libxkbcommon
-    vulkan-loader
     wayland
-    libxcb
-    libx11
-    libxcursor
-    libxi
-    libxrandr
-    zenity
   ];
 
   shellHook = ''

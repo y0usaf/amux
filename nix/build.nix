@@ -2,32 +2,23 @@
   lib,
   crane,
   rustPlatform,
-  makeWrapper,
   pkg-config,
-  fontconfig,
-  freetype,
-  libGL,
-  libxkbcommon,
-  vulkan-loader,
   wayland,
-  libxcb,
-  libx11,
-  libxcursor,
-  libxi,
-  libxrandr,
   libcap,
   xz,
   openssl,
   zlib,
-  zenity,
+  binaryName ? "pi-harness",
+  pname ? binaryName,
+  cargoPackage ? pname,
 }: let
-  pname = "pi-harness";
   acpRuntimeLibs = [libcap xz openssl zlib];
   craneLib = crane;
   src = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [
       ../src
+      ../crates
       ../pi-extension/harness-sidechannel.js
       ../Cargo.toml
       ../Cargo.lock
@@ -37,25 +28,14 @@
   commonArgs = {
     inherit pname src;
     version = (builtins.fromTOML (builtins.readFile ../Cargo.toml)).package.version;
+    cargoExtraArgs = "--package ${cargoPackage} --bin ${binaryName}";
     cargoLock = ../Cargo.lock;
 
-    nativeBuildInputs = [pkg-config rustPlatform.bindgenHook makeWrapper];
-    buildInputs = [
-      fontconfig
-      freetype
-      libGL
-      libxkbcommon
-      vulkan-loader
-      wayland
-      libxcb
-      libx11
-      libxcursor
-      libxi
-      libxrandr
-    ];
+    nativeBuildInputs = [pkg-config rustPlatform.bindgenHook];
+    buildInputs = [wayland];
 
     env = {
-      NIX_LDFLAGS = "-rpath ${lib.makeLibraryPath [vulkan-loader wayland libGL libxkbcommon]}";
+      NIX_LDFLAGS = "-rpath ${lib.makeLibraryPath [wayland]}";
       ACP_RUNTIME_LIBS = lib.makeLibraryPath acpRuntimeLibs;
     };
 
@@ -78,10 +58,5 @@ in
         $out/share/pi-harness/pi-extension/harness-sidechannel.js
     '';
 
-    postFixup = ''
-      wrapProgram $out/bin/pi-harness \
-        --prefix PATH : ${lib.makeBinPath [zenity fontconfig]}
-    '';
-
-    meta.mainProgram = pname;
+    meta.mainProgram = binaryName;
   })

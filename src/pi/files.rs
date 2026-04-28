@@ -76,9 +76,19 @@ fn move_file_into_dir_with_fallback(source: &Path, dest_dir: &Path) -> Result<()
         .map_err(|error| format!("cannot create {}: {error}", dest_dir.display()))?;
 
     let dest = dest_dir.join(file_name);
-    if dest.exists() {
+    if path_exists(&dest)? {
+        if path_exists(source)? {
+            return Err(format!(
+                "cannot move {} -> {}: destination exists",
+                source.display(),
+                dest.display()
+            ));
+        }
+        return Ok(());
+    }
+    if !path_exists(source)? {
         return Err(format!(
-            "cannot move {} -> {}: destination exists",
+            "cannot move {} -> {}: source missing",
             source.display(),
             dest.display()
         ));
@@ -87,6 +97,9 @@ fn move_file_into_dir_with_fallback(source: &Path, dest_dir: &Path) -> Result<()
     match std::fs::rename(source, &dest) {
         Ok(()) => Ok(()),
         Err(rename_error) => {
+            if path_exists(&dest).unwrap_or(false) && !path_exists(source).unwrap_or(true) {
+                return Ok(());
+            }
             std::fs::copy(source, &dest).map_err(|copy_error| {
                 format!(
                     "cannot move {} -> {}: rename failed ({rename_error}); copy failed ({copy_error})",
@@ -104,6 +117,11 @@ fn move_file_into_dir_with_fallback(source: &Path, dest_dir: &Path) -> Result<()
             Ok(())
         }
     }
+}
+
+fn path_exists(path: &Path) -> Result<bool, String> {
+    path.try_exists()
+        .map_err(|error| format!("cannot inspect {}: {error}", path.display()))
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -300,6 +318,25 @@ mod tests {
         assert!(err.contains("destination exists"));
         assert_eq!(fs::read_to_string(&source).unwrap(), "new-payload");
         assert_eq!(fs::read_to_string(&restored).unwrap(), "existing-payload");
+    }
+
+    #[test]
+    fn archive_session_file_treats_existing_archive_and_missing_source_as_success() {
+        let home = TestDir::new();
+        let _guard = EnvGuard::set("HOME", home.path());
+        let source_dir = home.path().join("sessions");
+        fs::create_dir_all(&source_dir).unwrap();
+        let source = source_dir.join("session.jsonl");
+
+        let archive_dir = home.path().join(LIVE_ROOT_REL).join(ARCHIVE_DIR_NAME);
+        fs::create_dir_all(&archive_dir).unwrap();
+        let archived = archive_dir.join("session.jsonl");
+        fs::write(&archived, "archived-payload").unwrap();
+
+        archive_session_file(&source).unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(fs::read_to_string(&archived).unwrap(), "archived-payload");
     }
 
     #[test]
