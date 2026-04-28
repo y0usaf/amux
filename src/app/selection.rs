@@ -1,7 +1,5 @@
 use crate::state::{Project, Session};
 
-use super::App;
-
 pub(super) fn session_index_for_restore_key(sessions: &[Session], key: &str) -> Option<usize> {
     sessions
         .iter()
@@ -52,24 +50,6 @@ pub(super) fn next_selectable_session_index(
         .copied()
         .find(|index| *index >= anchor_index)
         .or_else(|| visible.last().copied())
-}
-
-impl App {
-    pub(super) fn current_project(&self) -> Option<&Project> {
-        self.workspace.current_project()
-    }
-
-    pub(super) fn current_session(&self) -> Option<&Session> {
-        self.workspace.current_session()
-    }
-
-    pub(super) fn current_session_visible_in_sidebar(&self) -> bool {
-        self.workspace.current_session_visible_in_sidebar()
-    }
-
-    pub(super) fn persist_selection(&mut self) {
-        self.workspace.persist_selection();
-    }
 }
 
 #[cfg(test)]

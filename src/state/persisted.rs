@@ -12,8 +12,6 @@ pub struct PersistedState {
     pub projects: Vec<String>,
     pub selected_project: Option<String>,
     pub selected_session: Option<String>,
-    #[serde(default, skip_serializing)]
-    pub ui_scale: Option<f32>,
 }
 
 impl PersistedState {

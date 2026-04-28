@@ -1,9 +1,7 @@
-use crate::render::{Color, TextRenderer};
-use crate::state::Session;
+use crate::render::Color;
+use crate::state::{Project, Session};
 
-use super::layout::{panel_content_rect, CellRect, Rect};
 use super::theme::{ACCENT, MUTED, RUNNING, TEXT, WARNING};
-use super::App;
 
 pub(super) const SIDEBAR_SPINNER_FRAMES: &[&str] =
     &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -38,17 +36,18 @@ pub(super) struct SidebarRow {
     pub(super) status: Option<SidebarStatusKind>,
 }
 
-impl SidebarRow {
-    pub(super) fn is_hoverable(&self) -> bool {
-        !matches!(self.kind, SidebarRowKind::Label)
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // anchor_row = selected project's header when one exists; selected_row = active row.
 pub(super) struct SidebarSelectionSpan {
     pub(super) anchor_row: usize,
     pub(super) selected_row: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct SidebarViewportItem {
+    pub(super) row_index: usize,
+    pub(super) visible_row: usize,
+    pub(super) sticky: bool,
 }
 
 fn clamp_scroll_into_range(current_scroll: usize, min_scroll: usize, max_scroll: usize) -> usize {
@@ -147,6 +146,42 @@ pub(super) fn sticky_sidebar_anchor_row(
         .then_some(span.anchor_row)
 }
 
+pub(super) fn sidebar_viewport_items(
+    rows: &[SidebarRow],
+    scroll: usize,
+    visible_rows: usize,
+    sticky_row_index: Option<usize>,
+) -> Vec<SidebarViewportItem> {
+    if visible_rows == 0 {
+        return Vec::new();
+    }
+
+    let mut items = Vec::new();
+    let body_start = usize::from(sticky_row_index.is_some());
+    if let Some(row_index) = sticky_row_index.filter(|row_index| rows.get(*row_index).is_some()) {
+        items.push(SidebarViewportItem {
+            row_index,
+            visible_row: 0,
+            sticky: true,
+        });
+    }
+
+    let body_rows = visible_rows.saturating_sub(body_start);
+    items.extend(
+        rows.iter()
+            .enumerate()
+            .skip(scroll)
+            .take(body_rows)
+            .enumerate()
+            .map(|(offset, (row_index, _))| SidebarViewportItem {
+                row_index,
+                visible_row: body_start + offset,
+                sticky: false,
+            }),
+    );
+    items
+}
+
 pub(super) fn session_sidebar_status(session: &Session) -> Option<SidebarStatusKind> {
     if session.runtime.running {
         Some(SidebarStatusKind::Active)
@@ -178,30 +213,74 @@ pub(super) fn sidebar_status_glyph(status: SidebarStatusKind, now_ms: u64) -> &'
     }
 }
 
-impl App {
-    pub(super) fn has_sidebar_spinner(&self) -> bool {
-        self.workspace
-            .projects()
-            .iter()
-            .flat_map(|project| project.sessions.iter())
-            .any(|session| session.runtime.running || session.runtime.queued)
+pub(super) fn sidebar_has_spinner(projects: &[Project]) -> bool {
+    projects
+        .iter()
+        .flat_map(|project| project.sessions.iter())
+        .any(|session| session.runtime.running || session.runtime.queued)
+}
+
+pub(super) fn build_sidebar_rows(
+    projects: &[Project],
+    selected_project: usize,
+    selected_session: Option<usize>,
+    selected_session_visible: bool,
+) -> Vec<SidebarRow> {
+    let mut rows = vec![SidebarRow {
+        kind: SidebarRowKind::ActionOpenProject,
+        text: "+ NEW PROJECT".to_string(),
+        fg: ACCENT,
+        bg: None,
+        inverted: projects.is_empty(),
+        status: None,
+    }];
+
+    if !projects.is_empty() {
+        rows.push(SidebarRow {
+            kind: SidebarRowKind::Label,
+            text: String::new(),
+            fg: MUTED,
+            bg: None,
+            inverted: false,
+            status: None,
+        });
     }
 
-    pub(super) fn sidebar_rows(&self) -> Vec<SidebarRow> {
-        let projects = self.workspace.projects();
-        let selected_project = self.workspace.selected_project_index();
-        let selected_session = self.workspace.selected_session_index();
-        let mut rows = vec![SidebarRow {
-            kind: SidebarRowKind::ActionOpenProject,
-            text: "+ NEW PROJECT".to_string(),
-            fg: ACCENT,
+    for (project_index, project) in projects.iter().enumerate() {
+        let project_selected = project_index == selected_project;
+        rows.push(SidebarRow {
+            kind: SidebarRowKind::Project(project_index),
+            text: project.name.to_uppercase(),
+            fg: if project_selected { ACCENT } else { TEXT },
             bg: None,
-            inverted: projects.is_empty(),
+            inverted: project_selected,
             status: None,
-        }];
-        let selected_session_visible = self.current_session_visible_in_sidebar();
+        });
 
-        if !projects.is_empty() {
+        for (session_index, session) in project.sessions.iter().enumerate() {
+            if !session.should_render_in_sidebar() {
+                continue;
+            }
+            let selected = project_selected
+                && selected_session_visible
+                && Some(session_index) == selected_session;
+            let status = session_sidebar_status(session);
+            rows.push(SidebarRow {
+                kind: SidebarRowKind::Session {
+                    project_index,
+                    session_index,
+                },
+                text: session.name.clone(),
+                fg: status
+                    .map(sidebar_status_color)
+                    .unwrap_or(if selected { TEXT } else { MUTED }),
+                bg: None,
+                inverted: selected,
+                status,
+            });
+        }
+
+        if project_index + 1 < projects.len() {
             rows.push(SidebarRow {
                 kind: SidebarRowKind::Label,
                 text: String::new(),
@@ -211,221 +290,109 @@ impl App {
                 status: None,
             });
         }
+    }
 
-        for (project_index, project) in projects.iter().enumerate() {
-            let project_selected = project_index == selected_project;
-            rows.push(SidebarRow {
-                kind: SidebarRowKind::Project(project_index),
-                text: project.name.to_uppercase(),
-                fg: if project_selected { ACCENT } else { TEXT },
-                bg: None,
-                inverted: project_selected,
-                status: None,
-            });
+    rows
+}
 
-            for (session_index, session) in project.sessions.iter().enumerate() {
-                if !session.should_render_in_sidebar() {
-                    continue;
-                }
-                let selected = project_selected
-                    && selected_session_visible
-                    && Some(session_index) == selected_session;
-                let status = session_sidebar_status(session);
-                rows.push(SidebarRow {
-                    kind: SidebarRowKind::Session {
-                        project_index,
-                        session_index,
-                    },
-                    text: session.name.clone(),
-                    fg: status.map(sidebar_status_color).unwrap_or(if selected {
-                        TEXT
-                    } else {
-                        MUTED
-                    }),
-                    bg: None,
-                    inverted: selected,
-                    status,
-                });
-            }
-
-            if project_index + 1 < projects.len() {
-                rows.push(SidebarRow {
-                    kind: SidebarRowKind::Label,
-                    text: String::new(),
-                    fg: MUTED,
-                    bg: None,
-                    inverted: false,
-                    status: None,
-                });
-            }
+pub(super) fn selected_sidebar_row_index_for_state(
+    projects_empty: bool,
+    selected_project: usize,
+    selected_session: Option<usize>,
+    selected_session_visible: bool,
+    rows: &[SidebarRow],
+) -> Option<usize> {
+    rows.iter().position(|row| match row.kind {
+        SidebarRowKind::ActionOpenProject => projects_empty,
+        SidebarRowKind::Project(project_index) => {
+            project_index == selected_project && !selected_session_visible
         }
-
-        rows
-    }
-
-    pub(super) fn sidebar_visible_rows(&self, rect: CellRect, panel_pad_cells: i32) -> usize {
-        panel_content_rect(rect, panel_pad_cells).rows.max(0) as usize
-    }
-
-    pub(super) fn selected_sidebar_row_index(&self, rows: &[SidebarRow]) -> Option<usize> {
-        let selected_session_visible = self.current_session_visible_in_sidebar();
-        let selected_project = self.workspace.selected_project_index();
-        let selected_session = self.workspace.selected_session_index();
-        rows.iter().position(|row| match row.kind {
-            SidebarRowKind::ActionOpenProject => self.workspace.projects().is_empty(),
-            SidebarRowKind::Project(project_index) => {
-                project_index == selected_project && !selected_session_visible
-            }
-            SidebarRowKind::Session {
-                project_index,
-                session_index,
-            } => {
-                selected_session_visible
-                    && project_index == selected_project
-                    && Some(session_index) == selected_session
-            }
-            SidebarRowKind::Label => false,
-        })
-    }
-
-    pub(super) fn selected_sidebar_selection_span(
-        &self,
-        rows: &[SidebarRow],
-    ) -> Option<SidebarSelectionSpan> {
-        let selected_row = self.selected_sidebar_row_index(rows)?;
-        let selected_project = self.workspace.selected_project_index();
-        let anchor_row = rows
-            .iter()
-            .position(|row| matches!(row.kind, SidebarRowKind::Project(index) if index == selected_project))
-            .unwrap_or(selected_row);
-        Some(SidebarSelectionSpan {
-            anchor_row,
-            selected_row,
-        })
-    }
-
-    pub(super) fn sticky_sidebar_anchor_row_index(
-        &self,
-        rows: &[SidebarRow],
-        visible_rows: usize,
-    ) -> Option<usize> {
-        self.selected_sidebar_selection_span(rows)
-            .and_then(|span| sticky_sidebar_anchor_row(self.sidebar_scroll, visible_rows, span))
-    }
-
-    pub(super) fn sidebar_row_index_at_visible_row(
-        &self,
-        rows: &[SidebarRow],
-        visible_rows: usize,
-        visible_row: usize,
-    ) -> Option<usize> {
-        if visible_row >= visible_rows {
-            return None;
+        SidebarRowKind::Session {
+            project_index,
+            session_index,
+        } => {
+            selected_session_visible
+                && project_index == selected_project
+                && Some(session_index) == selected_session
         }
+        SidebarRowKind::Label => false,
+    })
+}
 
-        let sticky_row = self.sticky_sidebar_anchor_row_index(rows, visible_rows);
-        let row_index = match sticky_row {
-            Some(anchor_row) if visible_row == 0 => anchor_row,
-            Some(_) => self.sidebar_scroll + visible_row.saturating_sub(1),
-            None => self.sidebar_scroll + visible_row,
-        };
-        rows.get(row_index).map(|_| row_index)
-    }
-
-    pub(super) fn hovered_sidebar_row_index(
-        &self,
-        rect: Rect,
-        text: &TextRenderer,
-        rows: &[SidebarRow],
-        visible_rows: usize,
-        panel_pad_cells: i32,
-    ) -> Option<usize> {
-        if !rect.contains(self.cursor_pos.0, self.cursor_pos.1) {
-            return None;
-        }
-
-        let cell_h = text.metrics.cell_height.max(1);
-        let local_y = self.cursor_pos.1 as i32 - rect.y - (1 + panel_pad_cells) * cell_h;
-        if local_y < 0 {
-            return None;
-        }
-
-        let visible_row = (local_y / cell_h) as usize;
-        let row_index = self.sidebar_row_index_at_visible_row(rows, visible_rows, visible_row)?;
-        rows.get(row_index)
-            .is_some_and(SidebarRow::is_hoverable)
-            .then_some(row_index)
-    }
-
-    pub(super) fn hovered_sidebar_row_index_for_cursor(&self) -> Option<usize> {
-        let (Some(window), Some(text)) = (&self.window, &self.text) else {
-            return None;
-        };
-        let size = window.inner_size();
-        let layout = self.compute_layout(size.width as i32, size.height as i32, text);
-        let rows = self.sidebar_rows();
-        let visible_rows =
-            self.sidebar_visible_rows(layout.sidebar_cells, layout.spacing.panel_pad_cells);
-        self.hovered_sidebar_row_index(
-            layout.sidebar,
-            text,
-            &rows,
-            visible_rows,
-            layout.spacing.panel_pad_cells,
+pub(super) fn selected_sidebar_selection_span_for_state(
+    projects_empty: bool,
+    selected_project: usize,
+    selected_session: Option<usize>,
+    selected_session_visible: bool,
+    rows: &[SidebarRow],
+) -> Option<SidebarSelectionSpan> {
+    let selected_row = selected_sidebar_row_index_for_state(
+        projects_empty,
+        selected_project,
+        selected_session,
+        selected_session_visible,
+        rows,
+    )?;
+    let anchor_row = rows
+        .iter()
+        .position(
+            |row| matches!(row.kind, SidebarRowKind::Project(index) if index == selected_project),
         )
+        .unwrap_or(selected_row);
+    Some(SidebarSelectionSpan {
+        anchor_row,
+        selected_row,
+    })
+}
+
+pub(super) fn clamp_sidebar_scroll_value(
+    current_scroll: usize,
+    row_count: usize,
+    visible_rows: usize,
+) -> usize {
+    current_scroll.min(row_count.saturating_sub(visible_rows))
+}
+
+pub(super) fn ensure_sidebar_selection_visible_for_state(
+    current_scroll: usize,
+    projects_empty: bool,
+    selected_project: usize,
+    selected_session: Option<usize>,
+    selected_session_visible: bool,
+    rows: &[SidebarRow],
+    visible_rows: usize,
+) -> usize {
+    let current_scroll = clamp_sidebar_scroll_value(current_scroll, rows.len(), visible_rows);
+    let Some(span) = selected_sidebar_selection_span_for_state(
+        projects_empty,
+        selected_project,
+        selected_session,
+        selected_session_visible,
+        rows,
+    ) else {
+        return current_scroll;
+    };
+    sync_sidebar_scroll_to_selection_span(current_scroll, rows.len(), visible_rows, span)
+}
+
+pub(super) fn scroll_sidebar_by_rows_value(
+    current_scroll: usize,
+    delta_rows: i32,
+    visible_rows: usize,
+    row_count: usize,
+) -> (usize, bool) {
+    if delta_rows == 0 || row_count == 0 {
+        return (current_scroll, false);
     }
 
-    pub(super) fn clamp_sidebar_scroll(&mut self, row_count: usize, visible_rows: usize) {
-        let max_scroll = row_count.saturating_sub(visible_rows);
-        self.sidebar_scroll = self.sidebar_scroll.min(max_scroll);
-    }
-
-    pub(super) fn ensure_sidebar_selection_visible(
-        &mut self,
-        rows: &[SidebarRow],
-        visible_rows: usize,
-    ) {
-        self.clamp_sidebar_scroll(rows.len(), visible_rows);
-        let Some(span) = self.selected_sidebar_selection_span(rows) else {
-            return;
-        };
-        self.sidebar_scroll = sync_sidebar_scroll_to_selection_span(
-            self.sidebar_scroll,
-            rows.len(),
-            visible_rows,
-            span,
-        );
-    }
-
-    pub(super) fn scroll_sidebar_by_rows(
-        &mut self,
-        delta_rows: i32,
-        visible_rows: usize,
-        row_count: usize,
-    ) -> bool {
-        if delta_rows == 0 || row_count == 0 {
-            return false;
-        }
-
-        self.clamp_sidebar_scroll(row_count, visible_rows);
-        let next = if delta_rows > 0 {
-            self.sidebar_scroll.saturating_add(delta_rows as usize)
-        } else {
-            self.sidebar_scroll
-                .saturating_sub(delta_rows.unsigned_abs() as usize)
-        };
-        let next = next.min(row_count.saturating_sub(visible_rows));
-        if next == self.sidebar_scroll {
-            return false;
-        }
-
-        self.sidebar_scroll = next;
-        true
-    }
-
-    pub(super) fn sync_sidebar_to_selection(&mut self) {
-        self.sidebar_sync_to_selection = true;
-    }
+    let current_scroll = clamp_sidebar_scroll_value(current_scroll, row_count, visible_rows);
+    let next = if delta_rows > 0 {
+        current_scroll.saturating_add(delta_rows as usize)
+    } else {
+        current_scroll.saturating_sub(delta_rows.unsigned_abs() as usize)
+    };
+    let next = next.min(row_count.saturating_sub(visible_rows));
+    (next, next != current_scroll)
 }
 
 #[cfg(test)]
@@ -498,5 +465,27 @@ mod tests {
         };
 
         assert_eq!(sticky_sidebar_anchor_row(16, 5, span), None);
+    }
+
+    #[test]
+    fn viewport_items_reserve_first_row_for_sticky_header() {
+        let rows: Vec<_> = (0..20)
+            .map(|index| SidebarRow {
+                kind: SidebarRowKind::Label,
+                text: index.to_string(),
+                fg: TEXT,
+                bg: None,
+                inverted: false,
+                status: None,
+            })
+            .collect();
+
+        let items = sidebar_viewport_items(&rows, 12, 5, Some(10));
+
+        assert_eq!(items.len(), 5);
+        assert_eq!(items[0].row_index, 10);
+        assert!(items[0].sticky);
+        assert_eq!(items[1].row_index, 12);
+        assert_eq!(items[1].visible_row, 1);
     }
 }

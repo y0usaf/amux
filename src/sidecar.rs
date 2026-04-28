@@ -6,8 +6,7 @@ use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 
-use winit::event_loop::EventLoopProxy;
-
+use crate::notify::Notify;
 use crate::pi::PiSidecarSnapshot;
 use stream::read_sidecar_stream;
 
@@ -17,7 +16,7 @@ pub struct SidecarListener {
 }
 
 impl SidecarListener {
-    pub fn start(proxy: EventLoopProxy<()>, socket_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn start(notify: Notify, socket_path: PathBuf) -> anyhow::Result<Self> {
         let Some(parent) = socket_path.parent() else {
             anyhow::bail!("sidecar socket has no parent: {}", socket_path.display());
         };
@@ -36,10 +35,10 @@ impl SidecarListener {
                     match incoming {
                         Ok(stream) => {
                             let tx = tx.clone();
-                            let proxy = proxy.clone();
+                            let notify = notify.clone();
                             let _ = std::thread::Builder::new()
                                 .name("pi-harness-sidecar-stream".into())
-                                .spawn(move || read_sidecar_stream(stream, tx, proxy));
+                                .spawn(move || read_sidecar_stream(stream, tx, notify));
                         }
                         Err(_) => break,
                     }

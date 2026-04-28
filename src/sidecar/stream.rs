@@ -2,19 +2,16 @@ use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc;
 
-use winit::event_loop::EventLoopProxy;
-
+use crate::notify::Notify;
 use crate::pi::PiSidecarSnapshot;
 
 pub(super) fn read_sidecar_stream(
     stream: UnixStream,
     tx: mpsc::Sender<PiSidecarSnapshot>,
-    proxy: EventLoopProxy<()>,
+    notify: Notify,
 ) {
     let reader = BufReader::new(stream);
-    read_sidecar_stream_from_reader(reader, tx, || {
-        let _ = proxy.send_event(());
-    });
+    read_sidecar_stream_from_reader(reader, tx, || notify());
 }
 
 fn read_sidecar_stream_from_reader<R, F>(

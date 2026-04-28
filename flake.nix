@@ -1,5 +1,5 @@
 {
-  description = "Minimal Pi desktop harness";
+  description = "Minimal Pi terminal harness";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -29,6 +29,15 @@
       default = pi-harness;
       pi-harness = pkgs.callPackage ./nix/build.nix {
         crane = crane.mkLib pkgs;
+        pname = "pi-harness";
+        cargoPackage = "pi-harness-tui";
+        binaryName = "pi-harness";
+      };
+      pi-harness-tui = pkgs.callPackage ./nix/build.nix {
+        crane = crane.mkLib pkgs;
+        pname = "pi-harness-tui";
+        cargoPackage = "pi-harness-tui";
+        binaryName = "pi-harness-tui";
       };
     });
 

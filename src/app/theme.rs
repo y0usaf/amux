@@ -1,51 +1,13 @@
 use crate::render::Color;
-use crate::state::Session;
-use crate::terminal::TerminalStatus;
-
-pub(super) const FONT_SIZE: f32 = 15.0;
-pub(super) const UI_SCALE_DEFAULT: f32 = 1.0;
-const UI_SCALE_MIN: f32 = 0.75;
-const UI_SCALE_MAX: f32 = 3.0;
-pub(super) const UI_SCALE_STEP: f32 = 0.125;
-pub(super) const BG: Color = Color::rgb(8, 10, 14);
-pub(super) const SURFACE: Color = Color::rgb(14, 17, 23);
-pub(super) const SURFACE_ALT: Color = Color::rgb(18, 22, 29);
-pub(super) const BORDER: Color = Color::rgb(42, 48, 60);
 pub(super) const TEXT: Color = ansi_index_to_color_const(7);
 pub(super) const MUTED: Color = ansi_index_to_color_const(8);
 pub(super) const ACCENT: Color = ansi_index_to_color_const(12);
 pub(super) const RUNNING: Color = ansi_index_to_color_const(10);
 pub(super) const WARNING: Color = ansi_index_to_color_const(11);
-const ERROR: Color = ansi_index_to_color_const(9);
 const CURSOR: Color = Color::rgb(188, 204, 255);
-pub(super) const TERM_BG: Color = Color::rgb(10, 13, 18);
 pub(super) const TERM_FG: Color = TEXT;
 const TERM_SELECTION_BG: Color = Color::rgb(53, 92, 173);
 const TERM_SELECTION_FG: Color = Color::rgb(245, 248, 255);
-
-pub(super) fn clamp_ui_scale(ui_scale: f32) -> f32 {
-    ui_scale.clamp(UI_SCALE_MIN, UI_SCALE_MAX)
-}
-
-pub(super) fn status_color(
-    session: Option<&Session>,
-    terminal_status: Option<&TerminalStatus>,
-) -> Color {
-    if let Some(session) = session {
-        if session.runtime.running {
-            return RUNNING;
-        }
-        if session.runtime.queued {
-            return WARNING;
-        }
-    }
-    match terminal_status {
-        Some(TerminalStatus::Error(_)) => ERROR,
-        Some(TerminalStatus::Exited(_)) => WARNING,
-        Some(TerminalStatus::Launching | TerminalStatus::Running) => ACCENT,
-        Some(TerminalStatus::Empty) | None => MUTED,
-    }
-}
 
 pub(super) fn screen_cell_colors(
     cell: &vt100::Cell,
@@ -74,25 +36,6 @@ pub(super) fn screen_cell_colors(
     }
 
     (fg, bg)
-}
-
-#[cfg(test)]
-pub(super) fn theme_palette_index(color: Color) -> Option<u8> {
-    if color == TEXT {
-        Some(7)
-    } else if color == MUTED {
-        Some(8)
-    } else if color == ERROR {
-        Some(9)
-    } else if color == RUNNING {
-        Some(10)
-    } else if color == WARNING {
-        Some(11)
-    } else if color == ACCENT {
-        Some(12)
-    } else {
-        None
-    }
 }
 
 fn terminal_color(color: vt100::Color, default: Color) -> Color {
@@ -172,65 +115,14 @@ fn fade_toward(color: Color, target: Color, mix: u8) -> Color {
 #[cfg(test)]
 mod tests {
     use super::{
-        ansi_index_to_color, brighten, clamp_ui_scale, fade_toward, screen_cell_colors,
-        status_color, ACCENT, CURSOR, ERROR, MUTED, RUNNING, TERM_BG, TERM_FG, TERM_SELECTION_BG,
-        TERM_SELECTION_FG, UI_SCALE_MAX, UI_SCALE_MIN, WARNING,
+        ansi_index_to_color, brighten, fade_toward, screen_cell_colors, CURSOR, TERM_FG,
+        TERM_SELECTION_BG, TERM_SELECTION_FG,
     };
     use crate::render::Color;
-    use crate::state::Session;
-    use crate::terminal::TerminalStatus;
-
-    fn session_with_runtime(running: bool, queued: bool) -> Session {
-        let mut session = Session::new_draft();
-        session.runtime.running = running;
-        session.runtime.queued = queued;
-        session
-    }
-
     fn cell_from_bytes(bytes: &[u8]) -> vt100::Cell {
         let mut parser = vt100::Parser::new(1, 8, 0);
         parser.process(bytes);
         parser.screen().cell(0, 0).unwrap().clone()
-    }
-
-    #[test]
-    fn clamp_ui_scale_respects_bounds_and_interior_values() {
-        assert_eq!(clamp_ui_scale(UI_SCALE_MIN - 1.0), UI_SCALE_MIN);
-        assert_eq!(clamp_ui_scale(1.5), 1.5);
-        assert_eq!(clamp_ui_scale(UI_SCALE_MAX + 1.0), UI_SCALE_MAX);
-    }
-
-    #[test]
-    fn status_color_prioritizes_session_runtime_over_terminal_status() {
-        let running = session_with_runtime(true, false);
-        let queued = session_with_runtime(false, true);
-
-        assert_eq!(
-            status_color(Some(&running), Some(&TerminalStatus::Error("boom".into()))),
-            RUNNING
-        );
-        assert_eq!(
-            status_color(Some(&queued), Some(&TerminalStatus::Running)),
-            WARNING
-        );
-    }
-
-    #[test]
-    fn status_color_falls_back_to_terminal_status_when_session_is_idle() {
-        let idle = session_with_runtime(false, false);
-
-        assert_eq!(
-            status_color(Some(&idle), Some(&TerminalStatus::Error("boom".into()))),
-            ERROR
-        );
-        assert_eq!(
-            status_color(None, Some(&TerminalStatus::Exited("0".into()))),
-            WARNING
-        );
-        assert_eq!(status_color(None, Some(&TerminalStatus::Launching)), ACCENT);
-        assert_eq!(status_color(None, Some(&TerminalStatus::Running)), ACCENT);
-        assert_eq!(status_color(None, Some(&TerminalStatus::Empty)), MUTED);
-        assert_eq!(status_color(None, None), MUTED);
     }
 
     #[test]
@@ -271,8 +163,9 @@ mod tests {
     #[test]
     fn terminal_cell_colors_apply_selection_and_cursor_after_style_processing() {
         let bold_dim_inverse = cell_from_bytes(b"\x1b[1;2;7mX");
-        let selected = screen_cell_colors(&bold_dim_inverse, false, true, TERM_FG, TERM_BG);
-        let cursor = screen_cell_colors(&bold_dim_inverse, true, false, TERM_FG, TERM_BG);
+        let term_bg = Color::rgb(10, 13, 18);
+        let selected = screen_cell_colors(&bold_dim_inverse, false, true, TERM_FG, term_bg);
+        let cursor = screen_cell_colors(&bold_dim_inverse, true, false, TERM_FG, term_bg);
 
         assert_eq!(selected, (TERM_SELECTION_FG, TERM_SELECTION_BG));
         assert_eq!(cursor, (Color::rgb(9, 12, 18), CURSOR));
@@ -284,11 +177,11 @@ mod tests {
         let styled = cell_from_bytes(b"\x1b[31;44;1;2;7mX");
 
         assert_eq!(
-            screen_cell_colors(&plain, false, false, TERM_FG, TERM_BG),
-            (TERM_FG, TERM_BG)
+            screen_cell_colors(&plain, false, false, TERM_FG, Color::rgb(10, 13, 18)),
+            (TERM_FG, Color::rgb(10, 13, 18))
         );
         assert_eq!(
-            screen_cell_colors(&styled, false, false, TERM_FG, TERM_BG),
+            screen_cell_colors(&styled, false, false, TERM_FG, Color::rgb(10, 13, 18)),
             (Color::rgb(175, 143, 201), Color::rgb(247, 118, 142))
         );
     }

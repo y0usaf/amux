@@ -1,5 +1,6 @@
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::PathBuf;
 
 use crate::pi;
 use crate::state::{merge_scanned_sessions, PersistedState, Project, Session};
@@ -16,6 +17,12 @@ pub(super) struct SessionArchiveTarget {
     pub(super) session_index: usize,
     pub(super) session_id: String,
     pub(super) session_file: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct OpenProjectResult {
+    pub(super) path: PathBuf,
+    pub(super) added: bool,
 }
 
 pub(super) struct Workspace {
@@ -160,30 +167,6 @@ impl Workspace {
         }
     }
 
-    pub(super) fn add_project(&mut self, path: &Path) -> Result<(), String> {
-        let path = normalize_project_path(path);
-        if !path.exists() || !path.is_dir() {
-            return Err(format!("invalid project path: {}", path.display()));
-        }
-        if let Some(project_index) = self
-            .projects
-            .iter()
-            .position(|project| project.path == path)
-        {
-            self.select_project(project_index);
-            return Ok(());
-        }
-
-        let mut project = Project::new(path.clone());
-        merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&path));
-        project.sort_sessions();
-        self.projects.push(project);
-        self.selected_project = self.projects.len() - 1;
-        self.selected_session = self.ensure_default_session_for_project(self.selected_project);
-        self.persist_selection();
-        Ok(())
-    }
-
     pub(super) fn promote_project_to_front(&mut self, project_index: usize) {
         if project_index == 0 || project_index >= self.projects.len() {
             return;
@@ -214,6 +197,36 @@ impl Workspace {
         }
         self.persist_selection();
         true
+    }
+
+    pub(super) fn open_project_path(&mut self, path: PathBuf) -> Result<OpenProjectResult, String> {
+        let path = normalize_project_path(&path);
+        let metadata =
+            fs::metadata(&path).map_err(|error| format!("open: {}: {error}", path.display()))?;
+        if !metadata.is_dir() {
+            return Err(format!("open: not a directory: {}", path.display()));
+        }
+
+        if let Some(index) = self
+            .projects
+            .iter()
+            .position(|project| project.path == path)
+        {
+            self.selected_project = index;
+            self.selected_session = self.ensure_default_session_for_project(index);
+            self.persist_selection();
+            return Ok(OpenProjectResult { path, added: false });
+        }
+
+        let mut project = Project::new(path.clone());
+        merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&path));
+        project.sort_sessions();
+        self.projects.push(project);
+        self.selected_project = self.projects.len().saturating_sub(1);
+        self.selected_session = self.ensure_default_session_for_project(self.selected_project);
+        self.persist_selection();
+
+        Ok(OpenProjectResult { path, added: true })
     }
 
     pub(super) fn refresh_project_from_scan(&mut self, project_index: usize) {

@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use winit::event_loop::EventLoopProxy;
-
+use crate::notify::Notify;
 use crate::state::{Project, Session};
 use crate::terminal::{TerminalController, TerminalStatus, TerminalTarget};
 
 pub(super) struct TerminalManager {
-    proxy: EventLoopProxy<()>,
+    notify: Notify,
     controllers: HashMap<String, TerminalController>,
     last_selected_session_id: Option<String>,
     sidecar_extension_path: Option<PathBuf>,
@@ -16,12 +15,12 @@ pub(super) struct TerminalManager {
 
 impl TerminalManager {
     pub(super) fn new(
-        proxy: EventLoopProxy<()>,
+        notify: Notify,
         sidecar_extension_path: Option<PathBuf>,
         sidecar_socket_path: PathBuf,
     ) -> Self {
         Self {
-            proxy,
+            notify,
             controllers: HashMap::new(),
             last_selected_session_id: None,
             sidecar_extension_path,
@@ -81,12 +80,12 @@ impl TerminalManager {
         }
 
         let (session_id, target) = self.terminal_target_for_session(project, session);
-        let proxy = self.proxy.clone();
+        let notify = self.notify.clone();
         let restart_result: anyhow::Result<()> = (|| {
             let terminal = self
                 .controllers
                 .entry(session_id)
-                .or_insert_with(|| TerminalController::new(proxy));
+                .or_insert_with(|| TerminalController::new(notify));
             let _ = terminal.attach(None)?;
             let _ = terminal.attach(Some(target))?;
             Ok(())
@@ -119,7 +118,7 @@ impl TerminalManager {
     ) -> Vec<String> {
         let mut active_ids = HashSet::new();
         let mut errors = Vec::new();
-        let proxy = self.proxy.clone();
+        let notify = self.notify.clone();
 
         for project in projects {
             for session in &project.sessions {
@@ -130,7 +129,7 @@ impl TerminalManager {
                     let terminal = self
                         .controllers
                         .entry(session_id)
-                        .or_insert_with(|| TerminalController::new(proxy.clone()));
+                        .or_insert_with(|| TerminalController::new(notify.clone()));
                     terminal.attach(Some(target))
                 };
                 if let Err(error) = attach_result {

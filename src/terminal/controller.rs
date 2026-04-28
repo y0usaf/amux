@@ -4,19 +4,18 @@ use std::sync::mpsc::TryRecvError;
 use anyhow::Context;
 use portable_pty::PtySize;
 use vt100::Parser;
-use winit::event::KeyEvent;
-use winit::event_loop::EventLoopProxy;
-use winit::keyboard::ModifiersState;
 
-use super::input::{self, KeyInput};
 use super::process::{
     spawn_process, targets_share_process, HostEvent, HostProcess, TerminalTarget,
 };
 use super::selection::{TerminalSelection, TerminalSelectionPoint, TerminalSelectionRange};
+use crate::notify::Notify;
 
 const DEFAULT_TERMINAL_COLS: u16 = 100;
 const DEFAULT_TERMINAL_ROWS: u16 = 32;
 const TERMINAL_SCROLLBACK: usize = 5_000;
+const BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
+const BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
 
 #[derive(Clone, Debug)]
 pub enum TerminalStatus {
@@ -37,7 +36,7 @@ pub(crate) fn disconnected_terminal_status(status: &TerminalStatus) -> Option<Te
 }
 
 pub struct TerminalController {
-    proxy: EventLoopProxy<()>,
+    notify: Notify,
     parser: Parser,
     target: Option<TerminalTarget>,
     process: Option<HostProcess>,
@@ -49,9 +48,9 @@ pub struct TerminalController {
 }
 
 impl TerminalController {
-    pub fn new(proxy: EventLoopProxy<()>) -> Self {
+    pub fn new(notify: Notify) -> Self {
         Self {
-            proxy,
+            notify,
             parser: Parser::new(
                 DEFAULT_TERMINAL_ROWS,
                 DEFAULT_TERMINAL_COLS,
@@ -86,7 +85,7 @@ impl TerminalController {
         match self.target.clone() {
             Some(target) => {
                 self.status = TerminalStatus::Launching;
-                match spawn_process(&target, self.cols, self.rows, self.proxy.clone()) {
+                match spawn_process(&target, self.cols, self.rows, self.notify.clone()) {
                     Ok(process) => {
                         self.process = Some(process);
                         self.status = TerminalStatus::Running;
@@ -248,33 +247,25 @@ impl TerminalController {
     }
 
     pub fn paste_text(&mut self, text: &str) -> anyhow::Result<bool> {
-        if text.is_empty() {
+        self.paste_bytes(text.as_bytes())
+            .context("writing clipboard paste")
+    }
+
+    pub fn paste_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<bool> {
+        if bytes.is_empty() {
             return Ok(false);
         }
-        self.write_bytes(text.as_bytes())
-            .context("writing clipboard paste")?;
+        let bytes = encoded_paste_bytes(bytes, self.parser.screen().bracketed_paste());
+        self.write_bytes(&bytes).context("writing terminal paste")?;
         Ok(true)
     }
 
-    pub fn handle_key(
-        &mut self,
-        event: &KeyEvent,
-        modifiers: ModifiersState,
-    ) -> anyhow::Result<bool> {
-        match input::handle_key_input(event, modifiers, self.rows, self.parser.screen()) {
-            KeyInput::Ignored => Ok(false),
-            KeyInput::Scroll(delta) if delta == i32::MAX => Ok(self.scroll_to_top()),
-            KeyInput::Scroll(delta) if delta == i32::MIN => Ok(self.scroll_to_bottom()),
-            KeyInput::Scroll(delta) => Ok(self.scroll_by_lines(delta)),
-            KeyInput::Bytes(bytes) => {
-                self.write_bytes(&bytes).context("writing terminal input")?;
-                Ok(true)
-            }
+    pub fn send_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<bool> {
+        if bytes.is_empty() {
+            return Ok(false);
         }
-    }
-
-    fn scroll_to_top(&mut self) -> bool {
-        self.set_scrollback(usize::MAX)
+        self.write_bytes(bytes).context("writing terminal input")?;
+        Ok(true)
     }
 
     pub fn scroll_to_bottom(&mut self) -> bool {
@@ -309,8 +300,42 @@ impl TerminalController {
     }
 }
 
+fn encoded_paste_bytes(paste: &[u8], bracketed_paste: bool) -> Vec<u8> {
+    if !bracketed_paste {
+        return paste.to_vec();
+    }
+
+    let mut bytes =
+        Vec::with_capacity(BRACKETED_PASTE_START.len() + paste.len() + BRACKETED_PASTE_END.len());
+    bytes.extend_from_slice(BRACKETED_PASTE_START);
+    bytes.extend_from_slice(paste);
+    bytes.extend_from_slice(BRACKETED_PASTE_END);
+    bytes
+}
+
 impl Drop for TerminalController {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encoded_paste_bytes;
+
+    #[test]
+    fn paste_bytes_are_raw_when_bracketed_paste_is_disabled() {
+        assert_eq!(
+            encoded_paste_bytes(b"hello\nworld", false),
+            b"hello\nworld".to_vec()
+        );
+    }
+
+    #[test]
+    fn paste_bytes_are_wrapped_when_bracketed_paste_is_enabled() {
+        assert_eq!(
+            encoded_paste_bytes(b"hello\nworld", true),
+            b"\x1b[200~hello\nworld\x1b[201~".to_vec()
+        );
     }
 }

@@ -1,34 +1,4 @@
-use crate::render::TextRenderer;
-
-use super::App;
-
-pub(super) const TOPBAR_ROWS: i32 = 3;
-pub(super) const SIDEBAR_COLS: i32 = 26;
-pub(super) const PANEL_PAD_CELLS: i32 = 0;
-pub(super) const TERMINAL_PAD: i32 = 12;
-pub(super) const OUTER_PAD: i32 = 20;
-pub(super) const COLUMN_GAP: i32 = 16;
-pub(super) const TOPBAR_GAP: i32 = 8;
-pub(super) const CENTER_WIDTH_FRAC: f32 = 0.55;
-pub(super) const MAX_TERM_COLS: u16 = 220;
-pub(super) const MAX_TERM_ROWS: u16 = 120;
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(super) struct Rect {
-    pub(super) x: i32,
-    pub(super) y: i32,
-    pub(super) w: i32,
-    pub(super) h: i32,
-}
-
-impl Rect {
-    pub(super) fn contains(self, x: f64, y: f64) -> bool {
-        x >= self.x as f64
-            && y >= self.y as f64
-            && x < (self.x + self.w) as f64
-            && y < (self.y + self.h) as f64
-    }
-}
+use crate::config::LayoutWidthPercents;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct CellRect {
@@ -39,6 +9,15 @@ pub(super) struct CellRect {
 }
 
 impl CellRect {
+    pub(super) fn new(col: i32, row: i32, cols: i32, rows: i32) -> Self {
+        Self {
+            col,
+            row,
+            cols,
+            rows,
+        }
+    }
+
     pub(super) fn inset(self, cols: i32, rows: i32) -> Self {
         Self {
             col: self.col + cols,
@@ -47,198 +26,129 @@ impl CellRect {
             rows: (self.rows - rows * 2).max(0),
         }
     }
-}
 
-pub(super) fn panel_content_rect(rect: CellRect, panel_pad_cells: i32) -> CellRect {
-    let inset = 1 + panel_pad_cells.max(0);
-    rect.inset(inset, inset)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct CellGrid {
-    pub(super) origin_x: i32,
-    pub(super) origin_y: i32,
-    pub(super) cols: i32,
-    pub(super) rows: i32,
-    pub(super) cell_w: i32,
-    pub(super) cell_h: i32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct LayoutSpacing {
-    pub(super) panel_pad_cells: i32,
-    pub(super) terminal_pad_cols: i32,
-    pub(super) terminal_pad_rows: i32,
-    pub(super) outer_pad_cols: i32,
-    pub(super) outer_pad_rows: i32,
-    pub(super) column_gap_cols: i32,
-    pub(super) topbar_gap_rows: i32,
-}
-
-fn clamp_panel_padding_cells(panel_padding_cells: i32) -> i32 {
-    panel_padding_cells.clamp(0, 4)
-}
-
-impl LayoutSpacing {
-    fn from_metrics(cell_w: i32, cell_h: i32, panel_padding_cells: Option<i32>) -> Self {
-        Self {
-            panel_pad_cells: panel_padding_cells
-                .map(clamp_panel_padding_cells)
-                .unwrap_or(PANEL_PAD_CELLS),
-            terminal_pad_cols: cells_for_px(TERMINAL_PAD, cell_w).max(1),
-            terminal_pad_rows: cells_for_px(TERMINAL_PAD, cell_h),
-            outer_pad_cols: cells_for_px(OUTER_PAD, cell_w),
-            outer_pad_rows: cells_for_px(OUTER_PAD, cell_h),
-            column_gap_cols: cells_for_px(COLUMN_GAP, cell_w).max(1),
-            topbar_gap_rows: cells_for_px(TOPBAR_GAP, cell_h),
-        }
+    pub(super) fn contains_cell(self, col: i32, row: i32) -> bool {
+        col >= self.col
+            && row >= self.row
+            && col < self.col + self.cols
+            && row < self.row + self.rows
     }
 }
 
-#[derive(Clone, Debug)]
-pub(super) struct Layout {
-    pub(super) grid: CellGrid,
-    pub(super) sidebar: Rect,
-    pub(super) terminal_card: Rect,
-    pub(super) terminal: Rect,
-    pub(super) topbar_cells: CellRect,
-    pub(super) sidebar_cells: CellRect,
-    pub(super) terminal_card_cells: CellRect,
-    pub(super) terminal_cells: CellRect,
-    pub(super) terminal_cols: u16,
-    pub(super) terminal_rows: u16,
-    pub(super) spacing: LayoutSpacing,
+const GAP_COLS: i32 = 1;
+const TOPBAR_ROWS: i32 = 5;
+const COMPACT_TOPBAR_ROWS: i32 = 3;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct CellLayout {
+    pub(super) topbar: CellRect,
+    pub(super) sidebar: CellRect,
+    pub(super) terminal_card: CellRect,
+    pub(super) terminal: CellRect,
 }
 
-fn cells_for_px(px: i32, cell: i32) -> i32 {
-    if px <= 0 {
-        return 0;
+pub(super) fn compute_cell_layout(
+    cols: u16,
+    rows: u16,
+    widths: LayoutWidthPercents,
+    body_height_percent: u8,
+) -> CellLayout {
+    let cols = i32::from(cols).max(1);
+    let rows = i32::from(rows).max(1);
+    let content = CellRect::new(0, 0, cols, rows);
+    let topbar_rows = if content.rows >= 12 {
+        TOPBAR_ROWS
+    } else {
+        COMPACT_TOPBAR_ROWS
     }
-    (px + cell.max(1) / 2) / cell.max(1)
-}
+    .min(content.rows.max(1));
+    let body_row = content.row + topbar_rows;
+    let body_rows = percent_cells((content.rows - topbar_rows).max(1), body_height_percent);
+    let show_sidebar = content.cols >= 72 && body_rows >= 6;
 
-fn rect_for_cells(grid: CellGrid, rect: CellRect) -> Rect {
-    Rect {
-        x: grid.origin_x + rect.col * grid.cell_w,
-        y: grid.origin_y + rect.row * grid.cell_h,
-        w: rect.cols * grid.cell_w,
-        h: rect.rows * grid.cell_h,
-    }
-}
-
-#[cfg(test)]
-pub(super) fn compute_layout_for_metrics(
-    width: i32,
-    height: i32,
-    cell_width: i32,
-    cell_height: i32,
-) -> Layout {
-    compute_layout_for_metrics_with_panel_padding_cells(
-        width,
-        height,
-        cell_width,
-        cell_height,
-        None,
-    )
-}
-
-pub(super) fn compute_layout_for_metrics_with_panel_padding_cells(
-    width: i32,
-    height: i32,
-    cell_width: i32,
-    cell_height: i32,
-    panel_padding_cells: Option<i32>,
-) -> Layout {
-    let cell_w = cell_width.max(1);
-    let cell_h = cell_height.max(1);
-    let grid_cols = (width.max(0) / cell_w).max(1);
-    let grid_rows = (height.max(0) / cell_h).max(1);
-    let grid = CellGrid {
-        origin_x: (width - grid_cols * cell_w).max(0) / 2,
-        origin_y: (height - grid_rows * cell_h).max(0) / 2,
-        cols: grid_cols,
-        rows: grid_rows,
-        cell_w,
-        cell_h,
-    };
-    let spacing = LayoutSpacing::from_metrics(cell_w, cell_h, panel_padding_cells);
-
-    let topbar_rows = TOPBAR_ROWS + 2 + spacing.panel_pad_cells * 2;
-    let sidebar_cols = SIDEBAR_COLS + 2 + spacing.panel_pad_cells * 2;
-    let content = CellRect {
-        col: spacing.outer_pad_cols,
-        row: spacing.outer_pad_rows,
-        cols: (grid.cols - spacing.outer_pad_cols * 2).max(0),
-        rows: (grid.rows - spacing.outer_pad_rows * 2).max(0),
-    };
-
-    let target_card_cols = ((content.cols as f32) * CENTER_WIDTH_FRAC).round() as i32;
-    let card_chrome_cols = 2 + spacing.terminal_pad_cols * 2;
-    let card_chrome_rows = 2 + spacing.terminal_pad_rows * 2;
-    let avail_term_cols = (target_card_cols - card_chrome_cols)
-        .max(1)
-        .min((content.cols - card_chrome_cols).max(1));
-    let avail_term_rows =
-        (content.rows - topbar_rows - spacing.topbar_gap_rows - card_chrome_rows).max(1);
-    let terminal_cols = avail_term_cols.min(i32::from(MAX_TERM_COLS)).max(1) as u16;
-    let terminal_rows = avail_term_rows.min(i32::from(MAX_TERM_ROWS)).max(1) as u16;
-
-    let card_cols = i32::from(terminal_cols) + card_chrome_cols;
-    let card_rows = i32::from(terminal_rows) + card_chrome_rows;
-    let block_rows = topbar_rows + spacing.topbar_gap_rows + card_rows;
-    let terminal_card_col = content.col + (content.cols - card_cols).max(0) / 2;
-    let topbar_row = content.row + (content.rows - block_rows).max(0) / 2;
-    let terminal_card_row = topbar_row + topbar_rows + spacing.topbar_gap_rows;
-
-    let topbar_cells = CellRect {
-        col: terminal_card_col,
-        row: topbar_row,
-        cols: card_cols,
-        rows: topbar_rows,
-    };
-    let sidebar_cells = CellRect {
-        col: (terminal_card_col - spacing.column_gap_cols - sidebar_cols).max(content.col),
-        row: terminal_card_row,
-        cols: sidebar_cols,
-        rows: card_rows,
-    };
-    let terminal_card_cells = CellRect {
-        col: terminal_card_col,
-        row: terminal_card_row,
-        cols: card_cols,
-        rows: card_rows,
-    };
-    let terminal_cells = CellRect {
-        col: terminal_card_cells.col + 1 + spacing.terminal_pad_cols,
-        row: terminal_card_cells.row + 1 + spacing.terminal_pad_rows,
-        cols: i32::from(terminal_cols),
-        rows: i32::from(terminal_rows),
-    };
-
-    Layout {
-        grid,
-        sidebar: rect_for_cells(grid, sidebar_cells),
-        terminal_card: rect_for_cells(grid, terminal_card_cells),
-        terminal: rect_for_cells(grid, terminal_cells),
-        topbar_cells,
-        sidebar_cells,
-        terminal_card_cells,
-        terminal_cells,
-        terminal_cols,
-        terminal_rows,
-        spacing,
-    }
-}
-
-impl App {
-    pub(super) fn compute_layout(&self, width: i32, height: i32, text: &TextRenderer) -> Layout {
-        compute_layout_for_metrics_with_panel_padding_cells(
-            width,
-            height,
-            text.metrics.cell_width,
-            text.metrics.cell_height,
-            None,
+    let (sidebar, terminal_col, terminal_cols) = if show_sidebar {
+        let columns = fit_three_panel_columns(
+            content,
+            percent_cells(content.cols, widths.sidebar),
+            percent_cells(content.cols, widths.terminal),
+            GAP_COLS,
+            1,
+        );
+        (
+            CellRect::new(columns.block_col, body_row, columns.sidebar_cols, body_rows),
+            columns.center_col,
+            columns.center_cols,
         )
+    } else {
+        let terminal_cols = percent_cells(content.cols, widths.terminal).min(content.cols.max(1));
+        let terminal_col = content.col + (content.cols - terminal_cols).max(0) / 2;
+        (CellRect::default(), terminal_col, terminal_cols)
+    };
+
+    let topbar = CellRect::new(terminal_col, content.row, terminal_cols, topbar_rows);
+    let terminal_card = CellRect::new(terminal_col, body_row, terminal_cols, body_rows);
+    let terminal = if terminal_card.cols >= 4 && terminal_card.rows >= 3 {
+        CellRect::new(
+            terminal_card.col + 1,
+            terminal_card.row + 1,
+            terminal_card.cols - 3,
+            terminal_card.rows - 2,
+        )
+    } else {
+        terminal_card.inset(1, 1)
+    };
+
+    CellLayout {
+        topbar,
+        sidebar,
+        terminal_card,
+        terminal,
+    }
+}
+
+fn percent_cells(total_cells: i32, percent: u8) -> i32 {
+    (((total_cells.max(1) as i64 * i64::from(percent)) + 50) / 100)
+        .max(1)
+        .min(i64::from(total_cells.max(1))) as i32
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ThreePanelColumns {
+    block_col: i32,
+    sidebar_cols: i32,
+    center_col: i32,
+    center_cols: i32,
+}
+
+fn fit_three_panel_columns(
+    content: CellRect,
+    requested_sidebar_cols: i32,
+    requested_center_cols: i32,
+    gap_cols: i32,
+    min_center_cols: i32,
+) -> ThreePanelColumns {
+    let gap_cols = gap_cols.max(0);
+    let mut sidebar_cols = requested_sidebar_cols.max(1);
+    let mut center_cols = requested_center_cols.max(1);
+    let available_cols = (content.cols - gap_cols * 2).max(1);
+    let requested_cols = sidebar_cols * 2 + center_cols;
+
+    if requested_cols > available_cols {
+        center_cols = center_cols
+            .saturating_sub(requested_cols - available_cols)
+            .max(min_center_cols.max(1));
+    }
+    if sidebar_cols * 2 + center_cols > available_cols {
+        sidebar_cols = ((available_cols - center_cols).max(0) / 2).max(1);
+    }
+
+    let block_cols = sidebar_cols * 2 + center_cols + gap_cols * 2;
+    let block_col = content.col + (content.cols - block_cols).max(0) / 2;
+    ThreePanelColumns {
+        block_col,
+        sidebar_cols,
+        center_col: block_col + sidebar_cols + gap_cols,
+        center_cols,
     }
 }
 
@@ -246,75 +156,25 @@ impl App {
 mod tests {
     use super::*;
 
-    #[test]
-    fn rect_contains_includes_top_left_and_excludes_bottom_right() {
-        let rect = Rect {
-            x: 10,
-            y: 20,
-            w: 30,
-            h: 40,
-        };
-
-        assert!(rect.contains(10.0, 20.0));
-        assert!(rect.contains(39.9, 59.9));
-        assert!(!rect.contains(9.9, 20.0));
-        assert!(!rect.contains(10.0, 60.0));
-        assert!(!rect.contains(40.0, 59.9));
+    fn widths() -> LayoutWidthPercents {
+        LayoutWidthPercents {
+            terminal: crate::config::LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT,
+            sidebar: crate::config::LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT,
+        }
     }
 
     #[test]
-    fn compute_layout_clamps_terminal_dimensions_to_maximums() {
-        let layout = compute_layout_for_metrics(20_000, 20_000, 8, 16);
-
-        assert_eq!(layout.terminal_cols, MAX_TERM_COLS);
-        assert_eq!(layout.terminal_rows, MAX_TERM_ROWS);
-
-        let huge = compute_layout_for_metrics(i32::MAX, i32::MAX, 8, 16);
-        assert_eq!(huge.terminal_cols, MAX_TERM_COLS);
-        assert_eq!(huge.terminal_rows, MAX_TERM_ROWS);
+    fn cell_layout_hides_sidebar_when_compact() {
+        let layout = compute_cell_layout(60, 20, widths(), 100);
+        assert_eq!(layout.sidebar, CellRect::default());
+        assert!(layout.terminal.cols > 0 && layout.terminal.rows > 0);
     }
 
     #[test]
-    fn compute_layout_keeps_terminal_inside_card_for_tiny_windows() {
-        let layout = compute_layout_for_metrics(40, 40, 8, 16);
-
-        assert_eq!(layout.terminal_cols, 1);
-        assert_eq!(layout.terminal_rows, 1);
-        assert_eq!(layout.terminal.w, 8);
-        assert_eq!(layout.terminal.h, 16);
-        assert_eq!(layout.terminal_cells.cols, 1);
-        assert_eq!(layout.terminal_cells.rows, 1);
-        assert_eq!(layout.topbar_cells.cols, layout.terminal_card_cells.cols);
-        assert_eq!(layout.sidebar.y, layout.terminal_card.y);
-        assert_eq!(layout.sidebar.h, layout.terminal_card.h);
-    }
-
-    #[test]
-    fn panel_padding_cells_adjusts_panels_without_changing_outer_spacing() {
-        let compact = compute_layout_for_metrics(1280, 840, 8, 16);
-        let padded = compute_layout_for_metrics_with_panel_padding_cells(1280, 840, 8, 16, Some(1));
-
-        assert_eq!(compact.spacing.panel_pad_cells, PANEL_PAD_CELLS);
-        assert_eq!(padded.spacing.panel_pad_cells, 1);
-        assert_eq!(
-            padded.spacing.terminal_pad_cols,
-            compact.spacing.terminal_pad_cols
-        );
-        assert_eq!(
-            padded.spacing.outer_pad_cols,
-            compact.spacing.outer_pad_cols
-        );
-        assert_eq!(
-            padded.spacing.column_gap_cols,
-            compact.spacing.column_gap_cols
-        );
-        assert_eq!(
-            padded.spacing.topbar_gap_rows,
-            compact.spacing.topbar_gap_rows
-        );
-        assert!(padded.sidebar.w > compact.sidebar.w);
-        assert!(padded.topbar_cells.rows > compact.topbar_cells.rows);
-        assert_eq!(compact.terminal.w, i32::from(compact.terminal_cols) * 8);
-        assert_eq!(compact.terminal.h, i32::from(compact.terminal_rows) * 16);
+    fn cell_layout_shows_sidebar_and_centers_terminal_on_wide_grid() {
+        let layout = compute_cell_layout(120, 40, widths(), 100);
+        assert!(layout.sidebar.cols > 0);
+        assert!(layout.terminal_card.col > layout.sidebar.col + layout.sidebar.cols);
+        assert_eq!(layout.topbar.col, layout.terminal_card.col);
     }
 }

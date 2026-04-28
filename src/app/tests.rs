@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::pi::{PiSessionStage, PiSidecarSnapshot};
 use crate::state::Session;
 
-use super::{project_actions, sidebar, sidecar_sync};
+use super::{sidebar, sidecar_sync, workspace};
 
 fn snapshot(stage: PiSessionStage, queued: bool) -> PiSidecarSnapshot {
     PiSidecarSnapshot {
@@ -147,7 +147,7 @@ fn sidecar_order_update_only_touches_after_trackable_running_session_finishes() 
 
 #[test]
 fn project_path_normalization_preserves_order() {
-    let paths = project_actions::normalize_unique_project_paths(vec![
+    let paths = workspace::normalize_unique_project_paths(vec![
         PathBuf::from("/tmp/project-b"),
         PathBuf::from("/tmp/project-a"),
         PathBuf::from("/tmp/project-b"),

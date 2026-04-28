@@ -27,13 +27,6 @@ pub enum KeymapMatch {
     Triggered(AppAction),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct KeymapHint {
-    pub stroke: KeyStroke,
-    pub action: Option<AppAction>,
-    pub has_children: bool,
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct Keymap {
     root: KeymapNode,
@@ -81,21 +74,6 @@ impl Keymap {
             }
             outcome => self.finish_advance(state, next, outcome),
         }
-    }
-
-    pub fn hints_for_prefix(&self, prefix: &[KeyStroke]) -> Vec<KeymapHint> {
-        let Some(node) = self.node(prefix) else {
-            return vec![];
-        };
-
-        node.children
-            .iter()
-            .map(|(stroke, child)| KeymapHint {
-                stroke: stroke.clone(),
-                action: child.action,
-                has_children: !child.children.is_empty(),
-            })
-            .collect()
     }
 
     fn insert(&mut self, action: AppAction, sequence: Vec<KeyStroke>) {
@@ -194,7 +172,7 @@ impl Keymap {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppAction, AppConfig, KeyChordState, KeyStroke, Keymap, KeymapHint, KeymapMatch};
+    use super::{AppAction, AppConfig, KeyChordState, KeyStroke, Keymap, KeymapMatch};
     use crate::config::ConfigKeybind;
 
     fn stroke(text: &str) -> KeyStroke {
@@ -202,40 +180,14 @@ mod tests {
     }
 
     #[test]
-    fn from_config_uses_custom_multi_stroke_binding_and_hints_expose_children() {
-        let mut config = AppConfig::default();
-        config.keybinds.insert(
-            "zoom_in".to_string(),
-            ConfigKeybind::Single("ctrl+k ctrl+plus".to_string()),
-        );
-
-        let keymap = Keymap::from_config(&config);
-        let root_hints = keymap.hints_for_prefix(&[]);
-
-        assert!(root_hints.contains(&KeymapHint {
-            stroke: stroke("ctrl+k"),
-            action: None,
-            has_children: true,
-        }));
-        assert_eq!(
-            keymap.hints_for_prefix(&[stroke("ctrl+k")]),
-            vec![KeymapHint {
-                stroke: stroke("ctrl+plus"),
-                action: Some(AppAction::ZoomIn),
-                has_children: false,
-            }]
-        );
-    }
-
-    #[test]
     fn advance_falls_back_to_fresh_match_after_bad_pending_prefix() {
         let mut config = AppConfig::default();
         config.keybinds.insert(
-            "zoom_in".to_string(),
-            ConfigKeybind::Single("ctrl+k ctrl+plus".to_string()),
+            "new_session".to_string(),
+            ConfigKeybind::Single("ctrl+k n".to_string()),
         );
         config.keybinds.insert(
-            "zoom_out".to_string(),
+            "refresh_session".to_string(),
             ConfigKeybind::Single("ctrl+minus".to_string()),
         );
 
@@ -250,7 +202,7 @@ mod tests {
 
         assert_eq!(
             keymap.advance(&mut state, stroke("ctrl+minus")),
-            KeymapMatch::Triggered(AppAction::ZoomOut)
+            KeymapMatch::Triggered(AppAction::RefreshSession)
         );
         assert!(state.pending().is_empty());
     }
@@ -259,8 +211,8 @@ mod tests {
     fn triggered_sequences_clear_pending_state() {
         let mut config = AppConfig::default();
         config.keybinds.insert(
-            "zoom_in".to_string(),
-            ConfigKeybind::Single("ctrl+k ctrl+plus".to_string()),
+            "new_session".to_string(),
+            ConfigKeybind::Single("ctrl+k n".to_string()),
         );
 
         let keymap = Keymap::from_config(&config);
@@ -271,8 +223,8 @@ mod tests {
             KeymapMatch::Pending
         );
         assert_eq!(
-            keymap.advance(&mut state, stroke("ctrl+plus")),
-            KeymapMatch::Triggered(AppAction::ZoomIn)
+            keymap.advance(&mut state, stroke("n")),
+            KeymapMatch::Triggered(AppAction::NewSession)
         );
         assert!(state.pending().is_empty());
     }
@@ -281,7 +233,7 @@ mod tests {
     fn invalid_override_falls_back_to_default_bindings() {
         let mut config = AppConfig::default();
         config.keybinds.insert(
-            "zoom_out".to_string(),
+            "archive_session".to_string(),
             ConfigKeybind::Single("definitely-not-a-key".to_string()),
         );
 
@@ -289,8 +241,8 @@ mod tests {
         let mut state = KeyChordState::default();
 
         assert_eq!(
-            keymap.advance(&mut state, stroke("ctrl+minus")),
-            KeymapMatch::Triggered(AppAction::ZoomOut)
+            keymap.advance(&mut state, stroke("ctrl+delete")),
+            KeymapMatch::Triggered(AppAction::ArchiveSession)
         );
     }
 
@@ -322,7 +274,7 @@ mod tests {
     fn shorter_binding_prunes_existing_longer_descendants() {
         let mut keymap = Keymap::default();
         keymap.insert(
-            AppAction::OpenProjectPicker,
+            AppAction::PreviousProject,
             vec![stroke("ctrl+p"), stroke("o")],
         );
         keymap.insert(AppAction::NewSession, vec![stroke("ctrl+p")]);
@@ -332,7 +284,6 @@ mod tests {
             keymap.advance(&mut state, stroke("ctrl+p")),
             KeymapMatch::Triggered(AppAction::NewSession)
         );
-        assert!(keymap.hints_for_prefix(&[stroke("ctrl+p")]).is_empty());
         assert_eq!(
             keymap.advance(&mut state, stroke("o")),
             KeymapMatch::NoMatch
@@ -344,7 +295,7 @@ mod tests {
         let mut keymap = Keymap::default();
         keymap.insert(AppAction::NewSession, vec![stroke("ctrl+p")]);
         keymap.insert(
-            AppAction::OpenProjectPicker,
+            AppAction::PreviousProject,
             vec![stroke("ctrl+p"), stroke("o")],
         );
 
@@ -353,19 +304,18 @@ mod tests {
             keymap.advance(&mut state, stroke("ctrl+p")),
             KeymapMatch::Triggered(AppAction::NewSession)
         );
-        assert!(keymap.hints_for_prefix(&[stroke("ctrl+p")]).is_empty());
     }
 
     #[test]
     fn duplicate_exact_binding_keeps_first_action() {
         let mut keymap = Keymap::default();
-        keymap.insert(AppAction::OpenProjectPicker, vec![stroke("ctrl+p")]);
+        keymap.insert(AppAction::PreviousProject, vec![stroke("ctrl+p")]);
         keymap.insert(AppAction::NewSession, vec![stroke("ctrl+p")]);
 
         let mut state = KeyChordState::default();
         assert_eq!(
             keymap.advance(&mut state, stroke("ctrl+p")),
-            KeymapMatch::Triggered(AppAction::OpenProjectPicker)
+            KeymapMatch::Triggered(AppAction::PreviousProject)
         );
     }
 }

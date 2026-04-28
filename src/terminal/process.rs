@@ -4,8 +4,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use winit::event_loop::EventLoopProxy;
 
+use crate::notify::Notify;
 use crate::pi;
 
 const READ_BUFFER_SIZE: usize = 8 * 1024;
@@ -58,7 +58,7 @@ pub(crate) fn spawn_process(
     target: &TerminalTarget,
     cols: u16,
     rows: u16,
-    proxy: EventLoopProxy<()>,
+    notify: Notify,
 ) -> Result<HostProcess, String> {
     let mut args = Vec::new();
     if let Some(ref extension_path) = target.sidecar_extension_path {
@@ -108,7 +108,7 @@ pub(crate) fn spawn_process(
 
     let (tx, rx) = mpsc::channel();
     let read_tx = tx.clone();
-    let read_proxy = proxy.clone();
+    let read_notify = notify.clone();
     std::thread::Builder::new()
         .name("pi-harness-terminal-reader".into())
         .spawn(move || {
@@ -120,12 +120,12 @@ pub(crate) fn spawn_process(
                         if read_tx.send(HostEvent::Output(buf[..n].to_vec())).is_err() {
                             break;
                         }
-                        let _ = read_proxy.send_event(());
+                        read_notify();
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(error) => {
                         let _ = read_tx.send(HostEvent::Error(error.to_string()));
-                        let _ = read_proxy.send_event(());
+                        read_notify();
                         break;
                     }
                 }
@@ -133,7 +133,7 @@ pub(crate) fn spawn_process(
         })
         .map_err(|error| format!("reader thread failed: {error}"))?;
 
-    let wait_proxy = proxy;
+    let wait_notify = notify;
     std::thread::Builder::new()
         .name("pi-harness-terminal-wait".into())
         .spawn(move || {
@@ -142,7 +142,7 @@ pub(crate) fn spawn_process(
                 .map(|status| status.to_string())
                 .unwrap_or_else(|error| error.to_string());
             let _ = tx.send(HostEvent::Exited(status));
-            let _ = wait_proxy.send_event(());
+            wait_notify();
         })
         .map_err(|error| format!("wait thread failed: {error}"))?;
 

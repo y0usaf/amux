@@ -1,7 +1,5 @@
 #[path = "terminal/controller.rs"]
 mod controller;
-#[path = "terminal/input.rs"]
-mod input;
 #[path = "terminal/process.rs"]
 mod process;
 #[path = "terminal/selection.rs"]
