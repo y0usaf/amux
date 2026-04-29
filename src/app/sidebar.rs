@@ -10,7 +10,6 @@ pub(super) const SIDEBAR_NOTIFICATION_GLYPH: &str = "⣿";
 
 #[derive(Clone, Debug)]
 pub(super) enum SidebarRowKind {
-    ActionOpenProject,
     Label,
     Project(usize),
     Session {
@@ -226,25 +225,7 @@ pub(super) fn build_sidebar_rows(
     selected_session: Option<usize>,
     selected_session_visible: bool,
 ) -> Vec<SidebarRow> {
-    let mut rows = vec![SidebarRow {
-        kind: SidebarRowKind::ActionOpenProject,
-        text: "+ NEW PROJECT".to_string(),
-        fg: ACCENT,
-        bg: None,
-        inverted: projects.is_empty(),
-        status: None,
-    }];
-
-    if !projects.is_empty() {
-        rows.push(SidebarRow {
-            kind: SidebarRowKind::Label,
-            text: String::new(),
-            fg: MUTED,
-            bg: None,
-            inverted: false,
-            status: None,
-        });
-    }
+    let mut rows = Vec::new();
 
     for (project_index, project) in projects.iter().enumerate() {
         let project_selected = project_index == selected_project;
@@ -296,14 +277,13 @@ pub(super) fn build_sidebar_rows(
 }
 
 pub(super) fn selected_sidebar_row_index_for_state(
-    projects_empty: bool,
+    _projects_empty: bool,
     selected_project: usize,
     selected_session: Option<usize>,
     selected_session_visible: bool,
     rows: &[SidebarRow],
 ) -> Option<usize> {
     rows.iter().position(|row| match row.kind {
-        SidebarRowKind::ActionOpenProject => projects_empty,
         SidebarRowKind::Project(project_index) => {
             project_index == selected_project && !selected_session_visible
         }
@@ -320,14 +300,14 @@ pub(super) fn selected_sidebar_row_index_for_state(
 }
 
 pub(super) fn selected_sidebar_selection_span_for_state(
-    projects_empty: bool,
+    _projects_empty: bool,
     selected_project: usize,
     selected_session: Option<usize>,
     selected_session_visible: bool,
     rows: &[SidebarRow],
 ) -> Option<SidebarSelectionSpan> {
     let selected_row = selected_sidebar_row_index_for_state(
-        projects_empty,
+        _projects_empty,
         selected_project,
         selected_session,
         selected_session_visible,
@@ -355,7 +335,7 @@ pub(super) fn clamp_sidebar_scroll_value(
 
 pub(super) fn ensure_sidebar_selection_visible_for_state(
     current_scroll: usize,
-    projects_empty: bool,
+    _projects_empty: bool,
     selected_project: usize,
     selected_session: Option<usize>,
     selected_session_visible: bool,
@@ -364,7 +344,7 @@ pub(super) fn ensure_sidebar_selection_visible_for_state(
 ) -> usize {
     let current_scroll = clamp_sidebar_scroll_value(current_scroll, rows.len(), visible_rows);
     let Some(span) = selected_sidebar_selection_span_for_state(
-        projects_empty,
+        _projects_empty,
         selected_project,
         selected_session,
         selected_session_visible,

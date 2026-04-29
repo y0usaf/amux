@@ -1,4 +1,4 @@
-use crate::config::LayoutWidthPercents;
+use crate::config::{LayoutSidebarWidth, LayoutWidths};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct CellRect {
@@ -18,12 +18,12 @@ impl CellRect {
         }
     }
 
-    pub(super) fn inset(self, cols: i32, rows: i32) -> Self {
+    pub(super) fn inset_edges(self, left: i32, top: i32, right: i32, bottom: i32) -> Self {
         Self {
-            col: self.col + cols,
-            row: self.row + rows,
-            cols: (self.cols - cols * 2).max(0),
-            rows: (self.rows - rows * 2).max(0),
+            col: self.col + left,
+            row: self.row + top,
+            cols: (self.cols - left - right).max(0),
+            rows: (self.rows - top - bottom).max(0),
         }
     }
 
@@ -35,75 +35,85 @@ impl CellRect {
     }
 }
 
-const GAP_COLS: i32 = 1;
-const TOPBAR_ROWS: i32 = 5;
-const COMPACT_TOPBAR_ROWS: i32 = 3;
+const STATUSBAR_ROWS: i32 = 2;
+const SIDEBAR_SHOW_MIN_COLS: i32 = 72;
+const SIDEBAR_LEGACY_PERCENT_MIN_COLS: i32 = 18;
+const SIDEBAR_LEGACY_PERCENT_MAX_COLS: i32 = 38;
+const MIN_TERMINAL_COLS_WITH_SIDEBAR: i32 = 32;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct CellLayout {
-    pub(super) topbar: CellRect,
     pub(super) sidebar: CellRect,
     pub(super) terminal_card: CellRect,
     pub(super) terminal: CellRect,
+    pub(super) statusbar: CellRect,
 }
 
-pub(super) fn compute_cell_layout(
-    cols: u16,
-    rows: u16,
-    widths: LayoutWidthPercents,
-    body_height_percent: u8,
-) -> CellLayout {
+pub(super) fn compute_cell_layout(cols: u16, rows: u16, widths: LayoutWidths) -> CellLayout {
     let cols = i32::from(cols).max(1);
     let rows = i32::from(rows).max(1);
     let content = CellRect::new(0, 0, cols, rows);
-    let topbar_rows = if content.rows >= 12 {
-        TOPBAR_ROWS
-    } else {
-        COMPACT_TOPBAR_ROWS
-    }
-    .min(content.rows.max(1));
-    let body_row = content.row + topbar_rows;
-    let body_rows = percent_cells((content.rows - topbar_rows).max(1), body_height_percent);
-    let show_sidebar = content.cols >= 72 && body_rows >= 6;
 
-    let (sidebar, terminal_col, terminal_cols) = if show_sidebar {
-        let columns = fit_three_panel_columns(
-            content,
-            percent_cells(content.cols, widths.sidebar),
-            percent_cells(content.cols, widths.terminal),
-            GAP_COLS,
-            1,
-        );
-        (
-            CellRect::new(columns.block_col, body_row, columns.sidebar_cols, body_rows),
-            columns.center_col,
-            columns.center_cols,
-        )
+    let statusbar_rows = STATUSBAR_ROWS.min(content.rows.max(1));
+    let body_rows_available = (content.rows - statusbar_rows).max(0);
+    let body_rows = body_rows_available;
+
+    let workspace_row = content.row;
+    let workspace_rows = body_rows;
+    let show_sidebar = content.cols >= SIDEBAR_SHOW_MIN_COLS && workspace_rows >= 4;
+    let sidebar_cols = if show_sidebar {
+        sidebar_columns(content.cols, widths.sidebar)
     } else {
-        let terminal_cols = percent_cells(content.cols, widths.terminal).min(content.cols.max(1));
-        let terminal_col = content.col + (content.cols - terminal_cols).max(0) / 2;
-        (CellRect::default(), terminal_col, terminal_cols)
+        0
     };
 
-    let topbar = CellRect::new(terminal_col, content.row, terminal_cols, topbar_rows);
-    let terminal_card = CellRect::new(terminal_col, body_row, terminal_cols, body_rows);
-    let terminal = if terminal_card.cols >= 4 && terminal_card.rows >= 3 {
-        CellRect::new(
-            terminal_card.col + 1,
-            terminal_card.row + 1,
-            terminal_card.cols - 3,
-            terminal_card.rows - 2,
-        )
+    let sidebar = if sidebar_cols > 0 {
+        CellRect::new(content.col, workspace_row, sidebar_cols, workspace_rows)
     } else {
-        terminal_card.inset(1, 1)
+        CellRect::default()
     };
+
+    let terminal_col = content.col + sidebar_cols;
+    let terminal_cols = (content.cols - sidebar_cols).max(0);
+    let terminal_card = CellRect::new(terminal_col, workspace_row, terminal_cols, workspace_rows);
+    let terminal = CellRect::new(
+        terminal_card.col,
+        terminal_card.row,
+        terminal_card.cols,
+        terminal_card.rows,
+    );
+    let statusbar = CellRect::new(
+        content.col,
+        content.row + content.rows - statusbar_rows,
+        content.cols,
+        statusbar_rows,
+    );
 
     CellLayout {
-        topbar,
         sidebar,
         terminal_card,
         terminal,
+        statusbar,
     }
+}
+
+pub(super) fn sidebar_content_rect(sidebar: CellRect) -> CellRect {
+    if sidebar.cols <= 0 || sidebar.rows <= 0 {
+        return CellRect::default();
+    }
+    // Left padding + right separator column, no top/bottom padding: Neo-tree style.
+    sidebar.inset_edges(1, 0, 1, 0)
+}
+
+fn sidebar_columns(total_cols: i32, width: LayoutSidebarWidth) -> i32 {
+    let max_for_main = (total_cols - MIN_TERMINAL_COLS_WITH_SIDEBAR).max(0);
+    let requested = match width {
+        LayoutSidebarWidth::Columns(cols) => i32::from(cols),
+        LayoutSidebarWidth::Percent(percent) => percent_cells(total_cols, percent)
+            .max(SIDEBAR_LEGACY_PERCENT_MIN_COLS)
+            .min(SIDEBAR_LEGACY_PERCENT_MAX_COLS),
+    };
+    requested.min(max_for_main).max(0)
 }
 
 fn percent_cells(total_cells: i32, percent: u8) -> i32 {
@@ -112,69 +122,40 @@ fn percent_cells(total_cells: i32, percent: u8) -> i32 {
         .min(i64::from(total_cells.max(1))) as i32
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ThreePanelColumns {
-    block_col: i32,
-    sidebar_cols: i32,
-    center_col: i32,
-    center_cols: i32,
-}
-
-fn fit_three_panel_columns(
-    content: CellRect,
-    requested_sidebar_cols: i32,
-    requested_center_cols: i32,
-    gap_cols: i32,
-    min_center_cols: i32,
-) -> ThreePanelColumns {
-    let gap_cols = gap_cols.max(0);
-    let mut sidebar_cols = requested_sidebar_cols.max(1);
-    let mut center_cols = requested_center_cols.max(1);
-    let available_cols = (content.cols - gap_cols * 2).max(1);
-    let requested_cols = sidebar_cols * 2 + center_cols;
-
-    if requested_cols > available_cols {
-        center_cols = center_cols
-            .saturating_sub(requested_cols - available_cols)
-            .max(min_center_cols.max(1));
-    }
-    if sidebar_cols * 2 + center_cols > available_cols {
-        sidebar_cols = ((available_cols - center_cols).max(0) / 2).max(1);
-    }
-
-    let block_cols = sidebar_cols * 2 + center_cols + gap_cols * 2;
-    let block_col = content.col + (content.cols - block_cols).max(0) / 2;
-    ThreePanelColumns {
-        block_col,
-        sidebar_cols,
-        center_col: block_col + sidebar_cols + gap_cols,
-        center_cols,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn widths() -> LayoutWidthPercents {
-        LayoutWidthPercents {
-            terminal: crate::config::LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT,
-            sidebar: crate::config::LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT,
+    fn widths() -> LayoutWidths {
+        LayoutWidths {
+            sidebar: LayoutSidebarWidth::Columns(crate::config::LAYOUT_SIDEBAR_WIDTH_DEFAULT),
         }
     }
 
     #[test]
     fn cell_layout_hides_sidebar_when_compact() {
-        let layout = compute_cell_layout(60, 20, widths(), 100);
+        let layout = compute_cell_layout(60, 20, widths());
         assert_eq!(layout.sidebar, CellRect::default());
-        assert!(layout.terminal.cols > 0 && layout.terminal.rows > 0);
+        assert_eq!(layout.statusbar, CellRect::new(0, 18, 60, 2));
+        assert_eq!(layout.terminal.row, 0);
+        assert_eq!(layout.terminal.rows, 18);
+        assert!(layout.terminal.cols > 0);
     }
 
     #[test]
-    fn cell_layout_shows_sidebar_and_centers_terminal_on_wide_grid() {
-        let layout = compute_cell_layout(120, 40, widths(), 100);
-        assert!(layout.sidebar.cols > 0);
-        assert!(layout.terminal_card.col > layout.sidebar.col + layout.sidebar.cols);
-        assert_eq!(layout.topbar.col, layout.terminal_card.col);
+    fn cell_layout_shows_left_sidebar_and_unboxed_terminal_on_wide_grid() {
+        let layout = compute_cell_layout(120, 40, widths());
+        assert_eq!(
+            layout.sidebar.cols,
+            crate::config::LAYOUT_SIDEBAR_WIDTH_DEFAULT as i32
+        );
+        assert_eq!(layout.sidebar.col, 0);
+        assert_eq!(layout.sidebar.row, 0);
+        assert_eq!(layout.sidebar.rows, 38);
+        assert_eq!(layout.terminal_card.col, layout.sidebar.cols);
+        assert_eq!(layout.terminal_card.rows, 38);
+        assert_eq!(layout.terminal.row, 0);
+        assert_eq!(layout.statusbar, CellRect::new(0, 38, 120, 2));
+        assert_eq!(layout.terminal.cols, layout.terminal_card.cols);
     }
 }

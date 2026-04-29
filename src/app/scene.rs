@@ -3,10 +3,9 @@ use crate::terminal::TerminalSelectionRange;
 
 use super::backend::{ChromeView, FrameModel};
 use super::cell_surface::{
-    centered_cell_offset, display_cell_width, draw_box, render_cell_scrollbar, truncate_to_cells,
-    CellSurface,
+    display_cell_width, render_cell_scrollbar, truncate_to_cells, CellSurface,
 };
-use super::layout::{CellLayout, CellRect};
+use super::layout::{sidebar_content_rect, CellLayout, CellRect};
 use super::sidebar::{
     sidebar_status_color, sidebar_status_glyph, SidebarRow, SidebarRowKind, SidebarViewportItem,
 };
@@ -19,12 +18,10 @@ const SCROLLBAR_THUMB_GLYPH: &str = "▐";
 pub(super) struct ScenePalette {
     pub(super) fg: Color,
     pub(super) bg: Color,
-    pub(super) topbar_bg: Color,
+    pub(super) statusbar_bg: Color,
     pub(super) sidebar_bg: Color,
-    pub(super) terminal_card_bg: Color,
     pub(super) border: Color,
     pub(super) muted: Color,
-    pub(super) accent: Color,
     pub(super) term_fg: Color,
     pub(super) term_bg: Color,
     pub(super) monochrome: bool,
@@ -35,12 +32,10 @@ impl ScenePalette {
         Self {
             fg,
             bg,
-            topbar_bg: bg,
+            statusbar_bg: bg,
             sidebar_bg: bg,
-            terminal_card_bg: bg,
             border: fg,
             muted: fg,
-            accent: fg,
             term_fg,
             term_bg,
             monochrome: true,
@@ -52,6 +47,12 @@ impl ScenePalette {
 pub(super) enum TerminalCursorMode {
     Cell,
     Hardware,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HarnessMode {
+    Normal,
+    Command,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,24 +70,25 @@ pub(super) struct TerminalSceneLayout {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct HarnessSceneLayout {
-    pub(super) topbar_panel: CellRect,
-    pub(super) topbar_content: CellRect,
+    pub(super) statusbar: CellRect,
     pub(super) sidebar_panel: Option<CellRect>,
     pub(super) sidebar_content: CellRect,
     pub(super) terminal: TerminalSceneLayout,
 }
 
 pub(super) fn harness_scene_layout(layout: &CellLayout) -> HarnessSceneLayout {
-    let scrollbar_col = (layout.terminal.col + layout.terminal.cols)
-        .min(layout.terminal_card.col + layout.terminal_card.cols - 2)
-        .max(layout.terminal.col);
+    let scrollbar_col = if layout.terminal_card.cols > 0 {
+        layout.terminal_card.col + layout.terminal_card.cols - 1
+    } else {
+        layout.terminal.col + layout.terminal.cols
+    }
+    .max(layout.terminal.col);
 
     HarnessSceneLayout {
-        topbar_panel: layout.topbar,
-        topbar_content: layout.topbar.inset(1, 1),
+        statusbar: layout.statusbar,
         sidebar_panel: (layout.sidebar.cols > 0 && layout.sidebar.rows > 0)
             .then_some(layout.sidebar),
-        sidebar_content: layout.sidebar.inset(1, 1),
+        sidebar_content: sidebar_content_rect(layout.sidebar),
         terminal: TerminalSceneLayout {
             card: layout.terminal_card,
             terminal: layout.terminal,
@@ -101,20 +103,12 @@ pub(super) fn render_harness_scene(
     layout: HarnessSceneLayout,
     frame_model: &FrameModel,
     hovered_sidebar_row: Option<usize>,
-    topbar_status_fg: Color,
     palette: &ScenePalette,
     cursor_mode: TerminalCursorMode,
+    mode: HarnessMode,
     footer_hint: Option<&str>,
     now_ms: u64,
 ) -> Option<HardwareCursor> {
-    render_topbar(
-        surface,
-        layout.topbar_panel,
-        layout.topbar_content,
-        &frame_model.chrome,
-        topbar_status_fg,
-        palette,
-    );
     if let Some(sidebar_panel) = layout.sidebar_panel {
         render_sidebar(
             surface,
@@ -127,55 +121,254 @@ pub(super) fn render_harness_scene(
             now_ms,
         );
     }
-    render_terminal(
+    let cursor = render_terminal(
         surface,
         layout.terminal,
         &frame_model.terminal_screen,
         frame_model.terminal_selection,
         palette,
         cursor_mode,
+    );
+    render_statusbar(
+        surface,
+        layout.statusbar,
+        layout.sidebar_panel,
+        &frame_model.chrome,
+        palette,
+        mode,
         footer_hint,
-    )
+    );
+    cursor
 }
 
-pub(super) fn render_topbar(
+pub(super) fn render_statusbar(
     surface: &mut CellSurface,
     panel: CellRect,
-    content: CellRect,
+    sidebar_panel: Option<CellRect>,
     chrome: &ChromeView,
-    status_fg: Color,
     palette: &ScenePalette,
+    mode: HarnessMode,
+    footer_hint: Option<&str>,
 ) {
-    draw_box(
-        surface,
-        panel,
-        palette.fg,
-        palette.topbar_bg,
-        palette.border,
-    );
-    if content.cols <= 0 || content.rows <= 0 {
+    if panel.cols <= 0 || panel.rows <= 0 {
         return;
     }
 
-    let rows = [
-        (chrome.project.as_str(), palette.muted),
-        (chrome.status.as_str(), status_fg),
-        (chrome.session.as_str(), palette.accent),
-    ];
-    for (offset, (value, fg)) in rows.into_iter().enumerate() {
-        if offset as i32 >= content.rows {
-            break;
-        }
-        let value = truncate_to_cells(value, content.cols.max(0) as usize);
-        let col = content.col + centered_cell_offset(content.cols, &value);
-        surface.put_text(
-            col,
-            content.row + offset as i32,
-            content.cols,
-            fg,
-            palette.topbar_bg,
-            &value,
+    let statusline = CellRect::new(panel.col, panel.row, panel.cols, 1);
+    surface.fill_rect(statusline, palette.fg, palette.statusbar_bg);
+    if panel.rows > 1 {
+        surface.fill_rect(
+            CellRect::new(panel.col, panel.row + 1, panel.cols, panel.rows - 1),
+            palette.fg,
+            palette.bg,
         );
+    }
+
+    let row = statusline.row;
+    let main_col =
+        render_statusbar_sidebar_segment(surface, statusline, sidebar_panel, palette, mode);
+    let main_cols = (panel.col + panel.cols - main_col).max(0);
+    if main_cols <= 0 {
+        return;
+    }
+
+    let right = truncate_to_cells(&statusline_right_text(chrome), main_cols as usize);
+    let right_cols = display_cell_width(&right) as i32;
+    let left_max_cols = if right_cols > 0 {
+        main_cols.saturating_sub(right_cols + 1)
+    } else {
+        main_cols
+    };
+    let left = truncate_to_cells(&statusline_left_text(chrome), left_max_cols as usize);
+    let center = truncate_to_cells(&statusline_center_text(chrome), main_cols as usize);
+    let left_cols = display_cell_width(&left) as i32;
+    let center_cols = display_cell_width(&center) as i32;
+
+    if left_cols > 0 {
+        surface.put_text(
+            main_col,
+            row,
+            left_cols,
+            palette.fg,
+            palette.statusbar_bg,
+            &left,
+        );
+    }
+
+    if right_cols > 0 {
+        surface.put_text(
+            main_col + main_cols - right_cols,
+            row,
+            right_cols,
+            palette.fg,
+            palette.statusbar_bg,
+            &right,
+        );
+    }
+
+    if center_cols > 0 && center_cols <= main_cols {
+        let centered_col = main_col + (main_cols - center_cols) / 2;
+        let left_limit_col = main_col + left_cols + i32::from(left_cols > 0);
+        let right_limit_col = main_col + main_cols - right_cols - i32::from(right_cols > 0);
+        if centered_col >= left_limit_col && centered_col + center_cols <= right_limit_col {
+            surface.put_text(
+                centered_col,
+                row,
+                center_cols,
+                palette.fg,
+                palette.statusbar_bg,
+                &center,
+            );
+        }
+    }
+
+    render_commandbar(surface, panel, palette, footer_hint);
+}
+
+fn render_commandbar(
+    surface: &mut CellSurface,
+    panel: CellRect,
+    palette: &ScenePalette,
+    footer_hint: Option<&str>,
+) {
+    if panel.rows < 2 {
+        return;
+    }
+
+    let row = panel.row + panel.rows - 1;
+    let right = footer_hint.unwrap_or_default();
+    let right_cols = display_cell_width(right) as i32;
+    if right_cols > 0 && right_cols <= panel.cols {
+        surface.put_text(
+            panel.col + panel.cols - right_cols,
+            row,
+            right_cols,
+            palette.muted,
+            palette.bg,
+            right,
+        );
+    }
+}
+
+fn render_statusbar_sidebar_segment(
+    surface: &mut CellSurface,
+    panel: CellRect,
+    sidebar_panel: Option<CellRect>,
+    palette: &ScenePalette,
+    mode: HarnessMode,
+) -> i32 {
+    let row = panel.row;
+    let Some(sidebar_panel) = sidebar_panel else {
+        let mode_label = statusline_mode_label(mode);
+        let mode_cols = display_cell_width(mode_label) as i32;
+        surface.put_text(
+            panel.col,
+            row,
+            mode_cols,
+            palette.fg,
+            palette.statusbar_bg,
+            mode_label,
+        );
+        if let Some(rect) = statusbar_new_project_rect(panel, None, mode) {
+            surface.put_text(
+                rect.col,
+                rect.row,
+                rect.cols,
+                palette.fg,
+                palette.statusbar_bg,
+                "+",
+            );
+            return rect.col + rect.cols + 1;
+        }
+        return mode_cols.min(panel.cols);
+    };
+
+    let sidebar_cols = sidebar_panel.cols.min(panel.cols).max(0);
+    if sidebar_cols <= 0 {
+        return panel.col;
+    }
+
+    let mode_label = statusline_mode_label(mode);
+    let mode_cols = display_cell_width(mode_label) as i32;
+    let mode_cols = mode_cols.min(sidebar_cols);
+    surface.put_text(
+        panel.col,
+        row,
+        mode_cols,
+        palette.fg,
+        palette.statusbar_bg,
+        mode_label,
+    );
+
+    if let Some(rect) = statusbar_new_project_rect(panel, Some(sidebar_panel), mode) {
+        surface.put_text(
+            rect.col,
+            rect.row,
+            rect.cols,
+            palette.fg,
+            palette.statusbar_bg,
+            "+",
+        );
+    }
+
+    let separator_col = panel.col + sidebar_cols - 1;
+    surface.set_cell(
+        separator_col,
+        row,
+        palette.border,
+        palette.statusbar_bg,
+        "│",
+        false,
+    );
+    panel.col + sidebar_cols
+}
+
+pub(super) fn statusbar_new_project_rect(
+    panel: CellRect,
+    sidebar_panel: Option<CellRect>,
+    mode: HarnessMode,
+) -> Option<CellRect> {
+    if panel.cols <= 0 || panel.rows <= 0 {
+        return None;
+    }
+
+    let row = panel.row;
+    let mode_cols = display_cell_width(statusline_mode_label(mode)) as i32;
+    let plus_col = sidebar_panel
+        .map(|sidebar_panel| panel.col + sidebar_panel.cols.min(panel.cols).max(0) - 3)
+        .unwrap_or(panel.col + mode_cols + 1);
+    let limit_col = sidebar_panel
+        .map(|sidebar_panel| panel.col + sidebar_panel.cols.min(panel.cols).max(0) - 1)
+        .unwrap_or(panel.col + panel.cols);
+
+    (plus_col >= panel.col + mode_cols && plus_col < limit_col)
+        .then_some(CellRect::new(plus_col, row, 1, 1))
+}
+
+pub(super) fn statusline_mode_label(mode: HarnessMode) -> &'static str {
+    match mode {
+        HarnessMode::Normal => " NORMAL ",
+        HarnessMode::Command => " COMMAND ",
+    }
+}
+
+fn statusline_left_text(chrome: &ChromeView) -> String {
+    format!(" {} ", chrome.project)
+}
+
+fn statusline_center_text(chrome: &ChromeView) -> String {
+    if chrome.session.is_empty() {
+        String::new()
+    } else {
+        format!(" {} ", chrome.session)
+    }
+}
+
+fn statusline_right_text(chrome: &ChromeView) -> String {
+    if chrome.status.is_empty() {
+        String::new()
+    } else {
+        format!(" {} ", chrome.status)
     }
 }
 
@@ -190,13 +383,20 @@ pub(super) fn render_sidebar(
     palette: &ScenePalette,
     now_ms: u64,
 ) {
-    draw_box(
-        surface,
-        panel,
-        palette.fg,
-        palette.sidebar_bg,
-        palette.border,
-    );
+    surface.fill_rect(panel, palette.fg, palette.sidebar_bg);
+    if panel.cols > 0 && panel.rows > 0 {
+        let separator_col = panel.col + panel.cols - 1;
+        for row in panel.row..(panel.row + panel.rows) {
+            surface.set_cell(
+                separator_col,
+                row,
+                palette.border,
+                palette.sidebar_bg,
+                "│",
+                false,
+            );
+        }
+    }
     let visible_rows = content.rows.max(0) as usize;
     if visible_rows == 0 || content.cols <= 0 {
         return;
@@ -256,10 +456,17 @@ pub(super) fn render_sidebar(
 
         match row.kind {
             SidebarRowKind::Label => {}
-            SidebarRowKind::ActionOpenProject | SidebarRowKind::Project(_) => {
+            SidebarRowKind::Project(_) => {
                 let value = truncate_to_cells(&row.text, content.cols as usize);
-                let col = content.col + centered_cell_offset(content.cols, &value);
-                surface.put_text_styled(col, row_y, content.cols, row_fg, row_bg, &value, reverse);
+                surface.put_text_styled(
+                    content.col,
+                    row_y,
+                    content.cols,
+                    row_fg,
+                    row_bg,
+                    &value,
+                    reverse,
+                );
             }
             SidebarRowKind::Session { .. } => {
                 let status = row.status.map(|status| {
@@ -272,13 +479,17 @@ pub(super) fn render_sidebar(
                         },
                     )
                 });
+                let indent_cols = content.cols.min(2);
                 let reserved_cells = status
                     .map(|(glyph, _)| display_cell_width(glyph) as i32 + 1)
                     .unwrap_or(0);
-                let text_cols = content.cols.saturating_sub(reserved_cells);
+                let text_cols = content
+                    .cols
+                    .saturating_sub(indent_cols)
+                    .saturating_sub(reserved_cells);
                 let value = truncate_to_cells(&row.text, text_cols as usize);
                 surface.put_text_styled(
-                    content.col,
+                    content.col + indent_cols,
                     row_y,
                     text_cols,
                     row_fg,
@@ -330,16 +541,8 @@ pub(super) fn render_terminal(
     selection: Option<TerminalSelectionRange>,
     palette: &ScenePalette,
     cursor_mode: TerminalCursorMode,
-    footer_hint: Option<&str>,
 ) -> Option<HardwareCursor> {
-    draw_box(
-        surface,
-        layout.card,
-        palette.fg,
-        palette.terminal_card_bg,
-        palette.border,
-    );
-    surface.fill_rect(layout.terminal, palette.term_fg, palette.term_bg);
+    surface.fill_rect(layout.card, palette.term_fg, palette.term_bg);
     if layout.terminal.rows <= 0 || layout.terminal.cols <= 0 {
         return None;
     }
@@ -353,19 +556,6 @@ pub(super) fn render_terminal(
         cursor_mode == TerminalCursorMode::Cell,
     );
     render_terminal_scrollback(surface, layout, screen, palette);
-
-    if let Some(help) = footer_hint {
-        if layout.card.cols > display_cell_width(help) as i32 + 2 {
-            surface.put_text(
-                layout.card.col + layout.card.cols - display_cell_width(help) as i32 - 1,
-                layout.card.row + layout.card.rows - 1,
-                display_cell_width(help) as i32,
-                palette.fg,
-                palette.terminal_card_bg,
-                help,
-            );
-        }
-    }
 
     match cursor_mode {
         TerminalCursorMode::Hardware => hardware_cursor_for_screen(layout.terminal, screen),
@@ -423,7 +613,7 @@ fn render_terminal_scrollback(
         visible_rows.saturating_add(max_scroll),
         max_scroll.saturating_sub(screen.scrollback()),
         palette.border,
-        palette.terminal_card_bg,
+        palette.term_bg,
         SCROLLBAR_TRACK_GLYPH,
         palette.muted,
         SCROLLBAR_THUMB_GLYPH,

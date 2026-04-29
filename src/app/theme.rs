@@ -2,6 +2,7 @@ use crate::render::Color;
 pub(super) const TEXT: Color = ansi_index_to_color_const(7);
 pub(super) const MUTED: Color = ansi_index_to_color_const(8);
 pub(super) const ACCENT: Color = ansi_index_to_color_const(12);
+pub(super) const STATUS_BG: Color = Color::ansi_index(8);
 pub(super) const RUNNING: Color = ansi_index_to_color_const(10);
 pub(super) const WARNING: Color = ansi_index_to_color_const(11);
 const CURSOR: Color = Color::rgb(188, 204, 255);
