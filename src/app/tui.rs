@@ -3,12 +3,16 @@ use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
-use crate::config::{KeyModifiers, KeyStroke, KeyToken, NamedKeyToken};
+use crate::config::{AppAction, KeyModifiers, KeyStroke, KeyToken, NamedKeyToken};
 use crate::notify::Notify;
+use crate::pi;
+use crate::state::ScannedSession;
 use crate::terminal::TerminalSelectionPoint;
 
 use super::backend::{terminal_selection_point_for_cell_rect, HarnessCore, ShortcutOutcome};
-use super::cell_surface::{display_cell_width, CellSurface};
+use super::cell_surface::{
+    display_cell_width, draw_box, render_cell_scrollbar, truncate_to_cells, CellSurface,
+};
 use super::layout::{compute_cell_layout, sidebar_content_rect, CellLayout, CellRect as Rect};
 use super::scene::{
     harness_scene_layout, render_harness_scene, statusbar_new_project_rect, HarnessMode,
@@ -243,6 +247,9 @@ fn command_char_width(ch: char) -> usize {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TuiCommand {
     Open(PathBuf),
+    Archive,
+    Refresh,
+    Reload,
     Quit,
     Help,
 }
@@ -265,6 +272,9 @@ fn parse_command(input: &str) -> Result<TuiCommand, String> {
             let path = parse_path_argument(rest)?;
             Ok(TuiCommand::Open(expand_home_path(&path)))
         }
+        "archive" | "archives" => Ok(TuiCommand::Archive),
+        "refresh" => Ok(TuiCommand::Refresh),
+        "reload" => Ok(TuiCommand::Reload),
         "q" | "quit" => Ok(TuiCommand::Quit),
         "h" | "help" => Ok(TuiCommand::Help),
         _ => Err(format!("unknown command: :{name}")),
@@ -306,12 +316,259 @@ fn home_dir_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("~"))
 }
 
+#[derive(Clone, Debug)]
+struct ArchiveViewerState {
+    sessions: Vec<ScannedSession>,
+    selected: usize,
+    scroll: usize,
+    note: Option<String>,
+}
+
+impl ArchiveViewerState {
+    fn load() -> Self {
+        let mut viewer = Self {
+            sessions: pi::scan_archived_sessions(),
+            selected: 0,
+            scroll: 0,
+            note: None,
+        };
+        viewer.clamp_selection();
+        viewer
+    }
+
+    fn reload_sessions(&mut self) {
+        let selected_id = self
+            .selected_session()
+            .map(|session| session.session_id.clone());
+        self.sessions = pi::scan_archived_sessions();
+        self.selected = selected_id
+            .as_deref()
+            .and_then(|id| {
+                self.sessions
+                    .iter()
+                    .position(|session| session.session_id == id)
+            })
+            .unwrap_or(0);
+        self.clamp_selection();
+        self.scroll = self.scroll.min(self.sessions.len().saturating_sub(1));
+    }
+
+    fn selected_session(&self) -> Option<&ScannedSession> {
+        self.sessions.get(self.selected)
+    }
+
+    fn move_selection(&mut self, delta: i32) {
+        if self.sessions.is_empty() {
+            return;
+        }
+        let max = self.sessions.len().saturating_sub(1) as i32;
+        self.selected = (self.selected as i32 + delta).clamp(0, max) as usize;
+    }
+
+    fn page_selection(&mut self, delta_pages: i32, visible_rows: usize) {
+        let step = visible_rows.max(1) as i32;
+        self.move_selection(delta_pages.saturating_mul(step));
+    }
+
+    fn select_first(&mut self) {
+        self.selected = 0;
+    }
+
+    fn select_last(&mut self) {
+        self.selected = self.sessions.len().saturating_sub(1);
+    }
+
+    fn ensure_selection_visible(&mut self, visible_rows: usize) {
+        if self.sessions.is_empty() || visible_rows == 0 {
+            self.scroll = 0;
+            return;
+        }
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        } else if self.selected >= self.scroll + visible_rows {
+            self.scroll = self.selected.saturating_sub(visible_rows.saturating_sub(1));
+        }
+        self.scroll = self
+            .scroll
+            .min(self.sessions.len().saturating_sub(visible_rows));
+    }
+
+    fn clamp_selection(&mut self) {
+        if self.sessions.is_empty() {
+            self.selected = 0;
+        } else {
+            self.selected = self.selected.min(self.sessions.len() - 1);
+        }
+    }
+}
+
+fn archive_viewer_visible_rows_for_terminal() -> usize {
+    let (cols, rows) = terminal_size();
+    archive_viewer_list_rows(archive_viewer_rect(i32::from(cols), i32::from(rows)))
+}
+
+fn archive_viewer_rect(cols: i32, rows: i32) -> Rect {
+    let cols = cols.max(1);
+    let rows = rows.max(1);
+    let width = cols.min(110).max(1);
+    let height = rows.min(32).max(1);
+    Rect::new((cols - width) / 2, (rows - height) / 2, width, height)
+}
+
+fn archive_viewer_list_rows(rect: Rect) -> usize {
+    rect.rows.saturating_sub(5) as usize
+}
+
+fn render_archive_viewer(surface: &mut CellSurface, viewer: &mut ArchiveViewerState) {
+    let rect = archive_viewer_rect(surface.cols, surface.rows);
+    draw_box(surface, rect, TUI_DEFAULT_FG, TUI_DEFAULT_BG, MUTED);
+    if rect.cols <= 2 || rect.rows <= 2 {
+        return;
+    }
+
+    let inner = rect.inset_edges(1, 1, 1, 1);
+    surface.put_text(
+        rect.col + 2,
+        rect.row,
+        rect.cols - 4,
+        TUI_DEFAULT_FG,
+        TUI_DEFAULT_BG,
+        " ARCHIVE ",
+    );
+    let count = format!(" {} archived ", viewer.sessions.len());
+    let count_col = rect.col + rect.cols - display_cell_width(&count) as i32 - 2;
+    if count_col > rect.col + 2 {
+        surface.put_text(
+            count_col,
+            rect.row,
+            rect.cols - 2,
+            MUTED,
+            TUI_DEFAULT_BG,
+            &count,
+        );
+    }
+
+    let hint = "↑/↓/j/k select  Enter restore  r reload  q/Esc close";
+    surface.put_text(
+        inner.col,
+        inner.row,
+        inner.cols,
+        MUTED,
+        TUI_DEFAULT_BG,
+        hint,
+    );
+    let header_row = inner.row + 1;
+    surface.put_text(
+        inner.col,
+        header_row,
+        inner.cols,
+        TUI_DEFAULT_FG,
+        TUI_DEFAULT_BG,
+        "Updated  Session / project",
+    );
+
+    let list_row = inner.row + 2;
+    let footer_row = rect.row + rect.rows - 2;
+    let list_rows = (footer_row - list_row).max(0) as usize;
+    let list_width = (inner.cols - 1).max(0);
+    viewer.ensure_selection_visible(list_rows);
+
+    if viewer.sessions.is_empty() {
+        surface.put_text(
+            inner.col,
+            list_row,
+            list_width,
+            MUTED,
+            TUI_DEFAULT_BG,
+            "No archived sessions. Ctrl+Delete archives the selected session.",
+        );
+    } else {
+        let now_ms = crate::util::now_millis();
+        let end = (viewer.scroll + list_rows).min(viewer.sessions.len());
+        for (row_offset, index) in (viewer.scroll..end).enumerate() {
+            let row = list_row + row_offset as i32;
+            let selected = index == viewer.selected;
+            let line = archive_viewer_row_text(&viewer.sessions[index], now_ms);
+            let row_rect = Rect::new(inner.col, row, list_width, 1);
+            surface.put_text_styled(
+                inner.col,
+                row,
+                list_width,
+                TUI_DEFAULT_FG,
+                TUI_DEFAULT_BG,
+                &truncate_to_cells(&line, list_width as usize),
+                selected,
+            );
+            if selected {
+                surface.set_reverse_rect(row_rect, true);
+            }
+        }
+        render_cell_scrollbar(
+            surface,
+            inner.col + inner.cols - 1,
+            list_row,
+            list_rows as i32,
+            list_rows,
+            viewer.sessions.len(),
+            viewer.scroll,
+            MUTED,
+            TUI_DEFAULT_BG,
+            "│",
+            TUI_DEFAULT_FG,
+            "█",
+        );
+    }
+
+    let footer = viewer
+        .note
+        .as_deref()
+        .unwrap_or("Restores selected archive to its original project cwd.");
+    surface.put_text(
+        inner.col,
+        footer_row,
+        inner.cols,
+        MUTED,
+        TUI_DEFAULT_BG,
+        &truncate_to_cells(footer, inner.cols.max(0) as usize),
+    );
+}
+
+fn archive_viewer_row_text(session: &ScannedSession, now_ms: u64) -> String {
+    format!(
+        "{:<7} {}  {}",
+        archive_age_label(now_ms, session.updated_at_ms),
+        session.name,
+        session.cwd.display()
+    )
+}
+
+fn archive_age_label(now_ms: u64, updated_ms: u64) -> String {
+    if updated_ms == 0 {
+        return "unknown".to_string();
+    }
+    let age_secs = now_ms.saturating_sub(updated_ms) / 1000;
+    if age_secs < 60 {
+        "now".to_string()
+    } else if age_secs < 60 * 60 {
+        format!("{}m ago", age_secs / 60)
+    } else if age_secs < 60 * 60 * 24 {
+        format!("{}h ago", age_secs / (60 * 60))
+    } else if age_secs < 60 * 60 * 24 * 30 {
+        format!("{}d ago", age_secs / (60 * 60 * 24))
+    } else if age_secs < 60 * 60 * 24 * 365 {
+        format!("{}mo ago", age_secs / (60 * 60 * 24 * 30))
+    } else {
+        format!("{}y ago", age_secs / (60 * 60 * 24 * 365))
+    }
+}
+
 struct TuiApp {
     core: HarnessCore,
     last_size: Option<(u16, u16)>,
     needs_redraw: bool,
     host_bracketed_paste: Option<Vec<u8>>,
     command_line: Option<CommandLineState>,
+    archive_viewer: Option<ArchiveViewerState>,
 }
 
 impl TuiApp {
@@ -323,6 +580,7 @@ impl TuiApp {
             needs_redraw: true,
             host_bracketed_paste: None,
             command_line: None,
+            archive_viewer: None,
         };
         app.core.sync_terminals();
         Ok(app)
@@ -443,6 +701,10 @@ impl TuiApp {
         if let Some(command_cursor) = self.render_command_line_overlay(&mut surface) {
             hardware_cursor = Some(command_cursor);
         }
+        if let Some(viewer) = &mut self.archive_viewer {
+            render_archive_viewer(&mut surface, viewer);
+            hardware_cursor = None;
+        }
         renderer.render(stdout, &surface, hardware_cursor)?;
         Ok(())
     }
@@ -480,12 +742,17 @@ impl TuiApp {
     }
 
     fn handle_input(&mut self, bytes: &[u8]) -> bool {
-        if self.handle_host_bracketed_paste(bytes) {
+        if bytes == [0x11] {
+            return true;
+        }
+
+        if self.archive_viewer.is_some() {
+            self.handle_archive_viewer_input(bytes);
             return false;
         }
 
-        if bytes == [0x11] {
-            return true;
+        if self.handle_host_bracketed_paste(bytes) {
+            return false;
         }
 
         if let Some(should_quit) = self.handle_command_line_input(bytes) {
@@ -708,11 +975,120 @@ impl TuiApp {
 
         match parse_command(input) {
             Ok(TuiCommand::Open(path)) => self.core.open_project_path(path),
+            Ok(TuiCommand::Archive) => self.open_archive_viewer(),
+            Ok(TuiCommand::Refresh) => self.core.run_action(AppAction::RefreshSession),
+            Ok(TuiCommand::Reload) => self.core.run_action(AppAction::RefreshAllSessions),
             Ok(TuiCommand::Quit) => return true,
-            Ok(TuiCommand::Help) => self.core.set_note_text("commands: :open <dir>, :quit"),
+            Ok(TuiCommand::Help) => self
+                .core
+                .set_note_text("commands: :open <dir>, :archive, :refresh, :reload, :quit"),
             Err(note) => self.core.set_note_text(note),
         }
         false
+    }
+
+    fn open_archive_viewer(&mut self) {
+        self.archive_viewer = Some(ArchiveViewerState::load());
+    }
+
+    fn handle_archive_viewer_input(&mut self, bytes: &[u8]) {
+        if bytes == [0x03] {
+            self.archive_viewer = None;
+            return;
+        }
+
+        let Some(stroke) = key_stroke_for_bytes(bytes) else {
+            return;
+        };
+        let no_modifiers = stroke.modifiers == KeyModifiers::default();
+        if no_modifiers {
+            match stroke.key {
+                KeyToken::Named(NamedKeyToken::Escape) => self.archive_viewer = None,
+                KeyToken::Named(NamedKeyToken::Enter) => self.restore_selected_archive_session(),
+                KeyToken::Named(NamedKeyToken::Up) => self.move_archive_selection(-1),
+                KeyToken::Named(NamedKeyToken::Down) => self.move_archive_selection(1),
+                KeyToken::Named(NamedKeyToken::PageUp) => self.page_archive_selection(-1),
+                KeyToken::Named(NamedKeyToken::PageDown) => self.page_archive_selection(1),
+                KeyToken::Named(NamedKeyToken::Home) => self.select_first_archive_session(),
+                KeyToken::Named(NamedKeyToken::End) => self.select_last_archive_session(),
+                KeyToken::Character(ref key) if key == "q" => self.archive_viewer = None,
+                KeyToken::Character(ref key) if key == "j" => self.move_archive_selection(1),
+                KeyToken::Character(ref key) if key == "k" => self.move_archive_selection(-1),
+                KeyToken::Character(ref key) if key == "g" => self.select_first_archive_session(),
+                KeyToken::Character(ref key) if key == "r" => self.reload_archive_viewer(),
+                _ => {}
+            }
+            return;
+        }
+
+        let ctrl_only =
+            stroke.modifiers.control && !stroke.modifiers.shift && !stroke.modifiers.alt;
+        if ctrl_only && matches!(stroke.key, KeyToken::Character(ref key) if key == "c") {
+            self.archive_viewer = None;
+            return;
+        }
+
+        let shift_only =
+            stroke.modifiers.shift && !stroke.modifiers.control && !stroke.modifiers.alt;
+        if shift_only && matches!(stroke.key, KeyToken::Character(ref key) if key == "g") {
+            self.select_last_archive_session();
+        }
+    }
+
+    fn move_archive_selection(&mut self, delta: i32) {
+        if let Some(viewer) = &mut self.archive_viewer {
+            viewer.move_selection(delta);
+        }
+    }
+
+    fn page_archive_selection(&mut self, delta_pages: i32) {
+        let visible_rows = archive_viewer_visible_rows_for_terminal();
+        if let Some(viewer) = &mut self.archive_viewer {
+            viewer.page_selection(delta_pages, visible_rows);
+        }
+    }
+
+    fn select_first_archive_session(&mut self) {
+        if let Some(viewer) = &mut self.archive_viewer {
+            viewer.select_first();
+        }
+    }
+
+    fn select_last_archive_session(&mut self) {
+        if let Some(viewer) = &mut self.archive_viewer {
+            viewer.select_last();
+        }
+    }
+
+    fn reload_archive_viewer(&mut self) {
+        if let Some(viewer) = &mut self.archive_viewer {
+            viewer.reload_sessions();
+            viewer.note = Some(format!("{} archived sessions", viewer.sessions.len()));
+        }
+    }
+
+    fn restore_selected_archive_session(&mut self) {
+        let archived = self
+            .archive_viewer
+            .as_ref()
+            .and_then(ArchiveViewerState::selected_session)
+            .cloned();
+        let Some(archived) = archived else {
+            if let Some(viewer) = &mut self.archive_viewer {
+                viewer.note = Some("no archived sessions".to_string());
+            }
+            return;
+        };
+
+        match self.core.restore_archived_session(&archived) {
+            Ok(()) => self.archive_viewer = None,
+            Err(error) => {
+                if let Some(viewer) = &mut self.archive_viewer {
+                    viewer.reload_sessions();
+                    viewer.note = Some(error);
+                }
+            }
+        }
     }
 
     fn handle_host_bracketed_paste(&mut self, bytes: &[u8]) -> bool {
@@ -897,6 +1273,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_refresh_and_reload_commands() {
+        assert_eq!(parse_command("refresh").unwrap(), TuiCommand::Refresh);
+        assert_eq!(parse_command(":reload").unwrap(), TuiCommand::Reload);
+    }
+
+    #[test]
+    fn parse_archive_command() {
+        assert_eq!(parse_command("archive").unwrap(), TuiCommand::Archive);
+        assert_eq!(parse_command(":archives").unwrap(), TuiCommand::Archive);
+    }
     #[test]
     fn command_line_backspace_updates_utf8_cursor() {
         let mut command_line = CommandLineState::with_input("open café");
