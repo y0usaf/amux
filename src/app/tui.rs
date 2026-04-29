@@ -1,7 +1,7 @@
 use std::io;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::{AppAction, KeyModifiers, KeyStroke, KeyToken, NamedKeyToken};
 use crate::notify::Notify;
@@ -19,13 +19,13 @@ use super::scene::{
     ScenePalette, TerminalCursorMode,
 };
 use super::sidebar::SIDEBAR_SPINNER_FRAME_MS;
-use super::theme::{MUTED, STATUS_BG, TERM_FG};
+use super::theme::{self, DerivedTheme, TerminalPalette};
 
 mod ansi;
 mod input;
 mod raw;
 
-use ansi::{AnsiRenderer, DEFAULT_BG as TUI_DEFAULT_BG, DEFAULT_FG as TUI_DEFAULT_FG};
+use ansi::AnsiRenderer;
 use input::{
     key_stroke_for_bytes, mouse_event_for_bytes, MouseEvent, MouseEventKind, WheelDirection,
 };
@@ -48,6 +48,7 @@ pub fn run(initial_project_paths: Vec<PathBuf>) -> anyhow::Result<()> {
     let notify = tui_notify(tx.clone());
     let mut app = TuiApp::new(notify, initial_project_paths)?;
     let _raw_terminal = RawTerminal::enter()?;
+    app.inherit_terminal_theme();
     spawn_stdin_reader(tx);
     app.run(rx)
 }
@@ -410,8 +411,8 @@ fn archive_viewer_visible_rows_for_terminal() -> usize {
 fn archive_viewer_rect(cols: i32, rows: i32) -> Rect {
     let cols = cols.max(1);
     let rows = rows.max(1);
-    let width = cols.min(110).max(1);
-    let height = rows.min(32).max(1);
+    let width = cols.clamp(1, 110);
+    let height = rows.clamp(1, 32);
     Rect::new((cols - width) / 2, (rows - height) / 2, width, height)
 }
 
@@ -419,9 +420,13 @@ fn archive_viewer_list_rows(rect: Rect) -> usize {
     rect.rows.saturating_sub(5) as usize
 }
 
-fn render_archive_viewer(surface: &mut CellSurface, viewer: &mut ArchiveViewerState) {
+fn render_archive_viewer(
+    surface: &mut CellSurface,
+    viewer: &mut ArchiveViewerState,
+    theme: &DerivedTheme,
+) {
     let rect = archive_viewer_rect(surface.cols, surface.rows);
-    draw_box(surface, rect, TUI_DEFAULT_FG, TUI_DEFAULT_BG, MUTED);
+    draw_box(surface, rect, theme.term_fg, theme.surface, theme.border);
     if rect.cols <= 2 || rect.rows <= 2 {
         return;
     }
@@ -431,8 +436,8 @@ fn render_archive_viewer(surface: &mut CellSurface, viewer: &mut ArchiveViewerSt
         rect.col + 2,
         rect.row,
         rect.cols - 4,
-        TUI_DEFAULT_FG,
-        TUI_DEFAULT_BG,
+        theme.accent,
+        theme.surface,
         " ARCHIVE ",
     );
     let count = format!(" {} archived ", viewer.sessions.len());
@@ -442,8 +447,8 @@ fn render_archive_viewer(surface: &mut CellSurface, viewer: &mut ArchiveViewerSt
             count_col,
             rect.row,
             rect.cols - 2,
-            MUTED,
-            TUI_DEFAULT_BG,
+            theme.accent_2,
+            theme.surface,
             &count,
         );
     }
@@ -453,8 +458,8 @@ fn render_archive_viewer(surface: &mut CellSurface, viewer: &mut ArchiveViewerSt
         inner.col,
         inner.row,
         inner.cols,
-        MUTED,
-        TUI_DEFAULT_BG,
+        theme.muted,
+        theme.surface,
         hint,
     );
     let header_row = inner.row + 1;
@@ -462,9 +467,9 @@ fn render_archive_viewer(surface: &mut CellSurface, viewer: &mut ArchiveViewerSt
         inner.col,
         header_row,
         inner.cols,
-        TUI_DEFAULT_FG,
-        TUI_DEFAULT_BG,
-        "Updated  Session / project",
+        theme::brighten(theme.muted, 24),
+        theme.surface,
+        "UPDATED  SESSION / PROJECT",
     );
 
     let list_row = inner.row + 2;
@@ -478,8 +483,8 @@ fn render_archive_viewer(surface: &mut CellSurface, viewer: &mut ArchiveViewerSt
             inner.col,
             list_row,
             list_width,
-            MUTED,
-            TUI_DEFAULT_BG,
+            theme.muted,
+            theme.surface,
             "No archived sessions. Ctrl+Delete archives the selected session.",
         );
     } else {
@@ -490,18 +495,26 @@ fn render_archive_viewer(surface: &mut CellSurface, viewer: &mut ArchiveViewerSt
             let selected = index == viewer.selected;
             let line = archive_viewer_row_text(&viewer.sessions[index], now_ms);
             let row_rect = Rect::new(inner.col, row, list_width, 1);
+            let row_bg = if selected {
+                theme::fade_toward(theme.surface_raised, theme.accent, 48)
+            } else {
+                theme.surface
+            };
+            let row_fg = if selected {
+                theme.term_fg
+            } else {
+                theme::brighten(theme.muted, 30)
+            };
+            surface.fill_rect(row_rect, row_fg, row_bg);
             surface.put_text_styled(
                 inner.col,
                 row,
                 list_width,
-                TUI_DEFAULT_FG,
-                TUI_DEFAULT_BG,
+                row_fg,
+                row_bg,
                 &truncate_to_cells(&line, list_width as usize),
-                selected,
+                false,
             );
-            if selected {
-                surface.set_reverse_rect(row_rect, true);
-            }
         }
         render_cell_scrollbar(
             surface,
@@ -511,11 +524,11 @@ fn render_archive_viewer(surface: &mut CellSurface, viewer: &mut ArchiveViewerSt
             list_rows,
             viewer.sessions.len(),
             viewer.scroll,
-            MUTED,
-            TUI_DEFAULT_BG,
-            "│",
-            TUI_DEFAULT_FG,
-            "█",
+            theme.border,
+            theme.surface,
+            "╎",
+            theme.accent_2,
+            "┃",
         );
     }
 
@@ -527,8 +540,8 @@ fn render_archive_viewer(surface: &mut CellSurface, viewer: &mut ArchiveViewerSt
         inner.col,
         footer_row,
         inner.cols,
-        MUTED,
-        TUI_DEFAULT_BG,
+        theme.muted,
+        theme.surface,
         &truncate_to_cells(footer, inner.cols.max(0) as usize),
     );
 }
@@ -567,8 +580,10 @@ struct TuiApp {
     last_size: Option<(u16, u16)>,
     needs_redraw: bool,
     host_bracketed_paste: Option<Vec<u8>>,
+    last_spinner_redraw: Option<Instant>,
     command_line: Option<CommandLineState>,
     archive_viewer: Option<ArchiveViewerState>,
+    theme: DerivedTheme,
 }
 
 impl TuiApp {
@@ -578,13 +593,80 @@ impl TuiApp {
             core,
             last_size: None,
             needs_redraw: true,
+            last_spinner_redraw: None,
             host_bracketed_paste: None,
             command_line: None,
             archive_viewer: None,
+            theme: DerivedTheme::fallback(),
         };
         app.core.sync_terminals();
         Ok(app)
     }
+
+    fn inherit_terminal_theme(&mut self) {
+        if let Ok(response) = raw::query_terminal_palette_response(Duration::from_millis(120)) {
+            if let Some(palette) = parse_terminal_palette_response(&response) {
+                self.theme = DerivedTheme::from_terminal_palette(palette);
+            }
+        }
+    }
+}
+
+fn parse_terminal_palette_response(response: &[u8]) -> Option<TerminalPalette> {
+    let text = String::from_utf8_lossy(response);
+    let mut palette = TerminalPalette::fallback();
+    let mut got_fg = false;
+    let mut got_bg = false;
+    let mut got_ansi = [false; 16];
+
+    for token in text.split(['\x1b', '\x07']) {
+        let token = token.trim_matches(['\\']);
+        if let Some(rest) = token.strip_prefix("]10;") {
+            if let Some(color) = parse_osc_rgb(rest) {
+                palette.fg = color;
+                got_fg = true;
+            }
+        } else if let Some(rest) = token.strip_prefix("]11;") {
+            if let Some(color) = parse_osc_rgb(rest) {
+                palette.bg = color;
+                got_bg = true;
+            }
+        } else if let Some(rest) = token.strip_prefix("]4;") {
+            let mut parts = rest.splitn(2, ';');
+            if let (Some(index), Some(color_text)) = (parts.next(), parts.next()) {
+                if let (Ok(index), Some(color)) =
+                    (index.parse::<usize>(), parse_osc_rgb(color_text))
+                {
+                    if index < 16 {
+                        palette.ansi[index] = color;
+                        got_ansi[index] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    (got_fg && got_bg && got_ansi.iter().any(|got| *got)).then_some(palette)
+}
+
+fn parse_osc_rgb(value: &str) -> Option<crate::render::Color> {
+    let rgb = value.split(['\x1b', '\x07', '\\']).next()?.trim();
+    let rgb = rgb.strip_prefix("rgb:")?;
+    let mut parts = rgb.split('/');
+    let r = parse_osc_rgb_component(parts.next()?)?;
+    let g = parse_osc_rgb_component(parts.next()?)?;
+    let b = parse_osc_rgb_component(parts.next()?)?;
+    Some(crate::render::Color::rgb(r, g, b))
+}
+
+fn parse_osc_rgb_component(value: &str) -> Option<u8> {
+    let digits = value.trim();
+    if digits.is_empty() {
+        return None;
+    }
+    let value = u16::from_str_radix(digits, 16).ok()?;
+    let max = (1u32 << (digits.len().min(4) * 4)) - 1;
+    Some(((u32::from(value) * 255 + max / 2) / max) as u8)
 }
 
 impl TuiApp {
@@ -600,16 +682,20 @@ impl TuiApp {
                 break;
             }
 
+            let spinner_active = self.core.has_sidebar_spinner();
+            if spinner_active && self.spinner_redraw_due() {
+                self.needs_redraw = true;
+            }
+
             if self.needs_redraw {
                 self.render(&mut stdout, &mut renderer)?;
                 self.needs_redraw = false;
+                self.last_spinner_redraw = spinner_active.then(Instant::now);
+            } else if !spinner_active {
+                self.last_spinner_redraw = None;
             }
 
-            let timeout = if self.core.has_sidebar_spinner() {
-                Duration::from_millis(SIDEBAR_SPINNER_FRAME_MS)
-            } else {
-                Duration::from_millis(250)
-            };
+            let timeout = Duration::from_millis(SIDEBAR_SPINNER_FRAME_MS);
 
             match rx.recv_timeout(timeout) {
                 Ok(event) => {
@@ -627,6 +713,11 @@ impl TuiApp {
         }
 
         Ok(())
+    }
+
+    fn spinner_redraw_due(&self) -> bool {
+        self.last_spinner_redraw
+            .is_none_or(|last| last.elapsed() >= Duration::from_millis(SIDEBAR_SPINNER_FRAME_MS))
     }
 
     fn drain_pending_events(&mut self, rx: &mpsc::Receiver<TuiEvent>) -> bool {
@@ -673,11 +764,11 @@ impl TuiApp {
             visible_sidebar_rows,
         );
 
-        let mut palette =
-            ScenePalette::monochrome(TUI_DEFAULT_FG, TUI_DEFAULT_BG, TERM_FG, TUI_DEFAULT_BG);
-        palette.border = MUTED;
-        palette.muted = MUTED;
-        palette.statusbar_bg = STATUS_BG;
+        let theme = self.theme;
+        let mut palette = ScenePalette::themed(theme);
+        palette.border = theme.border;
+        palette.muted = theme.muted;
+        palette.statusbar_bg = theme.status_bg;
         let mut surface =
             CellSurface::new(i32::from(cols), i32::from(rows), palette.fg, palette.bg);
         surface.fill_rect(
@@ -702,7 +793,7 @@ impl TuiApp {
             hardware_cursor = Some(command_cursor);
         }
         if let Some(viewer) = &mut self.archive_viewer {
-            render_archive_viewer(&mut surface, viewer);
+            render_archive_viewer(&mut surface, viewer, &self.theme);
             hardware_cursor = None;
         }
         renderer.render(stdout, &surface, hardware_cursor)?;
@@ -724,17 +815,29 @@ impl TuiApp {
         let command_line = self.command_line.as_ref()?;
         let row = surface.rows.saturating_sub(1);
         let command_rect = Rect::new(0, row, surface.cols, 1);
-        surface.fill_rect(command_rect, TUI_DEFAULT_FG, TUI_DEFAULT_BG);
+        surface.fill_rect(command_rect, self.theme.term_fg, self.theme.surface);
         let (visible_text, cursor_col) =
             command_line.visible_text_and_cursor_col(surface.cols.max(1) as usize);
-        surface.put_text(
-            0,
-            row,
-            surface.cols,
-            TUI_DEFAULT_FG,
-            TUI_DEFAULT_BG,
-            &visible_text,
-        );
+        if let Some(rest) = visible_text.strip_prefix(':') {
+            surface.put_text(0, row, 1, self.theme.accent, self.theme.surface, ":");
+            surface.put_text(
+                1,
+                row,
+                surface.cols.saturating_sub(1),
+                self.theme.term_fg,
+                self.theme.surface,
+                rest,
+            );
+        } else {
+            surface.put_text(
+                0,
+                row,
+                surface.cols,
+                self.theme.term_fg,
+                self.theme.surface,
+                &visible_text,
+            );
+        }
         Some(super::scene::HardwareCursor {
             col: cursor_col,
             row,

@@ -91,7 +91,7 @@ fn sidebar_status_prefers_active_over_notification() {
 }
 
 #[test]
-fn notification_status_uses_full_braille_glyph() {
+fn notification_status_uses_static_glyph() {
     assert_eq!(
         sidebar::sidebar_status_glyph(sidebar::SidebarStatusKind::Notification, 0),
         sidebar::SIDEBAR_NOTIFICATION_GLYPH

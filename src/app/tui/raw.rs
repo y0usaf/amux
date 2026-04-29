@@ -2,6 +2,7 @@ use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use super::input::split_input_chunks;
 use super::TuiEvent;
@@ -59,6 +60,31 @@ fn stty_inherit(args: &[&str]) -> anyhow::Result<()> {
         anyhow::bail!("stty failed: {status}");
     }
     Ok(())
+}
+
+pub(super) fn query_terminal_palette_response(timeout: Duration) -> io::Result<Vec<u8>> {
+    let _ = stty_inherit(&["raw", "-echo", "min", "0", "time", "1"]);
+    let mut stdout = io::stdout();
+    write!(stdout, "\x1b]10;?\x1b\\\x1b]11;?\x1b\\")?;
+    for index in 0..16 {
+        write!(stdout, "\x1b]4;{index};?\x1b\\")?;
+    }
+    stdout.flush()?;
+
+    let started = Instant::now();
+    let mut stdin = io::stdin();
+    let mut buf = [0u8; 4096];
+    let mut response = Vec::new();
+    while started.elapsed() < timeout {
+        match stdin.read(&mut buf) {
+            Ok(0) => continue,
+            Ok(n) => response.extend_from_slice(&buf[..n]),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let _ = stty_inherit(&["raw", "-echo", "min", "1", "time", "0"]);
+    Ok(response)
 }
 
 pub(super) fn spawn_stdin_reader(tx: mpsc::Sender<TuiEvent>) {

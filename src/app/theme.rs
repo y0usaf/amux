@@ -1,14 +1,104 @@
 use crate::render::Color;
+
 pub(super) const TEXT: Color = ansi_index_to_color_const(7);
 pub(super) const MUTED: Color = ansi_index_to_color_const(8);
 pub(super) const ACCENT: Color = ansi_index_to_color_const(12);
-pub(super) const STATUS_BG: Color = Color::ansi_index(8);
+pub(super) const ACCENT_2: Color = ansi_index_to_color_const(13);
+pub(super) const SURFACE: Color = Color::rgb(0x12, 0x18, 0x24);
+pub(super) const SURFACE_RAISED: Color = Color::rgb(0x18, 0x20, 0x31);
+pub(super) const SIDEBAR_BG: Color = Color::rgba(0, 0, 0, 0);
+pub(super) const STATUS_BG: Color = Color::rgb(0x24, 0x2d, 0x44);
+pub(super) const BORDER: Color = Color::rgb(0x34, 0x3d, 0x59);
 pub(super) const RUNNING: Color = ansi_index_to_color_const(10);
 pub(super) const WARNING: Color = ansi_index_to_color_const(11);
+pub(super) const ERROR: Color = ansi_index_to_color_const(9);
 const CURSOR: Color = Color::rgb(188, 204, 255);
 pub(super) const TERM_FG: Color = TEXT;
 const TERM_SELECTION_BG: Color = Color::rgb(53, 92, 173);
 const TERM_SELECTION_FG: Color = Color::rgb(245, 248, 255);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TerminalPalette {
+    pub(super) fg: Color,
+    pub(super) bg: Color,
+    pub(super) ansi: [Color; 16],
+}
+
+impl TerminalPalette {
+    pub(super) fn fallback() -> Self {
+        Self {
+            fg: TEXT,
+            bg: Color::rgba(0, 0, 0, 0),
+            ansi: std::array::from_fn(|index| ansi_index_to_color(index as u8)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct DerivedTheme {
+    pub(super) text: Color,
+    pub(super) muted: Color,
+    pub(super) accent: Color,
+    pub(super) accent_2: Color,
+    pub(super) surface: Color,
+    pub(super) surface_raised: Color,
+    pub(super) sidebar_bg: Color,
+    pub(super) status_bg: Color,
+    pub(super) border: Color,
+    pub(super) running: Color,
+    pub(super) warning: Color,
+    pub(super) error: Color,
+    pub(super) term_fg: Color,
+    pub(super) term_bg: Color,
+    pub(super) ansi: [Color; 16],
+}
+
+impl DerivedTheme {
+    pub(super) fn from_terminal_palette(palette: TerminalPalette) -> Self {
+        let text = palette.fg;
+        let bg = palette.bg;
+        let muted = fade_toward(text, bg, 112);
+        let accent = palette.ansi[12];
+        let accent_2 = palette.ansi[13];
+        Self {
+            text,
+            muted,
+            accent,
+            accent_2,
+            surface: fade_toward(bg, accent, 18),
+            surface_raised: fade_toward(bg, accent, 32),
+            sidebar_bg: SIDEBAR_BG,
+            status_bg: fade_toward(bg, accent, 46),
+            border: fade_toward(text, bg, 150),
+            running: palette.ansi[10],
+            warning: palette.ansi[11],
+            error: palette.ansi[9],
+            term_fg: text,
+            term_bg: bg,
+            ansi: palette.ansi,
+        }
+    }
+
+    pub(super) fn fallback() -> Self {
+        Self {
+            text: TEXT,
+            muted: MUTED,
+            accent: ACCENT,
+            accent_2: ACCENT_2,
+            surface: SURFACE,
+            surface_raised: SURFACE_RAISED,
+            sidebar_bg: SIDEBAR_BG,
+            status_bg: STATUS_BG,
+            border: BORDER,
+            running: RUNNING,
+            warning: WARNING,
+            error: ERROR,
+            term_fg: TERM_FG,
+            term_bg: Color::rgba(0, 0, 0, 0),
+            ansi: TerminalPalette::fallback().ansi,
+        }
+    }
+}
 
 pub(super) fn screen_cell_colors(
     cell: &vt100::Cell,
@@ -16,9 +106,10 @@ pub(super) fn screen_cell_colors(
     selected: bool,
     default_fg: Color,
     default_bg: Color,
+    ansi_palette: &[Color; 16],
 ) -> (Color, Color) {
-    let mut fg = terminal_color(cell.fgcolor(), default_fg);
-    let mut bg = terminal_color(cell.bgcolor(), default_bg);
+    let mut fg = terminal_color(cell.fgcolor(), default_fg, ansi_palette);
+    let mut bg = terminal_color(cell.bgcolor(), default_bg, ansi_palette);
 
     if cell.inverse() {
         std::mem::swap(&mut fg, &mut bg);
@@ -39,9 +130,10 @@ pub(super) fn screen_cell_colors(
     (fg, bg)
 }
 
-fn terminal_color(color: vt100::Color, default: Color) -> Color {
+fn terminal_color(color: vt100::Color, default: Color, ansi_palette: &[Color; 16]) -> Color {
     match color {
         vt100::Color::Default => default,
+        vt100::Color::Idx(idx) if idx < 16 => ansi_palette[idx as usize],
         vt100::Color::Idx(idx) => ansi_index_to_color(idx),
         vt100::Color::Rgb(r, g, b) => Color::rgb(r, g, b),
     }
@@ -92,7 +184,7 @@ fn ansi_index_to_color(idx: u8) -> Color {
     ansi_index_to_color_const(idx)
 }
 
-fn brighten(color: Color, amount: u8) -> Color {
+pub(super) fn brighten(color: Color, amount: u8) -> Color {
     let (r, g, b) = color.rgb_components();
     Color::rgb(
         r.saturating_add(amount),
@@ -101,7 +193,7 @@ fn brighten(color: Color, amount: u8) -> Color {
     )
 }
 
-fn fade_toward(color: Color, target: Color, mix: u8) -> Color {
+pub(super) fn fade_toward(color: Color, target: Color, mix: u8) -> Color {
     let (r1, g1, b1) = color.rgb_components();
     let (r2, g2, b2) = target.rgb_components();
     let blend = |a: u8, b: u8| -> u8 {
@@ -116,8 +208,8 @@ fn fade_toward(color: Color, target: Color, mix: u8) -> Color {
 #[cfg(test)]
 mod tests {
     use super::{
-        ansi_index_to_color, brighten, fade_toward, screen_cell_colors, CURSOR, TERM_FG,
-        TERM_SELECTION_BG, TERM_SELECTION_FG,
+        ansi_index_to_color, brighten, fade_toward, screen_cell_colors, TerminalPalette, CURSOR,
+        TERM_FG, TERM_SELECTION_BG, TERM_SELECTION_FG,
     };
     use crate::render::Color;
     fn cell_from_bytes(bytes: &[u8]) -> vt100::Cell {
@@ -165,8 +257,9 @@ mod tests {
     fn terminal_cell_colors_apply_selection_and_cursor_after_style_processing() {
         let bold_dim_inverse = cell_from_bytes(b"\x1b[1;2;7mX");
         let term_bg = Color::rgb(10, 13, 18);
-        let selected = screen_cell_colors(&bold_dim_inverse, false, true, TERM_FG, term_bg);
-        let cursor = screen_cell_colors(&bold_dim_inverse, true, false, TERM_FG, term_bg);
+        let ansi = TerminalPalette::fallback().ansi;
+        let selected = screen_cell_colors(&bold_dim_inverse, false, true, TERM_FG, term_bg, &ansi);
+        let cursor = screen_cell_colors(&bold_dim_inverse, true, false, TERM_FG, term_bg, &ansi);
 
         assert_eq!(selected, (TERM_SELECTION_FG, TERM_SELECTION_BG));
         assert_eq!(cursor, (Color::rgb(9, 12, 18), CURSOR));
@@ -176,13 +269,21 @@ mod tests {
     fn terminal_cell_colors_apply_inverse_bold_and_dim_for_unselected_cells() {
         let plain = cell_from_bytes(b"X");
         let styled = cell_from_bytes(b"\x1b[31;44;1;2;7mX");
+        let ansi = TerminalPalette::fallback().ansi;
 
         assert_eq!(
-            screen_cell_colors(&plain, false, false, TERM_FG, Color::rgb(10, 13, 18)),
+            screen_cell_colors(&plain, false, false, TERM_FG, Color::rgb(10, 13, 18), &ansi),
             (TERM_FG, Color::rgb(10, 13, 18))
         );
         assert_eq!(
-            screen_cell_colors(&styled, false, false, TERM_FG, Color::rgb(10, 13, 18)),
+            screen_cell_colors(
+                &styled,
+                false,
+                false,
+                TERM_FG,
+                Color::rgb(10, 13, 18),
+                &ansi
+            ),
             (Color::rgb(175, 143, 201), Color::rgb(247, 118, 142))
         );
     }
