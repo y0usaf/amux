@@ -109,9 +109,10 @@ fn sidebar_columns(total_cols: i32, width: LayoutSidebarWidth) -> i32 {
     let max_for_main = (total_cols - MIN_TERMINAL_COLS_WITH_SIDEBAR).max(0);
     let requested = match width {
         LayoutSidebarWidth::Columns(cols) => i32::from(cols),
-        LayoutSidebarWidth::Percent(percent) => percent_cells(total_cols, percent)
-            .max(SIDEBAR_LEGACY_PERCENT_MIN_COLS)
-            .min(SIDEBAR_LEGACY_PERCENT_MAX_COLS),
+        LayoutSidebarWidth::Percent(percent) => percent_cells(total_cols, percent).clamp(
+            SIDEBAR_LEGACY_PERCENT_MIN_COLS,
+            SIDEBAR_LEGACY_PERCENT_MAX_COLS,
+        ),
     };
     requested.min(max_for_main).max(0)
 }

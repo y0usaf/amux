@@ -8,10 +8,20 @@ pub(super) fn status_text_for_session(
 ) -> String {
     if let Some(session) = session {
         if let Some(status) = session.runtime.status.as_deref() {
+            let mut status = if status == "tool" {
+                session
+                    .runtime
+                    .tool_name
+                    .as_deref()
+                    .map(|tool| format!("tool · {tool}"))
+                    .unwrap_or_else(|| status.to_string())
+            } else {
+                status.to_string()
+            };
             if session.runtime.queued {
-                return format!("{} · queued", status);
+                status.push_str(" · queued");
             }
-            return status.to_string();
+            return status;
         }
         if session.draft {
             return "new session".to_string();
@@ -51,6 +61,18 @@ mod tests {
         assert_eq!(
             status_text_for_session(true, Some(&session), None),
             "thinking"
+        );
+    }
+
+    #[test]
+    fn status_text_includes_active_tool_name_for_tool_stage() {
+        let mut session = Session::new_draft();
+        session.runtime.status = Some("tool".into());
+        session.runtime.tool_name = Some("grep".into());
+
+        assert_eq!(
+            status_text_for_session(true, Some(&session), None),
+            "tool · grep"
         );
     }
 

@@ -19,6 +19,15 @@ const TITLE_POLL_MS = 250
 const SESSION_TITLE_MAX_CHARS = 42
 const INLINE_SUMMARY_KEY = "__agentHarnessInlineSummary"
 const TOOL_OUTPUT_COLOR = "toolOutput"
+const TOOL_ICONS = {
+	read: "◰",
+	bash: "$",
+	edit: "✎",
+	write: "+",
+	find: "⌕",
+	grep: "⌕",
+	ls: "▦",
+}
 
 const builtInToolDefinitions = new Map()
 
@@ -121,9 +130,30 @@ function inlineSummary(context) {
 	return context?.state?.[INLINE_SUMMARY_KEY]
 }
 
+function statusMark(theme, status) {
+	if (status === "running") return theme.fg("warning", "…")
+	if (status === "error") return theme.fg("error", "✕")
+	if (status === "warning") return theme.fg("warning", "!")
+	return theme.fg("success", "✓")
+}
+
+function toolLabel(theme, name) {
+	const icon = TOOL_ICONS[name] || "•"
+	return `${theme.fg("toolTitle", theme.bold(`${icon} ${name}`))}`
+}
+
+function compactPathLabel(path, theme) {
+	return theme.fg("accent", path || "…")
+}
+
 function inlineCallText(label, summary, theme, isError) {
 	if (!summary) return label
-	return `${label}${theme.fg(isError ? "error" : "muted", ` · ${summary}`)}`
+	let text = `${summary}`
+	const isRunning = text.startsWith("… ")
+	const isWarning = /\b(trunc|limit)\b/i.test(text)
+	if (isRunning) text = text.slice(2)
+	const status = isError ? "error" : isRunning ? "running" : isWarning ? "warning" : "success"
+	return `${label}${theme.fg("muted", " · ")}${statusMark(theme, status)}${theme.fg(isError ? "error" : "muted", ` ${text}`)}`
 }
 
 function textComponent(text, lastComponent) {
@@ -132,18 +162,42 @@ function textComponent(text, lastComponent) {
 	return node
 }
 
-function renderExpandedText(text, theme, color = TOOL_OUTPUT_COLOR, lastComponent) {
-	if (!text) return textComponent("", lastComponent)
-	const body = `${text}`
+function truncationHint(result) {
+	const details = result?.details || {}
+	const truncation = details.truncation || {}
+	if (truncation.truncated) {
+		const omitted = Number.isFinite(truncation.omittedBytes) ? `, ${truncation.omittedBytes} bytes omitted` : ""
+		return `output truncated${omitted}`
+	}
+	if (details.resultLimitReached) return "result limit reached"
+	if (details.matchLimitReached) return "match limit reached"
+	if (details.entryLimitReached) return "entry limit reached"
+	if (details.linesTruncated) return "long lines truncated"
+	return ""
+}
+
+function summaryHeader(summary, theme, isError, result) {
+	if (!summary) return ""
+	const hint = !isError ? truncationHint(result) : ""
+	const isWarning = Boolean(hint) || /\b(trunc|limit)\b/i.test(summary)
+	const mark = statusMark(theme, isError ? "error" : isWarning ? "warning" : "success")
+	const header = `${mark} ${theme.fg(isError ? "error" : "muted", summary)}`
+	return hint ? `${header}${theme.fg("warning", ` — ${hint}`)}` : header
+}
+
+function renderExpandedText(text, theme, color = TOOL_OUTPUT_COLOR, lastComponent, header = "") {
+	const body = `${text || ""}`
 		.split("\n")
 		.map((line) => theme.fg(color, line))
 		.join("\n")
-	return textComponent(body ? `\n${body}` : "", lastComponent)
+	const sections = []
+	if (header) sections.push(header)
+	if (text) sections.push(body)
+	return textComponent(sections.length > 0 ? `\n${sections.join("\n")}` : "", lastComponent)
 }
 
-function renderExpandedDiff(diff, theme, lastComponent) {
-	if (!diff) return textComponent("", lastComponent)
-	const body = `${diff}`
+function renderExpandedDiff(diff, theme, lastComponent, header = "") {
+	const body = `${diff || ""}`
 		.split("\n")
 		.map((line) => {
 			if (line.startsWith("+++") || line.startsWith("@@")) return theme.fg("muted", line)
@@ -152,7 +206,10 @@ function renderExpandedDiff(diff, theme, lastComponent) {
 			return theme.fg(TOOL_OUTPUT_COLOR, line)
 		})
 		.join("\n")
-	return textComponent(body ? `\n${body}` : "", lastComponent)
+	const sections = []
+	if (header) sections.push(header)
+	if (diff) sections.push(body)
+	return textComponent(sections.length > 0 ? `\n${sections.join("\n")}` : "", lastComponent)
 }
 
 function countDiffLines(diff) {
@@ -193,18 +250,18 @@ function registerCompactBuiltInRenderers(pi) {
 		renderCall(args, theme, context) {
 			const path = shortenPath(args.path || "", context.cwd)
 			const range = formatLineRange(args.offset, args.limit)
-			const label = `${theme.fg("toolTitle", theme.bold("read"))} ${theme.fg("accent", path || "…")}${theme.fg("warning", range)}`
+			const label = `${toolLabel(theme, "read")} ${compactPathLabel(path, theme)}${theme.fg("warning", range)}`
 			return textComponent(inlineCallText(label, !context.expanded ? inlineSummary(context) : undefined, theme, context.isError), context.lastComponent)
 		},
 		renderResult(result, options, theme, context) {
 			if (options.isPartial) {
-				setInlineSummary(context, undefined)
-				return textComponent(options.expanded ? theme.fg("muted", "reading…") : "", context.lastComponent)
+				setInlineSummary(context, "… reading")
+				return textComponent(options.expanded ? `\n${statusMark(theme, "running")} ${theme.fg("muted", "reading…")}` : "", context.lastComponent)
 			}
 
 			if (hasImageContent(result)) {
 				setInlineSummary(context, "image")
-				return textComponent(options.expanded ? theme.fg("muted", "image") : "", context.lastComponent)
+				return textComponent(options.expanded ? `\n${summaryHeader("image", theme, false, result)}\n${theme.fg("muted", "image content")}` : "", context.lastComponent)
 			}
 
 			const text = firstTextContent(result)
@@ -218,7 +275,7 @@ function registerCompactBuiltInRenderers(pi) {
 			setInlineSummary(context, summary)
 
 			if (!options.expanded) return textComponent("", context.lastComponent)
-			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent)
+			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent, summaryHeader(summary, theme, context.isError, result))
 		},
 	})
 
@@ -226,13 +283,13 @@ function registerCompactBuiltInRenderers(pi) {
 		renderCall(args, theme, context) {
 			const command = truncateInline(args.command || "…", 120)
 			const timeout = Number.isFinite(args.timeout) ? theme.fg("muted", ` (${args.timeout}s)`) : ""
-			const label = `${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", command)}${timeout}`
+			const label = `${toolLabel(theme, "bash")} ${theme.fg("accent", command)}${timeout}`
 			return textComponent(inlineCallText(label, !context.expanded ? inlineSummary(context) : undefined, theme, context.isError), context.lastComponent)
 		},
 		renderResult(result, options, theme, context) {
 			if (options.isPartial) {
-				setInlineSummary(context, undefined)
-				return textComponent(options.expanded ? theme.fg("muted", "running…") : "", context.lastComponent)
+				setInlineSummary(context, "… running")
+				return textComponent(options.expanded ? `\n${statusMark(theme, "running")} ${theme.fg("muted", "running…")}` : "", context.lastComponent)
 			}
 
 			const text = firstTextContent(result)
@@ -249,7 +306,7 @@ function registerCompactBuiltInRenderers(pi) {
 			setInlineSummary(context, summary)
 
 			if (!options.expanded) return textComponent("", context.lastComponent)
-			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent)
+			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent, summaryHeader(summary, theme, context.isError, result))
 		},
 	})
 
@@ -258,13 +315,13 @@ function registerCompactBuiltInRenderers(pi) {
 			const path = shortenPath(args.path || "", context.cwd)
 			const editCount = Array.isArray(args.edits) ? args.edits.length : 0
 			const suffix = editCount > 0 ? theme.fg("muted", ` (${plural(editCount, "edit")})`) : ""
-			const label = `${theme.fg("toolTitle", theme.bold("edit"))} ${theme.fg("accent", path || "…")}${suffix}`
+			const label = `${toolLabel(theme, "edit")} ${compactPathLabel(path, theme)}${suffix}`
 			return textComponent(inlineCallText(label, !context.expanded ? inlineSummary(context) : undefined, theme, context.isError), context.lastComponent)
 		},
 		renderResult(result, options, theme, context) {
 			if (options.isPartial) {
-				setInlineSummary(context, undefined)
-				return textComponent(options.expanded ? theme.fg("muted", "editing…") : "", context.lastComponent)
+				setInlineSummary(context, "… editing")
+				return textComponent(options.expanded ? `\n${statusMark(theme, "running")} ${theme.fg("muted", "editing…")}` : "", context.lastComponent)
 			}
 
 			const diff = result?.details?.diff || ""
@@ -279,8 +336,8 @@ function registerCompactBuiltInRenderers(pi) {
 			setInlineSummary(context, summary)
 
 			if (!options.expanded) return textComponent("", context.lastComponent)
-			if (context.isError) return renderExpandedText(text, theme, "error", context.lastComponent)
-			return renderExpandedDiff(diff || text, theme, context.lastComponent)
+			if (context.isError) return renderExpandedText(text, theme, "error", context.lastComponent, summaryHeader(summary, theme, true, result))
+			return renderExpandedDiff(diff || text, theme, context.lastComponent, summaryHeader(summary, theme, false, result))
 		},
 	})
 
@@ -289,13 +346,13 @@ function registerCompactBuiltInRenderers(pi) {
 			const path = shortenPath(args.path || "", context.cwd)
 			const lines = lineCount(args.content || "")
 			const suffix = lines > 0 ? theme.fg("muted", ` (${plural(lines, "line")})`) : ""
-			const label = `${theme.fg("toolTitle", theme.bold("write"))} ${theme.fg("accent", path || "…")}${suffix}`
+			const label = `${toolLabel(theme, "write")} ${compactPathLabel(path, theme)}${suffix}`
 			return textComponent(inlineCallText(label, !context.expanded ? inlineSummary(context) : undefined, theme, context.isError), context.lastComponent)
 		},
 		renderResult(result, options, theme, context) {
 			if (options.isPartial) {
-				setInlineSummary(context, undefined)
-				return textComponent(options.expanded ? theme.fg("muted", "writing…") : "", context.lastComponent)
+				setInlineSummary(context, "… writing")
+				return textComponent(options.expanded ? `\n${statusMark(theme, "running")} ${theme.fg("muted", "writing…")}` : "", context.lastComponent)
 			}
 
 			const text = firstTextContent(result)
@@ -305,7 +362,7 @@ function registerCompactBuiltInRenderers(pi) {
 			setInlineSummary(context, summary)
 
 			if (!options.expanded) return textComponent("", context.lastComponent)
-			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent)
+			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent, summaryHeader(summary, theme, context.isError, result))
 		},
 	})
 
@@ -313,13 +370,13 @@ function registerCompactBuiltInRenderers(pi) {
 		renderCall(args, theme, context) {
 			const pattern = truncateInline(args.pattern || "*", 64)
 			const path = shortenPath(args.path || ".", context.cwd)
-			const label = `${theme.fg("toolTitle", theme.bold("find"))} ${theme.fg("accent", pattern)}${theme.fg("muted", ` in ${path}`)}`
+			const label = `${toolLabel(theme, "find")} ${theme.fg("accent", pattern)}${theme.fg("muted", ` @ ${path}`)}`
 			return textComponent(inlineCallText(label, !context.expanded ? inlineSummary(context) : undefined, theme, context.isError), context.lastComponent)
 		},
 		renderResult(result, options, theme, context) {
 			if (options.isPartial) {
-				setInlineSummary(context, undefined)
-				return textComponent(options.expanded ? theme.fg("muted", "searching…") : "", context.lastComponent)
+				setInlineSummary(context, "… searching")
+				return textComponent(options.expanded ? `\n${statusMark(theme, "running")} ${theme.fg("muted", "searching…")}` : "", context.lastComponent)
 			}
 
 			const text = firstTextContent(result)
@@ -331,7 +388,7 @@ function registerCompactBuiltInRenderers(pi) {
 			setInlineSummary(context, summary)
 
 			if (!options.expanded) return textComponent("", context.lastComponent)
-			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent)
+			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent, summaryHeader(summary, theme, context.isError, result))
 		},
 	})
 
@@ -339,13 +396,13 @@ function registerCompactBuiltInRenderers(pi) {
 		renderCall(args, theme, context) {
 			const pattern = truncateInline(args.pattern || "", 64)
 			const path = shortenPath(args.path || ".", context.cwd)
-			const label = `${theme.fg("toolTitle", theme.bold("grep"))} ${theme.fg("accent", `/${pattern}/`)}${theme.fg("muted", ` in ${path}`)}`
+			const label = `${toolLabel(theme, "grep")} ${theme.fg("accent", `/${pattern}/`)}${theme.fg("muted", ` @ ${path}`)}`
 			return textComponent(inlineCallText(label, !context.expanded ? inlineSummary(context) : undefined, theme, context.isError), context.lastComponent)
 		},
 		renderResult(result, options, theme, context) {
 			if (options.isPartial) {
-				setInlineSummary(context, undefined)
-				return textComponent(options.expanded ? theme.fg("muted", "searching…") : "", context.lastComponent)
+				setInlineSummary(context, "… searching")
+				return textComponent(options.expanded ? `\n${statusMark(theme, "running")} ${theme.fg("muted", "searching…")}` : "", context.lastComponent)
 			}
 
 			const text = firstTextContent(result)
@@ -357,20 +414,20 @@ function registerCompactBuiltInRenderers(pi) {
 			setInlineSummary(context, summary)
 
 			if (!options.expanded) return textComponent("", context.lastComponent)
-			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent)
+			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent, summaryHeader(summary, theme, context.isError, result))
 		},
 	})
 
 	registerCompactTool(pi, "ls", {
 		renderCall(args, theme, context) {
 			const path = shortenPath(args.path || ".", context.cwd)
-			const label = `${theme.fg("toolTitle", theme.bold("ls"))} ${theme.fg("accent", path)}`
+			const label = `${toolLabel(theme, "ls")} ${compactPathLabel(path, theme)}`
 			return textComponent(inlineCallText(label, !context.expanded ? inlineSummary(context) : undefined, theme, context.isError), context.lastComponent)
 		},
 		renderResult(result, options, theme, context) {
 			if (options.isPartial) {
-				setInlineSummary(context, undefined)
-				return textComponent(options.expanded ? theme.fg("muted", "listing…") : "", context.lastComponent)
+				setInlineSummary(context, "… listing")
+				return textComponent(options.expanded ? `\n${statusMark(theme, "running")} ${theme.fg("muted", "listing…")}` : "", context.lastComponent)
 			}
 
 			const text = firstTextContent(result)
@@ -382,7 +439,7 @@ function registerCompactBuiltInRenderers(pi) {
 			setInlineSummary(context, summary)
 
 			if (!options.expanded) return textComponent("", context.lastComponent)
-			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent)
+			return renderExpandedText(text, theme, context.isError ? "error" : TOOL_OUTPUT_COLOR, context.lastComponent, summaryHeader(summary, theme, context.isError, result))
 		},
 	})
 }

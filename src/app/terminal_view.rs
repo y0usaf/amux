@@ -21,6 +21,7 @@ pub(super) fn terminal_screen_cells(
     selection: Option<TerminalSelectionRange>,
     default_fg: Color,
     default_bg: Color,
+    ansi_palette: &[Color; 16],
     draw_cursor: bool,
 ) -> Vec<TerminalCellView> {
     let (screen_rows, screen_cols) = screen.size();
@@ -53,7 +54,14 @@ pub(super) fn terminal_screen_cells(
                 end > col && start < cell_end
             });
             let cursor_here = cursor_visible && row == cursor_row && col == cursor_col;
-            let (fg, bg) = screen_cell_colors(cell, cursor_here, selected, default_fg, default_bg);
+            let (fg, bg) = screen_cell_colors(
+                cell,
+                cursor_here,
+                selected,
+                default_fg,
+                default_bg,
+                ansi_palette,
+            );
             let text = if cell.contents().is_empty() {
                 " ".to_string()
             } else {

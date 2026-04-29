@@ -212,6 +212,28 @@ pub(super) fn sidebar_status_glyph(status: SidebarStatusKind, now_ms: u64) -> &'
     }
 }
 
+fn project_sidebar_status(project: &Project) -> Option<SidebarStatusKind> {
+    let mut notification = false;
+    let mut queued = false;
+
+    for session in &project.sessions {
+        match session_sidebar_status(session) {
+            Some(SidebarStatusKind::Active) => return Some(SidebarStatusKind::Active),
+            Some(SidebarStatusKind::Queued) => queued = true,
+            Some(SidebarStatusKind::Notification) => notification = true,
+            None => {}
+        }
+    }
+
+    if queued {
+        Some(SidebarStatusKind::Queued)
+    } else if notification {
+        Some(SidebarStatusKind::Notification)
+    } else {
+        None
+    }
+}
+
 pub(super) fn sidebar_has_spinner(projects: &[Project]) -> bool {
     projects
         .iter()
@@ -229,13 +251,14 @@ pub(super) fn build_sidebar_rows(
 
     for (project_index, project) in projects.iter().enumerate() {
         let project_selected = project_index == selected_project;
+        let status = project_sidebar_status(project);
         rows.push(SidebarRow {
             kind: SidebarRowKind::Project(project_index),
             text: project.name.to_uppercase(),
-            fg: if project_selected { ACCENT } else { TEXT },
+            fg: if project_selected { TEXT } else { ACCENT },
             bg: None,
             inverted: project_selected,
-            status: None,
+            status,
         });
 
         for (session_index, session) in project.sessions.iter().enumerate() {
@@ -258,17 +281,6 @@ pub(super) fn build_sidebar_rows(
                 bg: None,
                 inverted: selected,
                 status,
-            });
-        }
-
-        if project_index + 1 < projects.len() {
-            rows.push(SidebarRow {
-                kind: SidebarRowKind::Label,
-                text: String::new(),
-                fg: MUTED,
-                bg: None,
-                inverted: false,
-                status: None,
             });
         }
     }
@@ -407,6 +419,23 @@ mod tests {
             sidebar_status_glyph(SidebarStatusKind::Queued, now_ms + SIDEBAR_SPINNER_FRAME_MS),
             SIDEBAR_SPINNER_FRAMES[1]
         );
+        assert_eq!(
+            sidebar_status_glyph(
+                SidebarStatusKind::Notification,
+                now_ms + SIDEBAR_SPINNER_FRAME_MS * 2
+            ),
+            SIDEBAR_NOTIFICATION_GLYPH
+        );
+    }
+
+    #[test]
+    fn unread_session_does_not_keep_sidebar_spinner_ticking() {
+        let mut project = Project::new("project".into());
+        let mut session = Session::new_draft();
+        session.runtime.unread = true;
+        project.sessions.push(session);
+
+        assert!(!sidebar_has_spinner(&[project]));
     }
 
     #[test]

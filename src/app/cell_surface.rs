@@ -307,11 +307,6 @@ pub(super) fn display_cell_width(value: &str) -> usize {
         .sum()
 }
 
-pub(super) fn centered_cell_offset(cols: i32, value: &str) -> i32 {
-    let cols = cols.max(0) as usize;
-    (cols.saturating_sub(display_cell_width(value)) / 2) as i32
-}
-
 pub(super) fn truncate_to_cells(value: &str, max_cols: usize) -> String {
     if display_cell_width(value) <= max_cols {
         return value.to_string();
