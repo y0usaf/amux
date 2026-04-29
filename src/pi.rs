@@ -14,7 +14,7 @@ pub use discovery::{
 pub use files::{
     archive_session_file, is_pi_session_path, live_project_dir, restore_session_file, socket_path,
 };
-pub use scan::scan_live_sessions;
+pub use scan::{scan_archived_sessions, scan_live_sessions};
 pub use types::{PiSessionStage, PiSidecarSnapshot};
 
 pub const PI_SIDECAR_SOCKET_ENV: &str = "AGENT_HARNESS_PI_SIDECAR_SOCKET";

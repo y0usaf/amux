@@ -13,11 +13,11 @@ use crate::config::{
 use crate::notify::Notify;
 use crate::pi::{self, PiSidecarSnapshot};
 use crate::sidecar::SidecarListener;
-use crate::state::{PersistedState, Project, Session};
+use crate::state::{PersistedState, Project, ScannedSession, Session};
 use crate::terminal::{
     TerminalController, TerminalSelectionPoint, TerminalSelectionRange, TerminalStatus,
 };
-use crate::util::now_millis;
+use crate::util::{normalize_project_path, now_millis};
 
 use super::clipboard_image::{clipboard_image_path, clipboard_image_path_from_arboard};
 use super::layout::CellRect;
@@ -469,6 +469,45 @@ impl HarnessCore {
         self.workspace.remove_archived_session(&target);
         self.remove_terminal_for_session_id(&target.session_id);
         self.selection_changed_with_terminal_sync();
+    }
+
+    pub(super) fn restore_archived_session(
+        &mut self,
+        archived: &ScannedSession,
+    ) -> Result<(), String> {
+        let project_path = normalize_project_path(&archived.cwd);
+        pi::restore_session_file(&archived.session_file, &project_path)?;
+
+        let project_is_open = self
+            .workspace
+            .projects()
+            .iter()
+            .any(|project| project.path == project_path);
+        let mut open_note = None;
+        if !project_is_open {
+            if project_path.is_dir() {
+                if let Err(note) = self.workspace.open_project_path(project_path.clone()) {
+                    open_note = Some(note);
+                }
+            } else {
+                open_note = Some(format!("project path missing: {}", project_path.display()));
+            }
+        }
+
+        self.workspace.reload_projects_from_disk();
+        self.workspace.restore_selection(
+            Some(project_path.to_string_lossy().into_owned()),
+            Some(archived.session_id.clone()),
+        );
+        self.selection_changed_with_terminal_sync();
+        self.persist_selection();
+
+        let restored = format!("restored {} → {}", archived.name, project_path.display());
+        self.set_note_text(match open_note {
+            Some(note) => format!("{restored} ({note})"),
+            None => restored,
+        });
+        Ok(())
     }
 
     pub(super) fn new_session(&mut self) {

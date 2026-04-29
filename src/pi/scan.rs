@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::pi::live_project_dir;
+use super::files::{archive_dir, live_project_dir};
 use crate::state::ScannedSession;
 use crate::util::{normalize_project_path, session_name_from_text};
 
@@ -22,25 +22,58 @@ pub fn scan_live_sessions(project_path: &Path) -> Vec<ScannedSession> {
         if normalize_project_path(&meta.cwd) != normalized_project_path {
             continue;
         }
-        sessions.push(ScannedSession {
-            session_id: meta.session_id,
-            session_file: path,
-            cwd: meta.cwd,
-            created_at_ms: meta.created_at_ms,
-            updated_at_ms: meta.updated_at_ms.max(meta.created_at_ms),
-            name: meta
-                .name
-                .filter(|name| !name.trim().is_empty())
-                .unwrap_or_else(|| session_name_from_text(&meta.first_user_message)),
-        });
+        sessions.push(scanned_session_from_meta(path, meta));
     }
 
+    sort_scanned_sessions(&mut sessions);
+    sessions
+}
+
+pub fn scan_archived_sessions() -> Vec<ScannedSession> {
+    let Some(dir) = archive_dir() else {
+        return Vec::new();
+    };
+
+    let mut sessions = Vec::new();
+    for path in jsonl_files_in_dir(&dir) {
+        let Some(meta) = session_meta_from_path(&path) else {
+            continue;
+        };
+        sessions.push(scanned_session_from_meta(path, meta));
+    }
+
+    sort_scanned_sessions(&mut sessions);
+    sessions
+}
+
+fn scanned_session_from_meta(path: PathBuf, meta: ScanMeta) -> ScannedSession {
+    let ScanMeta {
+        session_id,
+        cwd,
+        created_at_ms,
+        updated_at_ms,
+        name,
+        first_user_message,
+    } = meta;
+
+    ScannedSession {
+        session_id,
+        session_file: path,
+        cwd,
+        created_at_ms,
+        updated_at_ms: updated_at_ms.max(created_at_ms),
+        name: name
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| session_name_from_text(&first_user_message)),
+    }
+}
+
+fn sort_scanned_sessions(sessions: &mut [ScannedSession]) {
     sessions.sort_by(|a, b| {
         b.updated_at_ms
             .cmp(&a.updated_at_ms)
             .then_with(|| a.session_id.cmp(&b.session_id))
     });
-    sessions
 }
 
 #[derive(Clone)]
@@ -418,6 +451,43 @@ mod tests {
             .map(|session| session.session_id.as_str())
             .collect();
         assert_eq!(ids, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn scan_archived_sessions_reads_global_archive_without_project_filter() {
+        let home = TestDir::new();
+        let _guard = EnvGuard::set_home(home.path());
+        let archive = archive_dir().unwrap();
+        fs::create_dir_all(&archive).unwrap();
+        let project_a = home.path().join("work/a");
+        let project_b = home.path().join("work/b");
+        fs::create_dir_all(&project_a).unwrap();
+        fs::create_dir_all(&project_b).unwrap();
+
+        fs::write(
+            archive.join("a.jsonl"),
+            format!(
+                "{{\"type\":\"session\",\"id\":\"a\",\"cwd\":\"{}\",\"timestamp\":\"2024-01-01T00:00:00Z\"}}\n{{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:01Z\",\"message\":{{\"role\":\"user\",\"content\":\"older\"}}}}\n",
+                project_a.to_string_lossy(),
+            ),
+        )
+        .unwrap();
+        fs::write(
+            archive.join("b.jsonl"),
+            format!(
+                "{{\"type\":\"session\",\"id\":\"b\",\"cwd\":\"{}\",\"timestamp\":\"2024-01-01T00:00:00Z\"}}\n{{\"type\":\"message\",\"timestamp\":\"2024-01-01T00:00:02Z\",\"message\":{{\"role\":\"user\",\"content\":\"newer\"}}}}\n",
+                project_b.to_string_lossy(),
+            ),
+        )
+        .unwrap();
+
+        let sessions = scan_archived_sessions();
+
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].session_id, "b");
+        assert_eq!(sessions[0].cwd, project_b);
+        assert_eq!(sessions[1].session_id, "a");
+        assert_eq!(sessions[1].cwd, project_a);
     }
 
     #[test]

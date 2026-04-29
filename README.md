@@ -30,13 +30,15 @@ Notes:
 
 ## Controls
 
-- `:` → command line (`:open <dir>` adds/selects a project, `:q` quits)
+- `:` → command line (`:open <dir>` adds/selects a project, `:archive` opens archive restore viewer, `:refresh`, `:reload`, `:q` quits)
 - click the `+` in the left statusline segment → opens command line prefilled as `:open `
 - bottom statusline shows `NORMAL` / `COMMAND`; command mode keeps the nvim-style command row below it
 - command line: `Enter` run, `Esc`/`Ctrl+C` cancel, arrows/Home/End edit; `::` sends a literal `:` to the terminal
 - `Ctrl+N` → new session
+- `Ctrl+R` → refresh selected idle session
+- `Ctrl+Shift+R` → reload Pi sessions from disk
 - `Ctrl+Delete` → archive selected session
-- `Ctrl+R` → reload Pi sessions from disk
+- archive viewer: `↑`/`↓`/`j`/`k` select, `Enter` restores to original project cwd, `r` reloads, `q`/`Esc` closes
 - `Ctrl+Shift+Delete` / `Ctrl+Shift+D` → remove selected project
 - `Ctrl+Left` / `Ctrl+Right` → prev/next project
 - `Ctrl+Up` / `Ctrl+Down` → prev/next session

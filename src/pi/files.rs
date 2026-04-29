@@ -42,7 +42,7 @@ fn pi_root() -> Option<PathBuf> {
     Some(home_dir()?.join(LIVE_ROOT_REL))
 }
 
-fn archive_dir() -> Option<PathBuf> {
+pub(super) fn archive_dir() -> Option<PathBuf> {
     Some(pi_root()?.join(ARCHIVE_DIR_NAME))
 }
 

@@ -25,6 +25,22 @@ fn defaults_use_ctrl_arrows_for_navigation() {
 }
 
 #[test]
+fn defaults_bind_refresh_and_reload() {
+    let config = AppConfig::default();
+    let keymap = config.keymap();
+    let mut state = KeyChordState::default();
+
+    assert_eq!(
+        keymap.advance(&mut state, KeyStroke::parse("ctrl+r").unwrap()),
+        KeymapMatch::Triggered(AppAction::RefreshSession)
+    );
+    assert_eq!(
+        keymap.advance(&mut state, KeyStroke::parse("ctrl+shift+r").unwrap()),
+        KeymapMatch::Triggered(AppAction::RefreshAllSessions)
+    );
+}
+
+#[test]
 fn config_overrides_navigation_defaults() {
     let mut config = AppConfig::default();
     config.keybinds.insert(
