@@ -18,24 +18,28 @@ pub use actions::{action_spec, ActionSpec, AppAction, ACTION_SPECS};
 pub use keymap::{KeyChordState, Keymap, KeymapMatch};
 pub use keys::{KeyModifiers, KeyStroke, KeyToken, NamedKeyToken};
 
-pub const LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT: u8 = 50;
-pub const LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT: u8 = 13;
-pub const LAYOUT_BODY_HEIGHT_PERCENT_DEFAULT: u8 = 100;
+pub const LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT: u8 = 100;
+pub const LAYOUT_SIDEBAR_WIDTH_DEFAULT: u16 = 36;
+pub const LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT: u8 = 22;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LayoutWidthPercents {
-    pub terminal: u8,
-    pub sidebar: u8,
+pub enum LayoutSidebarWidth {
+    Columns(u16),
+    Percent(u8),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LayoutWidths {
+    pub sidebar: LayoutSidebarWidth,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     pub terminal_width_percent: Option<u8>,
+    pub sidebar_width: Option<u16>,
     pub sidebar_width_percent: Option<u8>,
-    pub body_height_percent: Option<u8>,
     pub tui_terminal_width_percent: Option<u8>,
     pub tui_sidebar_width_percent: Option<u8>,
-    pub tui_body_height_percent: Option<u8>,
     #[serde(default)]
     pub keybinds: BTreeMap<String, ConfigKeybind>,
 }
@@ -110,46 +114,38 @@ impl AppConfig {
         Keymap::from_config(self)
     }
 
-    pub fn layout_width_percents(&self) -> LayoutWidthPercents {
-        let widths = LayoutWidthPercents {
-            terminal: self
-                .terminal_width_percent
-                .or(self.tui_terminal_width_percent)
-                .unwrap_or(LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT),
-            sidebar: self
-                .sidebar_width_percent
-                .or(self.tui_sidebar_width_percent)
-                .unwrap_or(LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT),
-        };
-        if validate_layout_width_percents(widths) {
-            return widths;
-        }
-
-        log::warn!(
-            "invalid layout width percents: terminal_width_percent={} sidebar_width_percent={} (need terminal > sidebar and terminal + sidebar*2 < 100); using defaults",
-            widths.terminal,
-            widths.sidebar,
-        );
-        LayoutWidthPercents {
-            terminal: LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT,
-            sidebar: LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT,
+    pub fn layout_widths(&self) -> LayoutWidths {
+        LayoutWidths {
+            sidebar: self.layout_sidebar_width(),
         }
     }
 
-    pub fn layout_body_height_percent(&self) -> u8 {
-        let percent = self
-            .body_height_percent
-            .or(self.tui_body_height_percent)
-            .unwrap_or(LAYOUT_BODY_HEIGHT_PERCENT_DEFAULT);
-        if validate_layout_body_height_percent(percent) {
-            return percent;
+    fn layout_sidebar_width(&self) -> LayoutSidebarWidth {
+        if let Some(width) = self.sidebar_width {
+            if validate_layout_sidebar_width(width) {
+                return LayoutSidebarWidth::Columns(width);
+            }
+            log::warn!(
+                "invalid sidebar_width={} (need 8..=120); using default",
+                width,
+            );
+            return LayoutSidebarWidth::Columns(LAYOUT_SIDEBAR_WIDTH_DEFAULT);
         }
 
-        log::warn!(
-            "invalid layout body height percent: body_height_percent={} (need 1..=100); using default",
-            percent,
-        );
-        LAYOUT_BODY_HEIGHT_PERCENT_DEFAULT
+        if let Some(percent) = self
+            .sidebar_width_percent
+            .or(self.tui_sidebar_width_percent)
+        {
+            if validate_layout_sidebar_width_percent(percent) {
+                return LayoutSidebarWidth::Percent(percent);
+            }
+            log::warn!(
+                "invalid sidebar_width_percent={} (need 1..=50); using default",
+                percent,
+            );
+        }
+
+        LayoutSidebarWidth::Columns(LAYOUT_SIDEBAR_WIDTH_DEFAULT)
     }
 
     fn normalize(&mut self) {
@@ -159,14 +155,12 @@ impl AppConfig {
     }
 }
 
-pub fn validate_layout_width_percents(widths: LayoutWidthPercents) -> bool {
-    widths.sidebar > 0
-        && widths.terminal > widths.sidebar
-        && u16::from(widths.terminal) + u16::from(widths.sidebar) * 2 < 100
+pub fn validate_layout_sidebar_width(width: u16) -> bool {
+    (8..=120).contains(&width)
 }
 
-pub fn validate_layout_body_height_percent(percent: u8) -> bool {
-    (1..=100).contains(&percent)
+pub fn validate_layout_sidebar_width_percent(percent: u8) -> bool {
+    (1..=50).contains(&percent)
 }
 
 fn resolved_sequences(config: &AppConfig, spec: &ActionSpec) -> Vec<Vec<KeyStroke>> {

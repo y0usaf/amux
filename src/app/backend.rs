@@ -610,7 +610,6 @@ impl HarnessCore {
 
     pub(super) fn activate_sidebar_row(&mut self, row_kind: &SidebarRowKind) {
         match *row_kind {
-            SidebarRowKind::ActionOpenProject => self.set_note_text("pass a path to pi-harness"),
             SidebarRowKind::Project(index) => self.select_project(index),
             SidebarRowKind::Session {
                 project_index,

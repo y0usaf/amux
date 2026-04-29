@@ -9,10 +9,13 @@ use crate::terminal::TerminalSelectionPoint;
 
 use super::backend::{terminal_selection_point_for_cell_rect, HarnessCore, ShortcutOutcome};
 use super::cell_surface::{display_cell_width, CellSurface};
-use super::layout::{compute_cell_layout, CellLayout, CellRect as Rect};
-use super::scene::{harness_scene_layout, render_harness_scene, ScenePalette, TerminalCursorMode};
-use super::sidebar::{SidebarRowKind, SIDEBAR_SPINNER_FRAME_MS};
-use super::theme::TERM_FG;
+use super::layout::{compute_cell_layout, sidebar_content_rect, CellLayout, CellRect as Rect};
+use super::scene::{
+    harness_scene_layout, render_harness_scene, statusbar_new_project_rect, HarnessMode,
+    ScenePalette, TerminalCursorMode,
+};
+use super::sidebar::SIDEBAR_SPINNER_FRAME_MS;
+use super::theme::{MUTED, STATUS_BG, TERM_FG};
 
 mod ansi;
 mod input;
@@ -404,21 +407,19 @@ impl TuiApp {
         renderer: &mut AnsiRenderer,
     ) -> anyhow::Result<()> {
         let (cols, rows) = terminal_size();
-        let layout = compute_cell_layout(
-            cols,
-            rows,
-            self.core.config.layout_width_percents(),
-            self.core.config.layout_body_height_percent(),
-        );
-        let visible_sidebar_rows = layout.sidebar.inset(1, 1).rows.max(0) as usize;
+        let layout = compute_cell_layout(cols, rows, self.core.config.layout_widths());
+        let visible_sidebar_rows = sidebar_content_rect(layout.sidebar).rows.max(0) as usize;
         let frame_model = self.core.prepare_frame(
             layout.terminal.rows.max(1) as u16,
             layout.terminal.cols.max(1) as u16,
             visible_sidebar_rows,
         );
 
-        let palette =
+        let mut palette =
             ScenePalette::monochrome(TUI_DEFAULT_FG, TUI_DEFAULT_BG, TERM_FG, TUI_DEFAULT_BG);
+        palette.border = MUTED;
+        palette.muted = MUTED;
+        palette.statusbar_bg = STATUS_BG;
         let mut surface =
             CellSurface::new(i32::from(cols), i32::from(rows), palette.fg, palette.bg);
         surface.fill_rect(
@@ -433,9 +434,9 @@ impl TuiApp {
             harness_scene_layout(&layout),
             &frame_model,
             None,
-            TUI_DEFAULT_FG,
             &palette,
             TerminalCursorMode::Hardware,
+            self.current_mode(),
             Some(&footer_hint),
             crate::util::now_millis(),
         );
@@ -446,28 +447,20 @@ impl TuiApp {
         Ok(())
     }
 
+    fn current_mode(&self) -> HarnessMode {
+        if self.command_line.is_some() {
+            HarnessMode::Command
+        } else {
+            HarnessMode::Normal
+        }
+    }
+
     fn render_command_line_overlay(
         &self,
         surface: &mut CellSurface,
     ) -> Option<super::scene::HardwareCursor> {
         let command_line = self.command_line.as_ref()?;
         let row = surface.rows.saturating_sub(1);
-        if row > 0 {
-            let border_row = row - 1;
-            surface.fill_rect(
-                Rect::new(0, border_row, surface.cols, 1),
-                TUI_DEFAULT_FG,
-                TUI_DEFAULT_BG,
-            );
-            surface.put_text(
-                0,
-                border_row,
-                surface.cols,
-                TUI_DEFAULT_FG,
-                TUI_DEFAULT_BG,
-                &"─".repeat(surface.cols.max(0) as usize),
-            );
-        }
         let command_rect = Rect::new(0, row, surface.cols, 1);
         surface.fill_rect(command_rect, TUI_DEFAULT_FG, TUI_DEFAULT_BG);
         let (visible_text, cursor_col) =
@@ -480,7 +473,6 @@ impl TuiApp {
             TUI_DEFAULT_BG,
             &visible_text,
         );
-        surface.set_reverse_rect(command_rect, true);
         Some(super::scene::HardwareCursor {
             col: cursor_col,
             row,
@@ -759,12 +751,7 @@ impl TuiApp {
 
     fn handle_mouse_event(&mut self, event: MouseEvent) {
         let (cols, rows) = terminal_size();
-        let layout = compute_cell_layout(
-            cols,
-            rows,
-            self.core.config.layout_width_percents(),
-            self.core.config.layout_body_height_percent(),
-        );
+        let layout = compute_cell_layout(cols, rows, self.core.config.layout_widths());
 
         match event.kind {
             MouseEventKind::Wheel(direction) => self.handle_mouse_wheel(event, direction, &layout),
@@ -787,7 +774,7 @@ impl TuiApp {
         };
 
         if layout.sidebar.contains_cell(event.col, event.row) {
-            let visible_rows = layout.sidebar.inset(1, 1).rows.max(0) as usize;
+            let visible_rows = sidebar_content_rect(layout.sidebar).rows.max(0) as usize;
             let row_count = self.core.sidebar_rows().len();
             self.core
                 .scroll_sidebar_from_wheel(delta, visible_rows, row_count);
@@ -801,6 +788,9 @@ impl TuiApp {
 
     fn handle_left_mouse_press(&mut self, event: MouseEvent, layout: &CellLayout) {
         self.core.set_terminal_selection_in_progress(false);
+        if self.handle_statusbar_click(event, layout) {
+            return;
+        }
         if self.handle_sidebar_click(event, layout) {
             return;
         }
@@ -820,8 +810,22 @@ impl TuiApp {
         self.core.finish_terminal_selection();
     }
 
+    fn handle_statusbar_click(&mut self, event: MouseEvent, layout: &CellLayout) -> bool {
+        if !layout.statusbar.contains_cell(event.col, event.row) {
+            return false;
+        }
+        let sidebar_panel =
+            (layout.sidebar.cols > 0 && layout.sidebar.rows > 0).then_some(layout.sidebar);
+        if statusbar_new_project_rect(layout.statusbar, sidebar_panel, self.current_mode())
+            .is_some_and(|rect| rect.contains_cell(event.col, event.row))
+        {
+            self.start_command_line("open ");
+        }
+        true
+    }
+
     fn handle_sidebar_click(&mut self, event: MouseEvent, layout: &CellLayout) -> bool {
-        let content = layout.sidebar.inset(1, 1);
+        let content = sidebar_content_rect(layout.sidebar);
         if !content.contains_cell(event.col, event.row) {
             return false;
         }
@@ -837,10 +841,7 @@ impl TuiApp {
         let Some(row_kind) = rows.get(row_index).map(|row| row.kind.clone()) else {
             return true;
         };
-        match row_kind {
-            SidebarRowKind::ActionOpenProject => self.start_command_line("open "),
-            _ => self.core.activate_sidebar_row(&row_kind),
-        }
+        self.core.activate_sidebar_row(&row_kind);
         true
     }
 

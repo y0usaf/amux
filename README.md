@@ -5,7 +5,7 @@ Minimal Pi terminal harness.
 Layout:
 - TUI only
 - shared cell scene rendered to ANSI
-- centered Pi terminal + sidebar + top bar
+- Neo-tree style left sidebar + unboxed Pi terminal + nvim-style bottom statusline/command row
 
 No GUI. No TUI framework. Minimal config surface.
 
@@ -31,7 +31,8 @@ Notes:
 ## Controls
 
 - `:` → command line (`:open <dir>` adds/selects a project, `:q` quits)
-- click `+ NEW PROJECT` → opens command line prefilled as `:open `
+- click the `+` in the left statusline segment → opens command line prefilled as `:open `
+- bottom statusline shows `NORMAL` / `COMMAND`; command mode keeps the nvim-style command row below it
 - command line: `Enter` run, `Esc`/`Ctrl+C` cancel, arrows/Home/End edit; `::` sends a literal `:` to the terminal
 - `Ctrl+N` → new session
 - `Ctrl+Delete` → archive selected session
@@ -63,9 +64,7 @@ If no project path is passed, the app falls back to persisted projects, then cur
 
 ```json
 {
-  "terminal_width_percent": 50,
-  "sidebar_width_percent": 13,
-  "body_height_percent": 100,
+  "sidebar_width": 36,
   "keybinds": {
     "project_prev": "ctrl+h",
     "project_next": "ctrl+l",
@@ -75,9 +74,10 @@ If no project path is passed, the app falls back to persisted projects, then cur
 }
 ```
 
-- `terminal_width_percent` + `sidebar_width_percent` set shared cell UI widths as percentages of available columns; valid when `terminal > sidebar` and `terminal + sidebar*2 < 100`; unused space stays as margins, not flex fill
-- `body_height_percent` sets sidebar + terminal height as a percentage of rows below the fixed top bar (`1..=100`); unused space stays below the body
-- legacy `tui_*_percent` keys are still accepted as fallbacks
+- `sidebar_width` sets the left sidebar width in terminal cells (`8..=120`); on narrow terminals it is reduced to preserve the main Pi area
+- legacy `sidebar_width_percent` is still accepted as a fallback when `sidebar_width` is unset
+- `terminal_width_percent` is accepted for config compatibility but ignored; the Pi terminal fills the remaining main area
+- legacy `tui_sidebar_width_percent` is still accepted as a fallback
 - missing `keybinds.*` → built-in defaults
 - value shape = string or string array
 - multi-stroke chords are space-separated, e.g. `"ctrl+p n"`
@@ -88,5 +88,5 @@ If no project path is passed, the app falls back to persisted projects, then cur
 - Uses Pi session discovery from `~/.pi/agent/sessions/...`
 - Launches Pi in a PTY
 - Injects the bundled sidecar extension with `-e`
-- Sidecar snapshots update session name/runtime state in the sidebar + top bar
-- Uses the host terminal grid/ANSI renderer, leaves harness chrome on the terminal's default theme, centers the terminal panel, uses inverse video for sidebar selection, renders sidebar/terminal scrollbars, supports mouse wheel + `Shift+PageUp/PageDown` scrolling, and exits with `Ctrl+Q`
+- Sidecar snapshots update session name/runtime state in the sidebar + statusline
+- Uses the host terminal grid/ANSI renderer, leaves harness chrome on the terminal's default theme, renders an unboxed main terminal with a Neo-tree style sidebar and dual bottom statusline/command row, uses inverse video for sidebar selection, renders sidebar/terminal scrollbars, supports mouse wheel + `Shift+PageUp/PageDown` scrolling, and exits with `Ctrl+Q`

@@ -151,6 +151,9 @@ fn ansi_fg(color: Color) -> String {
     if color == DEFAULT_FG {
         return "\x1b[39m".to_string();
     }
+    if let Some(index) = color.ansi_index_value() {
+        return format!("\x1b[38;5;{index}m");
+    }
     let (r, g, b) = color.rgb_components();
     format!("\x1b[38;2;{r};{g};{b}m")
 }
@@ -158,6 +161,9 @@ fn ansi_fg(color: Color) -> String {
 fn ansi_bg(color: Color) -> String {
     if color == DEFAULT_BG {
         return "\x1b[49m".to_string();
+    }
+    if let Some(index) = color.ansi_index_value() {
+        return format!("\x1b[48;5;{index}m");
     }
     let (r, g, b) = color.rgb_components();
     format!("\x1b[48;2;{r};{g};{b}m")

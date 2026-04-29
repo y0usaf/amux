@@ -174,62 +174,65 @@ fn whitespace_in_keybinds_is_normalized() {
 }
 
 #[test]
-fn layout_width_percents_validate_centered_layout_formula() {
+fn layout_widths_default_to_fixed_sidebar_columns() {
     assert_eq!(
-        AppConfig::default().layout_width_percents(),
-        LayoutWidthPercents {
-            terminal: LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT,
-            sidebar: LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT,
+        AppConfig::default().layout_widths(),
+        LayoutWidths {
+            sidebar: LayoutSidebarWidth::Columns(LAYOUT_SIDEBAR_WIDTH_DEFAULT),
         }
     );
-    assert!(validate_layout_width_percents(LayoutWidthPercents {
-        terminal: 50,
-        sidebar: 16,
-    }));
-    assert!(!validate_layout_width_percents(LayoutWidthPercents {
-        terminal: 30,
-        sidebar: 30,
-    }));
-    assert!(!validate_layout_width_percents(LayoutWidthPercents {
-        terminal: 70,
-        sidebar: 15,
-    }));
+    assert!(validate_layout_sidebar_width(8));
+    assert!(validate_layout_sidebar_width(120));
+    assert!(!validate_layout_sidebar_width(7));
+    assert!(!validate_layout_sidebar_width(121));
 }
 
 #[test]
-fn invalid_layout_width_percents_fall_back_to_defaults() {
+fn configured_sidebar_width_uses_fixed_columns() {
     let config = AppConfig {
-        tui_terminal_width_percent: Some(70),
-        tui_sidebar_width_percent: Some(15),
+        sidebar_width: Some(34),
         ..AppConfig::default()
     };
 
     assert_eq!(
-        config.layout_width_percents(),
-        LayoutWidthPercents {
-            terminal: LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT,
-            sidebar: LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT,
+        config.layout_widths(),
+        LayoutWidths {
+            sidebar: LayoutSidebarWidth::Columns(34),
         }
     );
 }
 
 #[test]
-fn layout_body_height_percent_validates_range() {
-    assert_eq!(
-        AppConfig::default().layout_body_height_percent(),
-        LAYOUT_BODY_HEIGHT_PERCENT_DEFAULT
-    );
-    assert!(validate_layout_body_height_percent(1));
-    assert!(validate_layout_body_height_percent(100));
-    assert!(!validate_layout_body_height_percent(0));
-
+fn legacy_sidebar_width_percent_is_still_accepted() {
     let config = AppConfig {
-        tui_body_height_percent: Some(0),
+        tui_sidebar_width_percent: Some(22),
         ..AppConfig::default()
     };
+
     assert_eq!(
-        config.layout_body_height_percent(),
-        LAYOUT_BODY_HEIGHT_PERCENT_DEFAULT
+        config.layout_widths(),
+        LayoutWidths {
+            sidebar: LayoutSidebarWidth::Percent(22),
+        }
+    );
+    assert!(validate_layout_sidebar_width_percent(1));
+    assert!(validate_layout_sidebar_width_percent(50));
+    assert!(!validate_layout_sidebar_width_percent(0));
+    assert!(!validate_layout_sidebar_width_percent(60));
+}
+
+#[test]
+fn invalid_sidebar_width_falls_back_to_default_columns() {
+    let config = AppConfig {
+        sidebar_width: Some(121),
+        ..AppConfig::default()
+    };
+
+    assert_eq!(
+        config.layout_widths(),
+        LayoutWidths {
+            sidebar: LayoutSidebarWidth::Columns(LAYOUT_SIDEBAR_WIDTH_DEFAULT),
+        }
     );
 }
 
