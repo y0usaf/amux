@@ -255,7 +255,7 @@ pub(super) fn build_sidebar_rows(
         rows.push(SidebarRow {
             kind: SidebarRowKind::Project(project_index),
             text: project.name.to_uppercase(),
-            fg: if project_selected { TEXT } else { ACCENT },
+            fg: if project_selected { TEXT } else { MUTED },
             bg: None,
             inverted: project_selected,
             status,
@@ -275,9 +275,7 @@ pub(super) fn build_sidebar_rows(
                     session_index,
                 },
                 text: session.name.clone(),
-                fg: status
-                    .map(sidebar_status_color)
-                    .unwrap_or(if selected { TEXT } else { MUTED }),
+                fg: if selected { TEXT } else { MUTED },
                 bg: None,
                 inverted: selected,
                 status,
