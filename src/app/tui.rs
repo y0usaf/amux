@@ -37,6 +37,7 @@ const TUI_BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
 const TUI_QUIT_HINT: &str = "ctrl+q quit";
 const TUI_COMMAND_HINT: &str = ": cmd";
 
+const TUI_THEME_QUERY_INTERVAL: Duration = Duration::from_secs(30);
 #[derive(Debug)]
 enum TuiEvent {
     Input(Vec<u8>),
@@ -251,6 +252,7 @@ enum TuiCommand {
     Archive,
     Refresh,
     Reload,
+
     Quit,
     Help,
 }
@@ -276,6 +278,7 @@ fn parse_command(input: &str) -> Result<TuiCommand, String> {
         "archive" | "archives" => Ok(TuiCommand::Archive),
         "refresh" => Ok(TuiCommand::Refresh),
         "reload" => Ok(TuiCommand::Reload),
+
         "q" | "quit" => Ok(TuiCommand::Quit),
         "h" | "help" => Ok(TuiCommand::Help),
         _ => Err(format!("unknown command: :{name}")),
@@ -584,6 +587,8 @@ struct TuiApp {
     command_line: Option<CommandLineState>,
     archive_viewer: Option<ArchiveViewerState>,
     theme: DerivedTheme,
+    terminal_palette: TerminalPalette,
+    last_theme_query: Instant,
 }
 
 impl TuiApp {
@@ -598,6 +603,8 @@ impl TuiApp {
             command_line: None,
             archive_viewer: None,
             theme: DerivedTheme::fallback(),
+            terminal_palette: TerminalPalette::fallback(),
+            last_theme_query: Instant::now(),
         };
         app.core.sync_terminals();
         Ok(app)
@@ -606,12 +613,69 @@ impl TuiApp {
     fn inherit_terminal_theme(&mut self) {
         if let Ok(response) = raw::query_terminal_palette_response(Duration::from_millis(120)) {
             if let Some(palette) = parse_terminal_palette_response(&response) {
+                self.terminal_palette = palette;
                 self.theme = DerivedTheme::from_terminal_palette(palette);
             }
+            self.last_theme_query = Instant::now();
         }
+    }
+
+    fn maybe_query_terminal_theme(&mut self) {
+        if self.last_theme_query.elapsed() >= TUI_THEME_QUERY_INTERVAL {
+            self.last_theme_query = Instant::now();
+            let _ = raw::request_terminal_palette_query();
+        }
+    }
+
+    fn handle_terminal_palette_response(&mut self, bytes: &[u8]) -> bool {
+        if !is_terminal_palette_response(bytes) {
+            return false;
+        }
+        if apply_terminal_palette_response(bytes, &mut self.terminal_palette) {
+            self.theme = DerivedTheme::from_terminal_palette(self.terminal_palette);
+            self.needs_redraw = true;
+        }
+        true
     }
 }
 
+fn is_terminal_palette_response(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x1b]10;")
+        || bytes.starts_with(b"\x1b]11;")
+        || bytes.starts_with(b"\x1b]4;")
+}
+
+fn apply_terminal_palette_response(response: &[u8], palette: &mut TerminalPalette) -> bool {
+    let text = String::from_utf8_lossy(response);
+    let mut changed = false;
+    for token in text.split(['\x1b', '\x07']) {
+        let token = token.trim_matches(['\\']);
+        if let Some(rest) = token.strip_prefix("]10;") {
+            if let Some(color) = parse_osc_rgb(rest) {
+                changed |= palette.fg != color;
+                palette.fg = color;
+            }
+        } else if let Some(rest) = token.strip_prefix("]11;") {
+            if let Some(color) = parse_osc_rgb(rest) {
+                changed |= palette.bg != color;
+                palette.bg = color;
+            }
+        } else if let Some(rest) = token.strip_prefix("]4;") {
+            let mut parts = rest.splitn(2, ';');
+            if let (Some(index), Some(color_text)) = (parts.next(), parts.next()) {
+                if let (Ok(index), Some(color)) =
+                    (index.parse::<usize>(), parse_osc_rgb(color_text))
+                {
+                    if index < 16 {
+                        changed |= palette.ansi[index] != color;
+                        palette.ansi[index] = color;
+                    }
+                }
+            }
+        }
+    }
+    changed
+}
 fn parse_terminal_palette_response(response: &[u8]) -> Option<TerminalPalette> {
     let text = String::from_utf8_lossy(response);
     let mut palette = TerminalPalette::fallback();
@@ -682,6 +746,7 @@ impl TuiApp {
                 break;
             }
 
+            self.maybe_query_terminal_theme();
             let spinner_active = self.core.has_sidebar_spinner();
             if spinner_active && self.spinner_redraw_due() {
                 self.needs_redraw = true;
@@ -845,6 +910,10 @@ impl TuiApp {
     }
 
     fn handle_input(&mut self, bytes: &[u8]) -> bool {
+        if self.handle_terminal_palette_response(bytes) {
+            return false;
+        }
+
         if bytes == [0x11] {
             return true;
         }
@@ -1081,6 +1150,7 @@ impl TuiApp {
             Ok(TuiCommand::Archive) => self.open_archive_viewer(),
             Ok(TuiCommand::Refresh) => self.core.run_action(AppAction::RefreshSession),
             Ok(TuiCommand::Reload) => self.core.run_action(AppAction::RefreshAllSessions),
+
             Ok(TuiCommand::Quit) => return true,
             Ok(TuiCommand::Help) => self
                 .core

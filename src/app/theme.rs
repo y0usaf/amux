@@ -16,6 +16,11 @@ const CURSOR: Color = Color::rgb(188, 204, 255);
 pub(super) const TERM_FG: Color = TEXT;
 const TERM_SELECTION_BG: Color = Color::rgb(53, 92, 173);
 const TERM_SELECTION_FG: Color = Color::rgb(245, 248, 255);
+const SEMANTIC_CHROMA_FLOOR: u8 = 64;
+const SEMANTIC_LUMA_DELTA_FLOOR: u8 = 70;
+const SEMANTIC_DISTANCE_FLOOR: i16 = 48;
+const WHITE: Color = Color::rgb(0xff, 0xff, 0xff);
+const BLACK: Color = Color::rgb(0, 0, 0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TerminalPalette {
@@ -58,8 +63,17 @@ impl DerivedTheme {
         let text = palette.fg;
         let bg = palette.bg;
         let muted = fade_toward(text, bg, 112);
-        let accent = palette.ansi[12];
-        let accent_2 = palette.ansi[13];
+        let accent = semantic_color(palette.ansi[12], ACCENT, bg);
+        let accent_2 = separated_semantic_color(palette.ansi[13], ACCENT_2, bg, &[accent]);
+        let running = separated_semantic_color(palette.ansi[10], RUNNING, bg, &[accent, accent_2]);
+        let warning =
+            separated_semantic_color(palette.ansi[11], WARNING, bg, &[accent, accent_2, running]);
+        let error = separated_semantic_color(
+            palette.ansi[9],
+            ERROR,
+            bg,
+            &[accent, accent_2, running, warning],
+        );
         Self {
             text,
             muted,
@@ -70,11 +84,11 @@ impl DerivedTheme {
             sidebar_bg: SIDEBAR_BG,
             status_bg: fade_toward(bg, accent, 46),
             border: fade_toward(text, bg, 150),
-            running: palette.ansi[10],
-            warning: palette.ansi[11],
-            error: palette.ansi[9],
+            running,
+            warning,
+            error,
             term_fg: text,
-            term_bg: bg,
+            term_bg: Color::rgba(0, 0, 0, 0),
             ansi: palette.ansi,
         }
     }
@@ -205,11 +219,112 @@ pub(super) fn fade_toward(color: Color, target: Color, mix: u8) -> Color {
     Color::rgb(blend(r1, r2), blend(g1, g2), blend(b1, b2))
 }
 
+fn semantic_color(inherited: Color, fallback: Color, bg: Color) -> Color {
+    let color = ensure_min_chroma(inherited, fallback);
+    let color = ensure_min_luma_delta(color, bg);
+    let color = ensure_min_chroma(color, fallback);
+    ensure_min_luma_delta(color, bg)
+}
+
+fn separated_semantic_color(
+    inherited: Color,
+    fallback: Color,
+    bg: Color,
+    existing: &[Color],
+) -> Color {
+    let color = semantic_color(inherited, fallback, bg);
+    if is_separated_from_all(color, existing) {
+        return color;
+    }
+
+    for mix in [64, 96, 128, 160, 192, 224, 255] {
+        let candidate = semantic_color(fade_toward(color, fallback, mix), fallback, bg);
+        if is_separated_from_all(candidate, existing) {
+            return candidate;
+        }
+    }
+
+    color
+}
+
+fn ensure_min_chroma(color: Color, fallback: Color) -> Color {
+    if rgb_chroma(color) >= SEMANTIC_CHROMA_FLOOR {
+        return color;
+    }
+
+    for mix in [48, 80, 112, 144, 176, 208, 240, 255] {
+        let candidate = fade_toward(color, fallback, mix);
+        if rgb_chroma(candidate) >= SEMANTIC_CHROMA_FLOOR {
+            return candidate;
+        }
+    }
+
+    fallback
+}
+
+fn ensure_min_luma_delta(color: Color, bg: Color) -> Color {
+    if luma_delta(color, bg) >= SEMANTIC_LUMA_DELTA_FLOOR {
+        return color;
+    }
+
+    let target = if perceived_luma(bg) < 128 {
+        WHITE
+    } else {
+        BLACK
+    };
+    for mix in [32, 64, 96, 128, 160, 192, 224, 255] {
+        let candidate = fade_toward(color, target, mix);
+        if luma_delta(candidate, bg) >= SEMANTIC_LUMA_DELTA_FLOOR {
+            return candidate;
+        }
+    }
+
+    target
+}
+
+fn is_separated_from_all(color: Color, existing: &[Color]) -> bool {
+    existing
+        .iter()
+        .all(|other| rgb_distance_sq(color, *other) >= semantic_distance_floor_sq())
+}
+
+fn rgb_chroma(color: Color) -> u8 {
+    let (r, g, b) = color.rgb_components();
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    max - min
+}
+
+fn perceived_luma(color: Color) -> u8 {
+    let (r, g, b) = color.rgb_components();
+    ((u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114) / 1000) as u8
+}
+
+fn luma_delta(a: Color, b: Color) -> u8 {
+    perceived_luma(a).abs_diff(perceived_luma(b))
+}
+
+fn rgb_distance_sq(a: Color, b: Color) -> u32 {
+    let (ar, ag, ab) = a.rgb_components();
+    let (br, bg, bb) = b.rgb_components();
+    let dr = i32::from(ar) - i32::from(br);
+    let dg = i32::from(ag) - i32::from(bg);
+    let db = i32::from(ab) - i32::from(bb);
+    (dr * dr + dg * dg + db * db) as u32
+}
+
+fn semantic_distance_floor_sq() -> u32 {
+    let floor = i32::from(SEMANTIC_DISTANCE_FLOOR);
+    (floor * floor) as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ansi_index_to_color, brighten, fade_toward, screen_cell_colors, TerminalPalette, CURSOR,
-        TERM_FG, TERM_SELECTION_BG, TERM_SELECTION_FG,
+        ansi_index_to_color, brighten, fade_toward, luma_delta, rgb_chroma, rgb_distance_sq,
+        screen_cell_colors, semantic_distance_floor_sq, DerivedTheme, TerminalPalette, CURSOR,
+        SEMANTIC_CHROMA_FLOOR, SEMANTIC_LUMA_DELTA_FLOOR, TERM_FG, TERM_SELECTION_BG,
+        TERM_SELECTION_FG,
     };
     use crate::render::Color;
     fn cell_from_bytes(bytes: &[u8]) -> vt100::Cell {
@@ -286,5 +401,46 @@ mod tests {
             ),
             (Color::rgb(175, 143, 201), Color::rgb(247, 118, 142))
         );
+    }
+
+    #[test]
+    fn derived_theme_preserves_visible_distinct_terminal_semantic_colors() {
+        let mut palette = TerminalPalette::fallback();
+        palette.bg = Color::rgb(0x10, 0x14, 0x20);
+        let theme = DerivedTheme::from_terminal_palette(palette);
+
+        assert_eq!(theme.accent, palette.ansi[12]);
+        assert_eq!(theme.accent_2, palette.ansi[13]);
+        assert_eq!(theme.running, palette.ansi[10]);
+        assert_eq!(theme.warning, palette.ansi[11]);
+        assert_eq!(theme.error, palette.ansi[9]);
+    }
+
+    #[test]
+    fn derived_theme_boosts_monochrome_terminal_semantic_colors() {
+        let gray = Color::rgb(0x78, 0x78, 0x78);
+        let palette = TerminalPalette {
+            fg: Color::rgb(0xd8, 0xd8, 0xd8),
+            bg: Color::rgb(0x10, 0x10, 0x10),
+            ansi: [gray; 16],
+        };
+        let theme = DerivedTheme::from_terminal_palette(palette);
+        let semantic = [
+            theme.accent,
+            theme.accent_2,
+            theme.running,
+            theme.warning,
+            theme.error,
+        ];
+
+        for color in semantic {
+            assert!(rgb_chroma(color) >= SEMANTIC_CHROMA_FLOOR);
+            assert!(luma_delta(color, palette.bg) >= SEMANTIC_LUMA_DELTA_FLOOR);
+        }
+        for (index, color) in semantic.iter().enumerate() {
+            for other in semantic.iter().skip(index + 1) {
+                assert!(rgb_distance_sq(*color, *other) >= semantic_distance_floor_sq());
+            }
+        }
     }
 }
