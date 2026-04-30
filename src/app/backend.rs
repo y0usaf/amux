@@ -25,7 +25,7 @@ use super::sidebar::{
     build_sidebar_rows, clamp_sidebar_scroll_value, ensure_sidebar_selection_visible_for_state,
     scroll_sidebar_by_rows_value, selected_sidebar_selection_span_for_state, sidebar_has_spinner,
     sidebar_viewport_items, sticky_sidebar_anchor_row, SidebarRow, SidebarRowKind,
-    SidebarSelectionSpan, SidebarViewportItem,
+    SidebarSelectionSpan, SidebarStatusKind, SidebarViewportItem,
 };
 use super::sidecar_reducer::{apply_snapshot_to_session, reconcile_terminal_note};
 use super::status::status_text_for_session;
@@ -660,6 +660,26 @@ impl HarnessCore {
 
     pub(super) fn has_sidebar_spinner(&self) -> bool {
         sidebar_has_spinner(self.workspace.projects())
+    }
+
+    pub(super) fn visible_sidebar_has_spinner(&self, visible_sidebar_rows: usize) -> bool {
+        let rows = self.sidebar_rows();
+        let sticky_sidebar_anchor =
+            self.sticky_sidebar_anchor_row_index(&rows, visible_sidebar_rows);
+        sidebar_viewport_items(
+            &rows,
+            self.sidebar_scroll,
+            visible_sidebar_rows,
+            sticky_sidebar_anchor,
+        )
+        .iter()
+        .filter_map(|item| rows.get(item.row_index))
+        .any(|row| {
+            matches!(
+                row.status,
+                Some(SidebarStatusKind::Active | SidebarStatusKind::Queued)
+            )
+        })
     }
 
     pub(super) fn sidebar_rows(&self) -> Vec<SidebarRow> {

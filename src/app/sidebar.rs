@@ -3,9 +3,10 @@ use crate::state::{Project, Session};
 
 use super::theme::{ACCENT, HEADING, MUTED, RUNNING, TEXT, WARNING};
 
+pub(super) const SIDEBAR_ANIMATION_FRAME_MS: u64 = 20;
 pub(super) const SIDEBAR_SPINNER_FRAMES: &[&str] =
     &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-pub(super) const SIDEBAR_SPINNER_FRAME_MS: u64 = 80;
+pub(super) const SIDEBAR_SPINNER_FRAME_MS: u64 = 60;
 pub(super) const SIDEBAR_NOTIFICATION_GLYPH: &str = "⣿";
 
 #[derive(Clone, Debug)]
@@ -204,11 +205,20 @@ pub(super) fn sidebar_status_color(status: SidebarStatusKind) -> Color {
 pub(super) fn sidebar_status_glyph(status: SidebarStatusKind, now_ms: u64) -> &'static str {
     match status {
         SidebarStatusKind::Active | SidebarStatusKind::Queued => {
-            let frame =
-                ((now_ms / SIDEBAR_SPINNER_FRAME_MS) as usize) % SIDEBAR_SPINNER_FRAMES.len();
+            let frame = ((now_ms / SIDEBAR_SPINNER_FRAME_MS) as usize
+                + spinner_phase_offset(status))
+                % SIDEBAR_SPINNER_FRAMES.len();
             SIDEBAR_SPINNER_FRAMES[frame]
         }
         SidebarStatusKind::Notification => SIDEBAR_NOTIFICATION_GLYPH,
+    }
+}
+
+fn spinner_phase_offset(status: SidebarStatusKind) -> usize {
+    match status {
+        SidebarStatusKind::Active => 0,
+        SidebarStatusKind::Queued => SIDEBAR_SPINNER_FRAMES.len() / 2,
+        SidebarStatusKind::Notification => 0,
     }
 }
 
@@ -415,7 +425,8 @@ mod tests {
         );
         assert_eq!(
             sidebar_status_glyph(SidebarStatusKind::Queued, now_ms + SIDEBAR_SPINNER_FRAME_MS),
-            SIDEBAR_SPINNER_FRAMES[1]
+            SIDEBAR_SPINNER_FRAMES
+                [(SIDEBAR_SPINNER_FRAMES.len() / 2 + 1) % SIDEBAR_SPINNER_FRAMES.len()]
         );
         assert_eq!(
             sidebar_status_glyph(

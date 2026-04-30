@@ -18,7 +18,7 @@ use super::scene::{
     harness_scene_layout, render_harness_scene, statusbar_new_project_rect, HarnessMode,
     ScenePalette, TerminalCursorMode,
 };
-use super::sidebar::SIDEBAR_SPINNER_FRAME_MS;
+use super::sidebar::SIDEBAR_ANIMATION_FRAME_MS;
 use super::theme::{self, DerivedTheme, TerminalPalette};
 
 mod ansi;
@@ -583,7 +583,7 @@ struct TuiApp {
     last_size: Option<(u16, u16)>,
     needs_redraw: bool,
     host_bracketed_paste: Option<Vec<u8>>,
-    last_spinner_redraw: Option<Instant>,
+    next_animation_redraw: Option<Instant>,
     command_line: Option<CommandLineState>,
     archive_viewer: Option<ArchiveViewerState>,
     theme: DerivedTheme,
@@ -598,7 +598,7 @@ impl TuiApp {
             core,
             last_size: None,
             needs_redraw: true,
-            last_spinner_redraw: None,
+            next_animation_redraw: None,
             host_bracketed_paste: None,
             command_line: None,
             archive_viewer: None,
@@ -751,20 +751,15 @@ impl TuiApp {
             }
 
             self.maybe_query_terminal_theme();
-            let spinner_active = self.core.has_sidebar_spinner();
-            if spinner_active && self.spinner_redraw_due() {
-                self.needs_redraw = true;
-            }
+            let animation_active = self.visible_sidebar_animation_active();
+            self.schedule_animation_redraw(animation_active);
 
             if self.needs_redraw {
                 self.render(&mut stdout, &mut renderer)?;
                 self.needs_redraw = false;
-                self.last_spinner_redraw = spinner_active.then(Instant::now);
-            } else if !spinner_active {
-                self.last_spinner_redraw = None;
             }
 
-            let timeout = Duration::from_millis(SIDEBAR_SPINNER_FRAME_MS);
+            let timeout = self.animation_timeout(animation_active);
 
             match rx.recv_timeout(timeout) {
                 Ok(event) => {
@@ -773,7 +768,7 @@ impl TuiApp {
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if self.core.has_sidebar_spinner() {
+                    if self.visible_sidebar_animation_active() {
                         self.needs_redraw = true;
                     }
                 }
@@ -784,9 +779,41 @@ impl TuiApp {
         Ok(())
     }
 
-    fn spinner_redraw_due(&self) -> bool {
-        self.last_spinner_redraw
-            .is_none_or(|last| last.elapsed() >= Duration::from_millis(SIDEBAR_SPINNER_FRAME_MS))
+    fn visible_sidebar_animation_active(&self) -> bool {
+        if self.archive_viewer.is_some() {
+            return false;
+        }
+        let (cols, rows) = terminal_size();
+        let layout = compute_cell_layout(cols, rows, self.core.config.layout_widths());
+        let visible_sidebar_rows = sidebar_content_rect(layout.sidebar).rows.max(0) as usize;
+        self.core.visible_sidebar_has_spinner(visible_sidebar_rows)
+    }
+
+    fn schedule_animation_redraw(&mut self, active: bool) {
+        if !active {
+            self.next_animation_redraw = None;
+            return;
+        }
+
+        let now = Instant::now();
+        let frame = Duration::from_millis(SIDEBAR_ANIMATION_FRAME_MS);
+        let next = self.next_animation_redraw.get_or_insert(now);
+        if now >= *next {
+            self.needs_redraw = true;
+            while *next <= now {
+                *next += frame;
+            }
+        }
+    }
+
+    fn animation_timeout(&self, active: bool) -> Duration {
+        if active {
+            self.next_animation_redraw
+                .map(|next| next.saturating_duration_since(Instant::now()))
+                .unwrap_or_else(|| Duration::from_millis(SIDEBAR_ANIMATION_FRAME_MS))
+        } else {
+            Duration::from_millis(80)
+        }
     }
 
     fn drain_pending_events(&mut self, rx: &mpsc::Receiver<TuiEvent>) -> bool {
