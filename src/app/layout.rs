@@ -40,6 +40,8 @@ const SIDEBAR_SHOW_MIN_COLS: i32 = 72;
 const SIDEBAR_LEGACY_PERCENT_MIN_COLS: i32 = 18;
 const SIDEBAR_LEGACY_PERCENT_MAX_COLS: i32 = 38;
 const MIN_TERMINAL_COLS_WITH_SIDEBAR: i32 = 32;
+const SIDEBAR_HEADER_ROWS: i32 = 1;
+const SIDEBAR_FOOTER_ROWS: i32 = 1;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct CellLayout {
@@ -101,8 +103,13 @@ pub(super) fn sidebar_content_rect(sidebar: CellRect) -> CellRect {
     if sidebar.cols <= 0 || sidebar.rows <= 0 {
         return CellRect::default();
     }
-    // Left padding + right separator column, no top/bottom padding: Neo-tree style.
-    sidebar.inset_edges(1, 0, 1, 0)
+    let max_chrome = sidebar.rows.saturating_sub(1).max(0);
+    let header_rows = SIDEBAR_HEADER_ROWS.min(max_chrome).max(0);
+    let footer_rows = SIDEBAR_FOOTER_ROWS
+        .min(max_chrome.saturating_sub(header_rows))
+        .max(0);
+    // Crush-style sidebar: gradient diagonal rule at top + bottom, content between.
+    sidebar.inset_edges(1, header_rows, 1, footer_rows)
 }
 
 fn sidebar_columns(total_cols: i32, width: LayoutSidebarWidth) -> i32 {

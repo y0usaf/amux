@@ -2,7 +2,7 @@ use crate::render::Color;
 
 const DEFAULT: Color = Color::rgba(0, 0, 0, 0);
 
-// CharmTone Pantera palette, mirrored from Crush's curated dark theme.
+// Curated dark palette.
 const CHARPLE: Color = Color::rgb(0x6b, 0x50, 0xff);
 const DOLLY: Color = Color::rgb(0xff, 0x60, 0xff);
 const BLUSH: Color = Color::rgb(0xff, 0x84, 0xff);
@@ -32,7 +32,7 @@ pub(super) const ACCENT: Color = BOK;
 pub(super) const ACCENT_2: Color = DOLLY;
 pub(super) const SURFACE: Color = PEPPER;
 pub(super) const SURFACE_RAISED: Color = BBQ;
-pub(super) const SIDEBAR_BG: Color = DEFAULT;
+pub(super) const SIDEBAR_BG: Color = SURFACE;
 pub(super) const STATUS_FG: Color = BUTTER;
 pub(super) const STATUS_BG: Color = CHARPLE;
 pub(super) const BORDER: Color = CHARCOAL;
@@ -105,12 +105,12 @@ impl DerivedTheme {
             error: ERROR,
             term_fg: TERM_FG,
             term_bg: DEFAULT,
-            ansi: charm_ansi_palette(),
+            ansi: fallback_ansi_palette(),
         }
     }
 }
 
-const fn charm_ansi_palette() -> [Color; 16] {
+const fn fallback_ansi_palette() -> [Color; 16] {
     [
         PEPPER, SRIRACHA, JULEP, MUSTARD, MALIBU, DOLLY, BOK, SMOKE, IRON, CORAL, GUAC, CITRON,
         ANCHOVY, BLUSH, SARDINE, ASH,
@@ -283,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn fallback_theme_matches_crush_charmtone_roles() {
+    fn fallback_theme_matches_default_roles() {
         let theme = DerivedTheme::fallback();
 
         assert_eq!(theme.text, TEXT);
