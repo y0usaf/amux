@@ -973,10 +973,7 @@ impl TuiApp {
             if self.handle_scroll_key(&stroke) {
                 return false;
             }
-            if self.core.handle_hjkl_navigation_shortcut(&stroke) {
-                self.core.clear_pending_key_chord();
-                return false;
-            }
+
             match self.core.handle_shortcut_stroke(stroke) {
                 ShortcutOutcome::NoMatch => {}
                 ShortcutOutcome::Pending => return false,

@@ -162,26 +162,7 @@ impl HarnessCore {
         }
     }
 
-    pub(super) fn handle_hjkl_navigation_shortcut(&mut self, stroke: &KeyStroke) -> bool {
-        let ctrl_only =
-            stroke.modifiers.control && !stroke.modifiers.shift && !stroke.modifiers.alt;
-        if !ctrl_only {
-            return false;
-        }
 
-        let action = match stroke.key {
-            KeyToken::Character(ref key) if key == "h" => Some(AppAction::PreviousProject),
-            KeyToken::Character(ref key) if key == "l" => Some(AppAction::NextProject),
-            KeyToken::Character(ref key) if key == "k" => Some(AppAction::PreviousSession),
-            KeyToken::Character(ref key) if key == "j" => Some(AppAction::NextSession),
-            _ => None,
-        };
-        let Some(action) = action else {
-            return false;
-        };
-        self.run_action(action);
-        true
-    }
 
     pub(super) fn current_project(&self) -> Option<&Project> {
         self.workspace.current_project()
