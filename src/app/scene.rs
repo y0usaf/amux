@@ -20,6 +20,7 @@ pub(super) struct ScenePalette {
     pub(super) fg: Color,
     pub(super) bg: Color,
     pub(super) statusbar_bg: Color,
+    pub(super) statusbar_fg: Color,
     pub(super) sidebar_bg: Color,
     pub(super) border: Color,
     pub(super) muted: Color,
@@ -27,7 +28,7 @@ pub(super) struct ScenePalette {
     pub(super) term_bg: Color,
     pub(super) accent: Color,
     pub(super) accent_2: Color,
-    pub(super) surface: Color,
+
     pub(super) ansi: [Color; 16],
 
     pub(super) running: Color,
@@ -41,6 +42,7 @@ impl ScenePalette {
         Self {
             fg: theme.text,
             bg: theme.term_bg,
+            statusbar_fg: theme.status_fg,
             statusbar_bg: theme.status_bg,
             sidebar_bg: theme.sidebar_bg,
             border: theme.border,
@@ -49,7 +51,7 @@ impl ScenePalette {
             term_bg: theme.term_bg,
             accent: theme.accent,
             accent_2: theme.accent_2,
-            surface: theme.surface,
+
             ansi: theme.ansi,
 
             running: theme.running,
@@ -175,16 +177,16 @@ pub(super) fn render_statusbar(
     fill_horizontal_gradient(
         surface,
         statusline,
-        palette.fg,
+        palette.statusbar_fg,
         palette.statusbar_bg,
-        palette.statusbar_bg,
+        palette.accent_2,
     );
 
     if panel.rows > 1 {
         surface.fill_rect(
             CellRect::new(panel.col, panel.row + 1, panel.cols, panel.rows - 1),
-            palette.muted,
-            palette.statusbar_bg,
+            palette.fg,
+            palette.bg,
         );
     }
 
@@ -213,7 +215,7 @@ pub(super) fn render_statusbar(
             main_col,
             row,
             left_cols,
-            palette.fg,
+            palette.statusbar_fg,
             palette.statusbar_bg,
             &left,
         );
@@ -239,7 +241,7 @@ pub(super) fn render_statusbar(
                 centered_col,
                 row,
                 center_cols,
-                palette.fg,
+                palette.statusbar_fg,
                 palette.statusbar_bg,
                 &center,
             );
@@ -281,7 +283,7 @@ fn render_commandbar(
 }
 
 fn commandbar_bg(palette: &ScenePalette) -> Color {
-    theme::fade_toward(palette.surface, palette.statusbar_bg, 96)
+    palette.bg
 }
 
 fn render_statusbar_sidebar_segment(
@@ -444,13 +446,13 @@ pub(super) fn statusline_mode_label(mode: HarnessMode) -> &'static str {
 fn mode_fg(mode: HarnessMode, palette: &ScenePalette) -> Color {
     match mode {
         HarnessMode::Normal => palette.statusbar_bg,
-        HarnessMode::Command => Color::rgb(0x10, 0x0c, 0x05),
+        HarnessMode::Command => palette.statusbar_fg,
     }
 }
 
 fn mode_bg(mode: HarnessMode, palette: &ScenePalette) -> Color {
     match mode {
-        HarnessMode::Normal => palette.fg,
+        HarnessMode::Normal => palette.border,
         HarnessMode::Command => palette.warning,
     }
 }

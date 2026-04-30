@@ -1,26 +1,48 @@
 use crate::render::Color;
 
-pub(super) const TEXT: Color = ansi_index_to_color_const(7);
-pub(super) const MUTED: Color = ansi_index_to_color_const(8);
-pub(super) const ACCENT: Color = ansi_index_to_color_const(12);
-pub(super) const ACCENT_2: Color = ansi_index_to_color_const(13);
-pub(super) const SURFACE: Color = Color::rgb(0x16, 0x16, 0x18);
-pub(super) const SURFACE_RAISED: Color = Color::rgb(0x20, 0x20, 0x24);
-pub(super) const SIDEBAR_BG: Color = Color::rgba(0, 0, 0, 0);
-pub(super) const STATUS_BG: Color = Color::rgb(0x24, 0x24, 0x28);
-pub(super) const BORDER: Color = Color::rgb(0x3e, 0x3e, 0x46);
-pub(super) const RUNNING: Color = ansi_index_to_color_const(10);
-pub(super) const WARNING: Color = ansi_index_to_color_const(11);
-pub(super) const ERROR: Color = ansi_index_to_color_const(9);
-const CURSOR: Color = Color::rgb(188, 204, 255);
+const DEFAULT: Color = Color::rgba(0, 0, 0, 0);
+
+// CharmTone Pantera palette, mirrored from Crush's curated dark theme.
+const CHARPLE: Color = Color::rgb(0x6b, 0x50, 0xff);
+const DOLLY: Color = Color::rgb(0xff, 0x60, 0xff);
+const BLUSH: Color = Color::rgb(0xff, 0x84, 0xff);
+const BOK: Color = Color::rgb(0x68, 0xff, 0xd6);
+const SRIRACHA: Color = Color::rgb(0xeb, 0x42, 0x68);
+const CORAL: Color = Color::rgb(0xff, 0x57, 0x7d);
+const MALIBU: Color = Color::rgb(0x00, 0xa4, 0xff);
+const ANCHOVY: Color = Color::rgb(0x71, 0x9a, 0xfc);
+const SARDINE: Color = Color::rgb(0x4f, 0xbe, 0xfe);
+const GUAC: Color = Color::rgb(0x12, 0xc7, 0x8f);
+const JULEP: Color = Color::rgb(0x00, 0xff, 0xb2);
+const MUSTARD: Color = Color::rgb(0xf5, 0xef, 0x34);
+const CITRON: Color = Color::rgb(0xe8, 0xff, 0x27);
+const PEPPER: Color = Color::rgb(0x20, 0x1f, 0x26);
+const BBQ: Color = Color::rgb(0x2d, 0x2c, 0x35);
+const CHARCOAL: Color = Color::rgb(0x3a, 0x39, 0x43);
+const IRON: Color = Color::rgb(0x4d, 0x4c, 0x57);
+const SQUID: Color = Color::rgb(0x85, 0x83, 0x92);
+const SMOKE: Color = Color::rgb(0xbf, 0xbc, 0xc8);
+const ASH: Color = Color::rgb(0xdf, 0xdb, 0xdd);
+const BUTTER: Color = Color::rgb(0xff, 0xfa, 0xf1);
+
+pub(super) const TEXT: Color = ASH;
+pub(super) const MUTED: Color = SQUID;
+pub(super) const HEADING: Color = SMOKE;
+pub(super) const ACCENT: Color = BOK;
+pub(super) const ACCENT_2: Color = DOLLY;
+pub(super) const SURFACE: Color = PEPPER;
+pub(super) const SURFACE_RAISED: Color = BBQ;
+pub(super) const SIDEBAR_BG: Color = DEFAULT;
+pub(super) const STATUS_FG: Color = BUTTER;
+pub(super) const STATUS_BG: Color = CHARPLE;
+pub(super) const BORDER: Color = CHARCOAL;
+pub(super) const RUNNING: Color = CITRON;
+pub(super) const WARNING: Color = MUSTARD;
+pub(super) const ERROR: Color = SRIRACHA;
+const CURSOR: Color = DOLLY;
 pub(super) const TERM_FG: Color = TEXT;
-const TERM_SELECTION_BG: Color = Color::rgb(53, 92, 173);
-const TERM_SELECTION_FG: Color = Color::rgb(245, 248, 255);
-const SEMANTIC_CHROMA_FLOOR: u8 = 64;
-const SEMANTIC_LUMA_DELTA_FLOOR: u8 = 70;
-const SEMANTIC_DISTANCE_FLOOR: i16 = 48;
-const WHITE: Color = Color::rgb(0xff, 0xff, 0xff);
-const BLACK: Color = Color::rgb(0, 0, 0);
+const TERM_SELECTION_BG: Color = CHARPLE;
+const TERM_SELECTION_FG: Color = BUTTER;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TerminalPalette {
@@ -48,6 +70,7 @@ pub(super) struct DerivedTheme {
     pub(super) surface: Color,
     pub(super) surface_raised: Color,
     pub(super) sidebar_bg: Color,
+    pub(super) status_fg: Color,
     pub(super) status_bg: Color,
     pub(super) border: Color,
     pub(super) running: Color,
@@ -59,67 +82,39 @@ pub(super) struct DerivedTheme {
 }
 
 impl DerivedTheme {
-    pub(super) fn from_terminal_palette(palette: TerminalPalette) -> Self {
-        let text = palette.fg;
-        let bg = palette.bg;
-        let muted = fade_toward(text, bg, 112);
-        let warning = semantic_color(&[palette.ansi[11], palette.ansi[3], WARNING], bg);
-        let error =
-            separated_semantic_color(&[palette.ansi[9], palette.ansi[1], ERROR], bg, &[warning]);
-        let accent = palette_accent(&palette.ansi, bg, &[warning, error]);
-        let accent_2 = palette_accent(&palette.ansi, bg, &[warning, error, accent]);
-        let running = accent_2;
-        Self {
-            text,
-            muted,
-            accent,
-            accent_2,
-            surface: fade_toward(bg, text, 12),
-            surface_raised: fade_toward(bg, text, 22),
-            sidebar_bg: SIDEBAR_BG,
-            status_bg: fade_toward(bg, text, 28),
-            border: fade_toward(text, bg, 150),
-            running,
-            warning,
-            error,
-            term_fg: text,
-            term_bg: Color::rgba(0, 0, 0, 0),
-            ansi: palette.ansi,
-        }
+    pub(super) fn from_terminal_palette(_palette: TerminalPalette) -> Self {
+        // Crush-style chrome is intentionally hardcoded; keep backgrounds as
+        // terminal defaults so transparency / host background still show through.
+        Self::fallback()
     }
 
     pub(super) fn fallback() -> Self {
-        let fallback_palette = TerminalPalette::fallback();
-        let warning = Color::ansi_index(11);
-        let error = Color::ansi_index(9);
-        let accent = palette_accent(
-            &fallback_palette.ansi,
-            fallback_palette.bg,
-            &[warning, error],
-        );
-        let accent_2 = palette_accent(
-            &fallback_palette.ansi,
-            fallback_palette.bg,
-            &[warning, error, accent],
-        );
         Self {
-            text: Color::rgba(0, 0, 0, 0),
-            muted: Color::ansi_index(8),
-            accent,
-            accent_2,
+            text: TEXT,
+            muted: MUTED,
+            accent: ACCENT,
+            accent_2: ACCENT_2,
             surface: SURFACE,
             surface_raised: SURFACE_RAISED,
             sidebar_bg: SIDEBAR_BG,
+            status_fg: STATUS_FG,
             status_bg: STATUS_BG,
             border: BORDER,
-            running: accent_2,
-            warning,
-            error,
-            term_fg: Color::rgba(0, 0, 0, 0),
-            term_bg: Color::rgba(0, 0, 0, 0),
-            ansi: fallback_palette.ansi,
+            running: RUNNING,
+            warning: WARNING,
+            error: ERROR,
+            term_fg: TERM_FG,
+            term_bg: DEFAULT,
+            ansi: charm_ansi_palette(),
         }
     }
+}
+
+const fn charm_ansi_palette() -> [Color; 16] {
+    [
+        PEPPER, SRIRACHA, JULEP, MUSTARD, MALIBU, DOLLY, BOK, SMOKE, IRON, CORAL, GUAC, CITRON,
+        ANCHOVY, BLUSH, SARDINE, ASH,
+    ]
 }
 
 pub(super) fn screen_cell_colors(
@@ -235,183 +230,12 @@ pub(super) fn fade_toward(color: Color, target: Color, mix: u8) -> Color {
     Color::rgb(blend(r1, r2), blend(g1, g2), blend(b1, b2))
 }
 
-fn palette_accent(ansi: &[Color; 16], bg: Color, existing: &[Color]) -> Color {
-    let mut best = None;
-    let mut best_score = i32::MIN;
-
-    for color in ansi.iter().copied().skip(1) {
-        let candidate = adjust_semantic_color(color, bg);
-        if !semantic_color_is_readable(candidate, bg) {
-            continue;
-        }
-        let separated = existing.is_empty() || is_separated_from_all(candidate, existing);
-        let separation_bonus = if separated { 800 } else { 0 };
-        let nearest = existing
-            .iter()
-            .map(|other| rgb_distance_sq(candidate, *other))
-            .min()
-            .unwrap_or(semantic_distance_floor_sq() * 4)
-            .min(16_384) as i32;
-        let score = i32::from(rgb_chroma(candidate)) * 8
-            + i32::from(luma_delta(candidate, bg)) * 4
-            + nearest / 24
-            + separation_bonus;
-
-        if score > best_score {
-            best_score = score;
-            best = Some(candidate);
-        }
-    }
-
-    best.unwrap_or_else(|| semantic_color(&[ACCENT_2, ACCENT], bg))
-}
-fn semantic_color(candidates: &[Color], bg: Color) -> Color {
-    if let Some(indexed) = candidates
-        .iter()
-        .copied()
-        .find(|color| color.ansi_index_value().is_some())
-    {
-        return indexed;
-    }
-
-    let first = candidates.first().copied().unwrap_or(ACCENT);
-    candidates
-        .iter()
-        .copied()
-        .map(|color| adjust_semantic_color(color, bg))
-        .find(|color| semantic_color_is_readable(*color, bg))
-        .unwrap_or_else(|| adjust_semantic_color(first, bg))
-}
-
-fn separated_semantic_color(candidates: &[Color], bg: Color, existing: &[Color]) -> Color {
-    let color = semantic_color(candidates, bg);
-    if is_separated_from_all(color, existing) {
-        return color;
-    }
-
-    for target in candidates.iter().copied().skip(1) {
-        let target = semantic_color(&[target], bg);
-        for mix in [64, 96, 128, 160, 192, 224, 255] {
-            let candidate = semantic_color(&[fade_toward(color, target, mix)], bg);
-            if is_separated_from_all(candidate, existing) {
-                return candidate;
-            }
-        }
-    }
-
-    color
-}
-
-fn adjust_semantic_color(color: Color, bg: Color) -> Color {
-    let color = ensure_min_chroma(color);
-    let color = ensure_min_luma_delta(color, bg);
-    let color = ensure_min_chroma(color);
-    ensure_min_luma_delta(color, bg)
-}
-
-fn semantic_color_is_readable(color: Color, bg: Color) -> bool {
-    rgb_chroma(color) >= SEMANTIC_CHROMA_FLOOR && luma_delta(color, bg) >= SEMANTIC_LUMA_DELTA_FLOOR
-}
-
-fn ensure_min_chroma(color: Color) -> Color {
-    if rgb_chroma(color) >= SEMANTIC_CHROMA_FLOOR {
-        return color;
-    }
-
-    for factor in [2, 3, 4, 5, 6, 7, 8] {
-        let candidate = boost_chroma(color, factor);
-        if rgb_chroma(candidate) >= SEMANTIC_CHROMA_FLOOR {
-            return candidate;
-        }
-    }
-
-    color
-}
-
-fn boost_chroma(color: Color, factor: i16) -> Color {
-    let (r, g, b) = color.rgb_components();
-    let gray = i16::from(perceived_luma(color));
-    Color::rgb(
-        scale_channel_from_gray(r, gray, factor),
-        scale_channel_from_gray(g, gray, factor),
-        scale_channel_from_gray(b, gray, factor),
-    )
-}
-
-fn scale_channel_from_gray(channel: u8, gray: i16, factor: i16) -> u8 {
-    (gray + (i16::from(channel) - gray) * factor).clamp(0, 255) as u8
-}
-
-fn ensure_min_luma_delta(color: Color, bg: Color) -> Color {
-    if luma_delta(color, bg) >= SEMANTIC_LUMA_DELTA_FLOOR {
-        return color;
-    }
-
-    let target = if perceived_luma(bg) < 128 {
-        WHITE
-    } else {
-        BLACK
-    };
-    for mix in [32, 64, 96, 128, 160, 192, 224, 255] {
-        let candidate = fade_toward(color, target, mix);
-        if luma_delta(candidate, bg) >= SEMANTIC_LUMA_DELTA_FLOOR {
-            return candidate;
-        }
-    }
-
-    target
-}
-
-fn is_separated_from_all(color: Color, existing: &[Color]) -> bool {
-    existing
-        .iter()
-        .all(|other| rgb_distance_sq(color, *other) >= semantic_distance_floor_sq())
-}
-
-fn color_for_scoring(color: Color) -> Color {
-    color
-        .ansi_index_value()
-        .map(ansi_index_to_color_const)
-        .unwrap_or(color)
-}
-
-fn rgb_chroma(color: Color) -> u8 {
-    let (r, g, b) = color_for_scoring(color).rgb_components();
-    let max = r.max(g).max(b);
-    let min = r.min(g).min(b);
-    max - min
-}
-
-fn perceived_luma(color: Color) -> u8 {
-    let (r, g, b) = color_for_scoring(color).rgb_components();
-    ((u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114) / 1000) as u8
-}
-
-fn luma_delta(a: Color, b: Color) -> u8 {
-    perceived_luma(a).abs_diff(perceived_luma(b))
-}
-
-fn rgb_distance_sq(a: Color, b: Color) -> u32 {
-    let (ar, ag, ab) = color_for_scoring(a).rgb_components();
-    let (br, bg, bb) = color_for_scoring(b).rgb_components();
-    let dr = i32::from(ar) - i32::from(br);
-    let dg = i32::from(ag) - i32::from(bg);
-    let db = i32::from(ab) - i32::from(bb);
-    (dr * dr + dg * dg + db * db) as u32
-}
-
-fn semantic_distance_floor_sq() -> u32 {
-    let floor = i32::from(SEMANTIC_DISTANCE_FLOOR);
-    (floor * floor) as u32
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        ansi_index_to_color, brighten, fade_toward, luma_delta, rgb_chroma, rgb_distance_sq,
-        screen_cell_colors, semantic_distance_floor_sq, DerivedTheme, TerminalPalette, CURSOR,
-        SEMANTIC_CHROMA_FLOOR, SEMANTIC_LUMA_DELTA_FLOOR, TERM_FG, TERM_SELECTION_BG,
-        TERM_SELECTION_FG, TEXT,
+        ansi_index_to_color, brighten, fade_toward, screen_cell_colors, DerivedTheme,
+        TerminalPalette, ACCENT, ACCENT_2, BORDER, CURSOR, DEFAULT, ERROR, MUTED, RUNNING,
+        STATUS_BG, STATUS_FG, TERM_FG, TERM_SELECTION_BG, TERM_SELECTION_FG, TEXT, WARNING,
     };
     use crate::render::Color;
     fn cell_from_bytes(bytes: &[u8]) -> vt100::Cell {
@@ -459,18 +283,20 @@ mod tests {
     }
 
     #[test]
-    fn fallback_theme_uses_palette_accents_without_green_active_default() {
+    fn fallback_theme_matches_crush_charmtone_roles() {
         let theme = DerivedTheme::fallback();
-        let default_fg = Color::rgba(0, 0, 0, 0);
 
-        assert_eq!(theme.text, default_fg);
-        assert_eq!(theme.muted.ansi_index_value(), Some(8));
-        assert!(theme.accent.ansi_index_value().is_some());
-        assert!(theme.accent_2.ansi_index_value().is_some());
-        assert_ne!(theme.running.ansi_index_value(), Some(10));
-        assert_eq!(theme.warning.ansi_index_value(), Some(11));
-        assert_eq!(theme.error.ansi_index_value(), Some(9));
-        assert_eq!(theme.term_fg, default_fg);
+        assert_eq!(theme.text, TEXT);
+        assert_eq!(theme.muted, MUTED);
+        assert_eq!(theme.accent, ACCENT);
+        assert_eq!(theme.accent_2, ACCENT_2);
+        assert_eq!(theme.status_fg, STATUS_FG);
+        assert_eq!(theme.status_bg, STATUS_BG);
+        assert_eq!(theme.border, BORDER);
+        assert_eq!(theme.running, RUNNING);
+        assert_eq!(theme.warning, WARNING);
+        assert_eq!(theme.error, ERROR);
+        assert_eq!(theme.term_fg, TERM_FG);
     }
 
     #[test]
@@ -517,50 +343,19 @@ mod tests {
     }
 
     #[test]
-    fn derived_theme_uses_scored_terminal_palette_accents() {
+    fn derived_theme_keeps_crush_chrome_and_terminal_default_background() {
         let palette = TerminalPalette {
-            fg: TEXT,
+            fg: Color::rgb(0xd8, 0xd8, 0xd8),
             bg: Color::rgb(0x10, 0x14, 0x20),
             ansi: std::array::from_fn(|index| ansi_index_to_color(index as u8)),
         };
         let theme = DerivedTheme::from_terminal_palette(palette);
 
-        assert_ne!(theme.accent, palette.fg);
-        assert_ne!(theme.accent, palette.ansi[10]);
-        assert_ne!(theme.running, palette.ansi[10]);
-        assert_eq!(theme.warning, palette.ansi[11]);
-        assert_eq!(theme.error, palette.ansi[9]);
-    }
-
-    #[test]
-    fn derived_theme_can_pick_accent_from_any_palette_slot() {
-        let custom_accent = Color::rgb(0xff, 0x80, 0x20);
-        let mut palette = TerminalPalette {
-            fg: Color::rgb(0xd8, 0xd8, 0xd8),
-            bg: Color::rgb(0x10, 0x10, 0x10),
-            ansi: [Color::rgb(0x78, 0x78, 0x78); 16],
-        };
-        palette.ansi[2] = custom_accent;
-
-        let theme = DerivedTheme::from_terminal_palette(palette);
-
-        assert_eq!(theme.accent, custom_accent);
-    }
-
-    #[test]
-    fn derived_theme_boosts_only_warning_and_error_for_monochrome_terminal_colors() {
-        let gray = Color::rgb(0x78, 0x78, 0x78);
-        let palette = TerminalPalette {
-            fg: Color::rgb(0xd8, 0xd8, 0xd8),
-            bg: Color::rgb(0x10, 0x10, 0x10),
-            ansi: [gray; 16],
-        };
-        let theme = DerivedTheme::from_terminal_palette(palette);
-
-        for color in [theme.accent, theme.running, theme.warning, theme.error] {
-            assert!(rgb_chroma(color) >= SEMANTIC_CHROMA_FLOOR);
-            assert!(luma_delta(color, palette.bg) >= SEMANTIC_LUMA_DELTA_FLOOR);
-        }
-        assert!(rgb_distance_sq(theme.warning, theme.error) >= semantic_distance_floor_sq());
+        assert_eq!(theme.text, TEXT);
+        assert_eq!(theme.accent, ACCENT);
+        assert_eq!(theme.status_fg, STATUS_FG);
+        assert_eq!(theme.status_bg, STATUS_BG);
+        assert_eq!(theme.term_bg, DEFAULT);
+        assert_eq!(theme.ansi, DerivedTheme::fallback().ansi);
     }
 }
