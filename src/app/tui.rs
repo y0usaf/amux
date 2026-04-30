@@ -37,7 +37,7 @@ const TUI_BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
 const TUI_QUIT_HINT: &str = "ctrl+q quit";
 const TUI_COMMAND_HINT: &str = ": cmd";
 
-const TUI_THEME_QUERY_INTERVAL: Duration = Duration::from_secs(30);
+const TUI_THEME_QUERY_INTERVAL: Duration = Duration::from_secs(1);
 #[derive(Debug)]
 enum TuiEvent {
     Input(Vec<u8>),
@@ -620,10 +620,14 @@ impl TuiApp {
         }
     }
 
+    fn request_terminal_theme_now(&mut self) {
+        self.last_theme_query = Instant::now();
+        let _ = raw::request_terminal_palette_query();
+    }
+
     fn maybe_query_terminal_theme(&mut self) {
         if self.last_theme_query.elapsed() >= TUI_THEME_QUERY_INTERVAL {
-            self.last_theme_query = Instant::now();
-            let _ = raw::request_terminal_palette_query();
+            self.request_terminal_theme_now();
         }
     }
 
