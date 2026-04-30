@@ -3,7 +3,15 @@ use std::path::PathBuf;
 use crate::pi::{PiSessionStage, PiSidecarSnapshot};
 use crate::state::Session;
 
-use super::{sidebar, sidecar_sync, workspace};
+use super::{
+    cell_surface::CellSurface,
+    layout::CellRect,
+    scene::{render_sidebar, ScenePalette},
+    sidebar::{self, SidebarRow, SidebarRowKind, SidebarStatusKind, SidebarViewportItem},
+    sidecar_sync,
+    theme::{self, DerivedTheme},
+    workspace,
+};
 
 fn snapshot(stage: PiSessionStage, queued: bool) -> PiSidecarSnapshot {
     PiSidecarSnapshot {
@@ -108,6 +116,43 @@ fn sidebar_status_prefers_queued_over_notification() {
         sidebar::session_sidebar_status(&session),
         Some(sidebar::SidebarStatusKind::Queued)
     );
+}
+
+#[test]
+fn notification_status_tints_session_title() {
+    let palette = ScenePalette::themed(DerivedTheme::fallback());
+    let mut surface = CellSurface::new(24, 3, palette.fg, palette.bg);
+    let rows = [SidebarRow {
+        kind: SidebarRowKind::Session {
+            project_index: 0,
+            session_index: 0,
+        },
+        text: "Unread session".into(),
+        fg: theme::TEXT,
+        bg: None,
+        inverted: false,
+        status: Some(SidebarStatusKind::Notification),
+    }];
+    let viewport = [SidebarViewportItem {
+        row_index: 0,
+        visible_row: 0,
+        sticky: false,
+    }];
+
+    render_sidebar(
+        &mut surface,
+        CellRect::new(0, 0, 24, 3),
+        CellRect::new(0, 0, 24, 1),
+        &rows,
+        &viewport,
+        None,
+        &palette,
+        0,
+    );
+
+    let title_cell = &surface.cells[2];
+    assert_eq!(title_cell.text, "U");
+    assert_eq!(title_cell.fg, palette.accent);
 }
 
 #[test]

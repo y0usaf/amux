@@ -223,22 +223,22 @@ fn spinner_phase_offset(status: SidebarStatusKind) -> usize {
 }
 
 fn project_sidebar_status(project: &Project) -> Option<SidebarStatusKind> {
-    let mut notification = false;
+    let mut active = false;
     let mut queued = false;
 
     for session in &project.sessions {
         match session_sidebar_status(session) {
-            Some(SidebarStatusKind::Active) => return Some(SidebarStatusKind::Active),
+            Some(SidebarStatusKind::Notification) => return Some(SidebarStatusKind::Notification),
+            Some(SidebarStatusKind::Active) => active = true,
             Some(SidebarStatusKind::Queued) => queued = true,
-            Some(SidebarStatusKind::Notification) => notification = true,
             None => {}
         }
     }
 
-    if queued {
+    if active {
+        Some(SidebarStatusKind::Active)
+    } else if queued {
         Some(SidebarStatusKind::Queued)
-    } else if notification {
-        Some(SidebarStatusKind::Notification)
     } else {
         None
     }
@@ -445,6 +445,22 @@ mod tests {
         project.sessions.push(session);
 
         assert!(!sidebar_has_spinner(&[project]));
+    }
+
+    #[test]
+    fn project_sidebar_status_prioritizes_child_notifications() {
+        let mut project = Project::new("project".into());
+        let mut active = Session::new_draft();
+        active.runtime.running = true;
+        let mut unread = Session::new_draft();
+        unread.runtime.unread = true;
+        project.sessions.push(active);
+        project.sessions.push(unread);
+
+        assert_eq!(
+            project_sidebar_status(&project),
+            Some(SidebarStatusKind::Notification)
+        );
     }
 
     #[test]
