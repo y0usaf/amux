@@ -236,6 +236,19 @@ fn escape_sequence_end(bytes: &[u8], start: usize) -> Option<usize> {
             }
             None
         }
+        b']' => {
+            let mut index = start + 2;
+            while index < bytes.len() {
+                if bytes[index] == b'\x07' {
+                    return Some(index + 1);
+                }
+                if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
+                    return Some(index + 2);
+                }
+                index += 1;
+            }
+            None
+        }
         b'O' => Some((start + 3).min(bytes.len())),
         _ => Some((start + 2).min(bytes.len())),
     }
