@@ -520,15 +520,11 @@ pub(super) fn render_sidebar(
     if panel.cols > 0 && panel.rows > 0 {
         let separator_col = panel.col + panel.cols - 1;
         for row in panel.row..(panel.row + panel.rows) {
-            let glyph = "│";
-            surface.set_cell(
-                separator_col,
-                row,
-                palette.border,
-                palette.sidebar_bg,
-                glyph,
-                false,
-            );
+            let row_offset = (row - panel.row).max(0) as u16;
+            let denom = panel.rows.saturating_sub(1).max(1) as u16;
+            let mix = ((row_offset * 255) / denom) as u8;
+            let color = theme::fade_toward(palette.border, palette.accent_2, mix);
+            surface.set_cell(separator_col, row, color, palette.sidebar_bg, "│", false);
         }
     }
     let visible_rows = content.rows.max(0) as usize;
@@ -550,7 +546,7 @@ pub(super) fn render_sidebar(
             palette.border,
             palette.sidebar_bg,
             SCROLLBAR_TRACK_GLYPH,
-            palette.muted,
+            palette.accent_2,
             SCROLLBAR_THUMB_GLYPH,
         );
         content.cols -= 1;
@@ -564,9 +560,11 @@ pub(super) fn render_sidebar(
             continue;
         }
         let row_y = content.row + item.visible_row as i32;
-        let active = row.inverted || hovered_row_index == Some(item.row_index);
+        let selected = row.inverted;
+        let hovered = hovered_row_index == Some(item.row_index) && !selected;
+        let active = selected || hovered;
         let sticky = item.sticky;
-        let (row_fg, row_bg, reverse) = sidebar_row_style(row, active, sticky, palette);
+        let (row_fg, row_bg, reverse) = sidebar_row_style(row, selected, hovered, sticky, palette);
         surface.fill_rect(
             CellRect {
                 col: content.col,
@@ -608,11 +606,7 @@ pub(super) fn render_sidebar(
                 let status = row.status.map(|status| {
                     (
                         sidebar_status_glyph(status, now_ms),
-                        if palette.monochrome || active {
-                            row_fg
-                        } else {
-                            sidebar_status_color_for_palette(status, palette)
-                        },
+                        sidebar_status_color_for_palette(status, palette),
                     )
                 });
                 let branch = if active { "▌ " } else { "  " };
@@ -625,15 +619,18 @@ pub(super) fn render_sidebar(
                     .saturating_sub(indent_cols)
                     .saturating_sub(reserved_cells);
                 let value = truncate_to_cells(&row.text, text_cols as usize);
+                let branch_fg = if hovered {
+                    palette.accent_2
+                } else if selected {
+                    palette.accent
+                } else {
+                    palette.border
+                };
                 surface.put_text_styled(
                     content.col,
                     row_y,
                     indent_cols,
-                    if active {
-                        palette.accent
-                    } else {
-                        palette.border
-                    },
+                    branch_fg,
                     row_bg,
                     branch,
                     reverse,
@@ -784,24 +781,32 @@ fn viewport_scroll_from_rows(viewport: &[SidebarViewportItem]) -> usize {
 
 fn sidebar_row_style(
     row: &SidebarRow,
-    active: bool,
+    selected: bool,
+    hovered: bool,
     sticky: bool,
     palette: &ScenePalette,
 ) -> (Color, Color, bool) {
     if palette.monochrome {
-        return (palette.fg, palette.bg, active);
+        return (palette.fg, palette.bg, selected);
     }
 
     let fg = palette_color(row.fg, palette);
-    if active {
+    if selected {
         return (
-            theme::brighten(fg, 16),
+            palette.statusbar_fg,
+            row.bg.unwrap_or(palette.sidebar_bg),
+            false,
+        );
+    }
+    if hovered {
+        return (
+            palette.accent_2,
             row.bg.unwrap_or(palette.sidebar_bg),
             false,
         );
     }
     if sticky {
-        return (theme::brighten(fg, 14), palette.sidebar_bg, false);
+        return (palette.accent, palette.sidebar_bg, false);
     }
 
     (fg, row.bg.unwrap_or(palette.sidebar_bg), false)
@@ -810,6 +815,8 @@ fn sidebar_row_style(
 fn palette_color(color: Color, palette: &ScenePalette) -> Color {
     if color == theme::TEXT {
         palette.fg
+    } else if color == theme::HEADING {
+        theme::HEADING
     } else if color == theme::MUTED {
         palette.muted
     } else if color == theme::ACCENT {
@@ -906,7 +913,7 @@ fn render_terminal_scrollback(
         palette.border,
         palette.term_bg,
         SCROLLBAR_TRACK_GLYPH,
-        palette.muted,
+        palette.accent_2,
         SCROLLBAR_THUMB_GLYPH,
     );
 }
