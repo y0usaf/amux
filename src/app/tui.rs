@@ -429,7 +429,7 @@ fn render_archive_viewer(
     theme: &DerivedTheme,
 ) {
     let rect = archive_viewer_rect(surface.cols, surface.rows);
-    draw_box(surface, rect, theme.term_fg, theme.surface, theme.border);
+    draw_box(surface, rect, theme.text, theme.surface, theme.border);
     if rect.cols <= 2 || rect.rows <= 2 {
         return;
     }
@@ -504,7 +504,7 @@ fn render_archive_viewer(
                 theme.surface
             };
             let row_fg = if selected {
-                theme.term_fg
+                theme.text
             } else {
                 theme::brighten(theme.muted, 30)
             };
@@ -838,6 +838,7 @@ impl TuiApp {
         palette.border = theme.border;
         palette.muted = theme.muted;
         palette.statusbar_bg = theme.status_bg;
+        palette.statusbar_fg = theme.status_fg;
         let mut surface =
             CellSurface::new(i32::from(cols), i32::from(rows), palette.fg, palette.bg);
         surface.fill_rect(
@@ -884,7 +885,7 @@ impl TuiApp {
         let command_line = self.command_line.as_ref()?;
         let row = surface.rows.saturating_sub(1);
         let command_rect = Rect::new(0, row, surface.cols, 1);
-        surface.fill_rect(command_rect, self.theme.term_fg, self.theme.surface);
+        surface.fill_rect(command_rect, self.theme.text, self.theme.surface);
         let (visible_text, cursor_col) =
             command_line.visible_text_and_cursor_col(surface.cols.max(1) as usize);
         if let Some(rest) = visible_text.strip_prefix(':') {
@@ -893,7 +894,7 @@ impl TuiApp {
                 1,
                 row,
                 surface.cols.saturating_sub(1),
-                self.theme.term_fg,
+                self.theme.text,
                 self.theme.surface,
                 rest,
             );
@@ -902,11 +903,12 @@ impl TuiApp {
                 0,
                 row,
                 surface.cols,
-                self.theme.term_fg,
+                self.theme.text,
                 self.theme.surface,
                 &visible_text,
             );
         }
+
         Some(super::scene::HardwareCursor {
             col: cursor_col,
             row,
