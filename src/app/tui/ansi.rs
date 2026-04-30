@@ -152,7 +152,7 @@ fn ansi_fg(color: Color) -> String {
         return "\x1b[39m".to_string();
     }
     if let Some(index) = color.ansi_index_value() {
-        return format!("\x1b[38;5;{index}m");
+        return ansi_index_fg(index);
     }
     let (r, g, b) = color.rgb_components();
     format!("\x1b[38;2;{r};{g};{b}m")
@@ -163,8 +163,43 @@ fn ansi_bg(color: Color) -> String {
         return "\x1b[49m".to_string();
     }
     if let Some(index) = color.ansi_index_value() {
-        return format!("\x1b[48;5;{index}m");
+        return ansi_index_bg(index);
     }
     let (r, g, b) = color.rgb_components();
     format!("\x1b[48;2;{r};{g};{b}m")
+}
+
+fn ansi_index_fg(index: u8) -> String {
+    match index {
+        0..=7 => format!("\x1b[{}m", 30 + index),
+        8..=15 => format!("\x1b[{}m", 90 + index - 8),
+        _ => format!("\x1b[38;5;{index}m"),
+    }
+}
+
+fn ansi_index_bg(index: u8) -> String {
+    match index {
+        0..=7 => format!("\x1b[{}m", 40 + index),
+        8..=15 => format!("\x1b[{}m", 100 + index - 8),
+        _ => format!("\x1b[48;5;{index}m"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ansi_index_bg, ansi_index_fg};
+
+    #[test]
+    fn low_ansi_indexes_use_classic_sgr_sequences() {
+        assert_eq!(ansi_index_fg(4), "\x1b[34m");
+        assert_eq!(ansi_index_fg(12), "\x1b[94m");
+        assert_eq!(ansi_index_bg(4), "\x1b[44m");
+        assert_eq!(ansi_index_bg(12), "\x1b[104m");
+    }
+
+    #[test]
+    fn high_ansi_indexes_use_256_color_sequences() {
+        assert_eq!(ansi_index_fg(42), "\x1b[38;5;42m");
+        assert_eq!(ansi_index_bg(42), "\x1b[48;5;42m");
+    }
 }
