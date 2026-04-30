@@ -1,7 +1,7 @@
 use crate::render::Color;
 use crate::state::{Project, Session};
 
-use super::theme::{ACCENT, MUTED, RUNNING, TEXT, WARNING};
+use super::theme::{ACCENT, HEADING, MUTED, RUNNING, TEXT, WARNING};
 
 pub(super) const SIDEBAR_SPINNER_FRAMES: &[&str] =
     &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -255,7 +255,7 @@ pub(super) fn build_sidebar_rows(
         rows.push(SidebarRow {
             kind: SidebarRowKind::Project(project_index),
             text: project.name.to_uppercase(),
-            fg: if project_selected { TEXT } else { MUTED },
+            fg: if project_selected { TEXT } else { HEADING },
             bg: None,
             inverted: project_selected,
             status,
