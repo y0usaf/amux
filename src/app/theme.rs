@@ -32,7 +32,7 @@ pub(super) const ACCENT: Color = BOK;
 pub(super) const ACCENT_2: Color = DOLLY;
 pub(super) const SURFACE: Color = PEPPER;
 pub(super) const SURFACE_RAISED: Color = BBQ;
-pub(super) const SIDEBAR_BG: Color = SURFACE;
+pub(super) const SIDEBAR_BG: Color = DEFAULT;
 pub(super) const STATUS_FG: Color = BUTTER;
 pub(super) const STATUS_BG: Color = CHARPLE;
 pub(super) const BORDER: Color = CHARCOAL;
@@ -297,6 +297,7 @@ mod tests {
         assert_eq!(theme.warning, WARNING);
         assert_eq!(theme.error, ERROR);
         assert_eq!(theme.term_fg, TERM_FG);
+        assert_eq!(theme.sidebar_bg, DEFAULT);
     }
 
     #[test]
@@ -356,6 +357,7 @@ mod tests {
         assert_eq!(theme.status_fg, STATUS_FG);
         assert_eq!(theme.status_bg, STATUS_BG);
         assert_eq!(theme.term_bg, DEFAULT);
+        assert_eq!(theme.sidebar_bg, DEFAULT);
         assert_eq!(theme.ansi, DerivedTheme::fallback().ansi);
     }
 }
