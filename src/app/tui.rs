@@ -499,7 +499,7 @@ fn render_archive_viewer(
             let line = archive_viewer_row_text(&viewer.sessions[index], now_ms);
             let row_rect = Rect::new(inner.col, row, list_width, 1);
             let row_bg = if selected {
-                theme::fade_toward(theme.surface_raised, theme.accent, 48)
+                theme.surface_raised
             } else {
                 theme.surface
             };

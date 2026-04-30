@@ -177,7 +177,7 @@ pub(super) fn render_statusbar(
         statusline,
         palette.fg,
         palette.statusbar_bg,
-        theme::fade_toward(palette.statusbar_bg, palette.accent_2, 45),
+        palette.statusbar_bg,
     );
 
     if panel.rows > 1 {
@@ -299,7 +299,7 @@ fn render_statusbar_sidebar_segment(
             panel.col,
             row,
             mode_cols,
-            mode_fg(mode),
+            mode_fg(mode, palette),
             mode_bg(mode, palette),
             mode_label,
         );
@@ -329,7 +329,7 @@ fn render_statusbar_sidebar_segment(
         panel.col,
         row,
         mode_cols,
-        mode_fg(mode),
+        mode_fg(mode, palette),
         mode_bg(mode, palette),
         mode_label,
     );
@@ -384,7 +384,7 @@ fn render_statusline_rule(
         surface.set_cell(
             col + offset,
             row,
-            theme::fade_toward(palette.border, palette.accent, 96),
+            palette.border,
             palette.statusbar_bg,
             "|",
             false,
@@ -441,17 +441,17 @@ pub(super) fn statusline_mode_label(mode: HarnessMode) -> &'static str {
     }
 }
 
-fn mode_fg(mode: HarnessMode) -> Color {
+fn mode_fg(mode: HarnessMode, palette: &ScenePalette) -> Color {
     match mode {
-        HarnessMode::Normal => Color::rgb(0x08, 0x0d, 0x14),
+        HarnessMode::Normal => palette.statusbar_bg,
         HarnessMode::Command => Color::rgb(0x10, 0x0c, 0x05),
     }
 }
 
 fn mode_bg(mode: HarnessMode, palette: &ScenePalette) -> Color {
     match mode {
-        HarnessMode::Normal => palette.accent,
-        HarnessMode::Command => theme::fade_toward(palette.warning, palette.accent_2, 45),
+        HarnessMode::Normal => palette.fg,
+        HarnessMode::Command => palette.warning,
     }
 }
 
@@ -522,7 +522,7 @@ pub(super) fn render_sidebar(
             surface.set_cell(
                 separator_col,
                 row,
-                theme::fade_toward(palette.border, palette.accent, 72),
+                palette.border,
                 palette.sidebar_bg,
                 glyph,
                 false,
@@ -679,8 +679,8 @@ fn render_sidebar_project_rule(
         label_fg
     };
     let max_label_cols = rect.cols.max(0) as usize;
-    let padded_label = format!(" {} ", label);
-    let mut value = truncate_to_cells(&padded_label, max_label_cols);
+    let decorated_label = format!("⧸ {} ⧸", label);
+    let mut value = truncate_to_cells(&decorated_label, max_label_cols);
     let mut value_cols = display_cell_width(&value) as i32;
 
     if value_cols >= rect.cols {
@@ -690,13 +690,13 @@ fn render_sidebar_project_rule(
             rect.cols,
             label_fg,
             bg,
-            &truncate_to_cells(label, max_label_cols),
+            &truncate_to_cells(&decorated_label, max_label_cols),
             reverse,
         );
         return;
     }
 
-    // Keep the rule symmetric: left `\\` count always equals right `/` count.
+    // Keep the rule symmetric: left `/` count always equals right `/` count.
     // If the available rule width is odd, absorb the extra cell into label padding.
     if (rect.cols - value_cols) % 2 != 0 && value_cols < rect.cols {
         value.push(' ');
@@ -714,7 +714,7 @@ fn render_sidebar_project_rule(
             rect.row,
             sidebar_project_rule_color(status, slash_index, now_ms, palette),
             bg,
-            "\\",
+            "/",
             reverse,
         );
         slash_index += 1;
