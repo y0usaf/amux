@@ -4,8 +4,9 @@ use crate::state::{Project, Session};
 use super::theme::{ACCENT, HEADING, MUTED, RUNNING, TEXT, WARNING};
 
 pub(super) const SIDEBAR_ANIMATION_FRAME_MS: u64 = 20;
-pub(super) const SIDEBAR_SPINNER_FRAMES: &[&str] =
-    &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+pub(super) const SIDEBAR_SPINNER_FRAMES: &[&str] = &[
+    "⠋", "⠙", "⠹", "⠸", "⢸", "⢰", "⣰", "⣠", "⣤", "⣄", "⣆", "⡆", "⡇", "⠇", "⠏",
+];
 pub(super) const SIDEBAR_SPINNER_FRAME_MS: u64 = 60;
 pub(super) const SIDEBAR_NOTIFICATION_GLYPH: &str = "⣿";
 

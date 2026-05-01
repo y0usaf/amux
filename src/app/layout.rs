@@ -35,7 +35,7 @@ impl CellRect {
     }
 }
 
-const STATUSBAR_ROWS: i32 = 2;
+const STATUSBAR_ROWS: i32 = 1;
 const SIDEBAR_SHOW_MIN_COLS: i32 = 72;
 const SIDEBAR_LEGACY_PERCENT_MIN_COLS: i32 = 18;
 const SIDEBAR_LEGACY_PERCENT_MAX_COLS: i32 = 38;
@@ -137,9 +137,9 @@ mod tests {
     fn cell_layout_hides_sidebar_when_compact() {
         let layout = compute_cell_layout(60, 20, widths());
         assert_eq!(layout.sidebar, CellRect::default());
-        assert_eq!(layout.statusbar, CellRect::new(0, 18, 60, 2));
+        assert_eq!(layout.statusbar, CellRect::new(0, 19, 60, 1));
         assert_eq!(layout.terminal.row, 0);
-        assert_eq!(layout.terminal.rows, 18);
+        assert_eq!(layout.terminal.rows, 19);
         assert!(layout.terminal.cols > 0);
     }
 
@@ -152,11 +152,11 @@ mod tests {
         );
         assert_eq!(layout.sidebar.col, 0);
         assert_eq!(layout.sidebar.row, 0);
-        assert_eq!(layout.sidebar.rows, 38);
+        assert_eq!(layout.sidebar.rows, 39);
         assert_eq!(layout.terminal_card.col, layout.sidebar.cols);
-        assert_eq!(layout.terminal_card.rows, 38);
+        assert_eq!(layout.terminal_card.rows, 39);
         assert_eq!(layout.terminal.row, 0);
-        assert_eq!(layout.statusbar, CellRect::new(0, 38, 120, 2));
+        assert_eq!(layout.statusbar, CellRect::new(0, 39, 120, 1));
         assert_eq!(layout.terminal.cols, layout.terminal_card.cols);
     }
 }

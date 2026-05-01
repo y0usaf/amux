@@ -156,6 +156,43 @@ fn notification_status_tints_session_title() {
 }
 
 #[test]
+fn project_title_uses_gradient_without_status() {
+    let palette = ScenePalette::themed(DerivedTheme::fallback());
+    let mut surface = CellSurface::new(24, 3, palette.fg, palette.bg);
+    let rows = [SidebarRow {
+        kind: SidebarRowKind::Project(0),
+        text: "PROJECT".into(),
+        fg: theme::HEADING,
+        bg: None,
+        inverted: false,
+        status: None,
+    }];
+    let viewport = [SidebarViewportItem {
+        row_index: 0,
+        visible_row: 0,
+        sticky: false,
+    }];
+
+    render_sidebar(
+        &mut surface,
+        CellRect::new(0, 0, 24, 3),
+        CellRect::new(0, 0, 24, 1),
+        &rows,
+        &viewport,
+        None,
+        &palette,
+        0,
+    );
+
+    let first_title_cell = &surface.cells[7];
+    let last_title_cell = &surface.cells[15];
+    assert_eq!(first_title_cell.text, "[");
+    assert_eq!(first_title_cell.fg, palette.accent);
+    assert_eq!(last_title_cell.text, "]");
+    assert_eq!(last_title_cell.fg, palette.accent_2);
+}
+
+#[test]
 fn spinner_glyph_advances_with_frame_interval() {
     let first = sidebar::sidebar_status_glyph(sidebar::SidebarStatusKind::Active, 0);
     let second = sidebar::sidebar_status_glyph(
