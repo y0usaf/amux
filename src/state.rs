@@ -12,7 +12,7 @@ mod session;
 mod sort;
 
 pub use merge::merge_scanned_sessions;
-pub use persisted::{default_state_path, PersistedState};
+pub use persisted::{default_state_path, PersistedProject, PersistedSession, PersistedState};
 pub use project::Project;
 pub use scanned::ScannedSession;
 pub use session::{Session, SessionRuntime};
