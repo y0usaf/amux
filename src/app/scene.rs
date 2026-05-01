@@ -343,8 +343,6 @@ fn render_statusline_rule(
     }
 }
 
-
-
 pub(super) fn statusbar_new_project_rect(
     panel: CellRect,
     sidebar_panel: Option<CellRect>,
@@ -493,7 +491,7 @@ pub(super) fn render_sidebar(
         let row_y = content.row + item.visible_row as i32;
         let selected = row.inverted;
         let hovered = hovered_row_index == Some(item.row_index) && !selected;
-        let active = selected || hovered;
+
         let sticky = item.sticky;
         let (row_fg, row_bg, reverse) = sidebar_row_style(row, selected, hovered, sticky, palette);
         surface.fill_rect(
@@ -519,10 +517,11 @@ pub(super) fn render_sidebar(
                     row.status,
                     now_ms,
                     reverse,
-                    active,
+                    row.selector,
                     palette,
                 );
             }
+
             SidebarRowKind::Session { .. } => {
                 let status = row.status.map(|status| {
                     (
@@ -530,7 +529,11 @@ pub(super) fn render_sidebar(
                         animated_sidebar_status_color(status, palette, now_ms, item.visible_row),
                     )
                 });
-                let branch = if active { SIDEBAR_SELECTOR_GLYPH } else { "  " };
+                let branch = if row.selector || hovered {
+                    SIDEBAR_SELECTOR_GLYPH
+                } else {
+                    "  "
+                };
                 let indent_cols = content.cols.min(display_cell_width(branch) as i32);
                 let reserved_cells = status
                     .map(|(glyph, _)| display_cell_width(glyph) as i32 + 1)
@@ -664,24 +667,48 @@ fn render_sidebar_project_rule(
     status: Option<SidebarStatusKind>,
     now_ms: u64,
     reverse: bool,
-    _focused: bool,
+    show_selector: bool,
     palette: &ScenePalette,
 ) {
     if rect.cols <= 0 {
         return;
     }
 
+    let selector_cols = if show_selector {
+        let selector_cols = rect
+            .cols
+            .min(display_cell_width(SIDEBAR_SELECTOR_GLYPH) as i32);
+        surface.put_text_styled(
+            rect.col,
+            rect.row,
+            selector_cols,
+            palette.accent,
+            bg,
+            SIDEBAR_SELECTOR_GLYPH,
+            reverse,
+        );
+        selector_cols
+    } else {
+        0
+    };
+    let label_area = CellRect::new(
+        rect.col + selector_cols,
+        rect.row,
+        rect.cols.saturating_sub(selector_cols),
+        1,
+    );
+
     let label_fg = if matches!(status, Some(SidebarStatusKind::Notification)) {
         sidebar_status_color_for_palette(SidebarStatusKind::Notification, palette)
     } else {
         label_fg
     };
-    let value = truncate_to_cells(&format!("[{label}]"), rect.cols.max(0) as usize);
+    let value = truncate_to_cells(&format!("[{label}]"), label_area.cols.max(0) as usize);
     let value_cols = display_cell_width(&value) as i32;
     let label_rect = CellRect::new(
-        rect.col + rect.cols.saturating_sub(value_cols) / 2,
-        rect.row,
-        value_cols.min(rect.cols),
+        label_area.col + label_area.cols.saturating_sub(value_cols) / 2,
+        label_area.row,
+        value_cols.min(label_area.cols),
         1,
     );
 

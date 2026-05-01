@@ -34,6 +34,7 @@ pub(super) struct SidebarRow {
     pub(super) fg: Color,
     pub(super) bg: Option<Color>,
     pub(super) inverted: bool,
+    pub(super) selector: bool,
     pub(super) status: Option<SidebarStatusKind>,
 }
 
@@ -262,14 +263,16 @@ pub(super) fn build_sidebar_rows(
 
     for (project_index, project) in projects.iter().enumerate() {
         let project_selected = project_index == selected_project;
+        let project_focused = project_selected && !selected_session_visible;
         let status = project_sidebar_status(project);
         rows.push(SidebarRow {
             kind: SidebarRowKind::Project(project_index),
             text: project.name.to_uppercase(),
-            fg: if project_selected { TEXT } else { HEADING },
+            fg: if project_focused { TEXT } else { HEADING },
             bg: None,
-            inverted: project_selected,
+            inverted: project_focused,
             status,
+            selector: project_focused,
         });
 
         for (session_index, session) in project.sessions.iter().enumerate() {
@@ -290,6 +293,7 @@ pub(super) fn build_sidebar_rows(
                 bg: None,
                 inverted: selected,
                 status,
+                selector: selected,
             });
         }
     }
@@ -465,6 +469,31 @@ mod tests {
     }
 
     #[test]
+    fn empty_selected_project_gets_sidebar_selector() {
+        let project = Project::new("project".into());
+        let rows = build_sidebar_rows(&[project], 0, None, false);
+
+        assert!(matches!(rows[0].kind, SidebarRowKind::Project(0)));
+        assert!(rows[0].selector);
+    }
+
+    #[test]
+    fn selected_project_header_without_selected_row_does_not_get_focused() {
+        let mut project = Project::new("project".into());
+        let mut session = Session::new_draft();
+        session.draft = false;
+        project.sessions.push(session);
+        let rows = build_sidebar_rows(&[project], 0, Some(0), true);
+
+        assert!(matches!(rows[0].kind, SidebarRowKind::Project(0)));
+        assert!(!rows[0].inverted);
+        assert!(!rows[0].selector);
+        assert!(matches!(rows[1].kind, SidebarRowKind::Session { .. }));
+        assert!(rows[1].inverted);
+        assert!(rows[1].selector);
+    }
+
+    #[test]
     fn selection_sync_keeps_project_header_visible_with_selected_session() {
         assert_eq!(
             sync_sidebar_scroll_to_selection_span(
@@ -512,6 +541,7 @@ mod tests {
                 bg: None,
                 inverted: false,
                 status: None,
+                selector: false,
             })
             .collect();
 

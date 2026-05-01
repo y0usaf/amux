@@ -131,6 +131,7 @@ fn notification_status_tints_session_title() {
         fg: theme::TEXT,
         bg: None,
         inverted: false,
+        selector: false,
         status: Some(SidebarStatusKind::Notification),
     }];
     let viewport = [SidebarViewportItem {
@@ -165,6 +166,7 @@ fn project_title_uses_gradient_without_status() {
         fg: theme::HEADING,
         bg: None,
         inverted: false,
+        selector: false,
         status: None,
     }];
     let viewport = [SidebarViewportItem {
@@ -190,6 +192,40 @@ fn project_title_uses_gradient_without_status() {
     assert_eq!(first_title_cell.fg, palette.accent);
     assert_eq!(last_title_cell.text, "]");
     assert_eq!(last_title_cell.fg, palette.accent_2);
+}
+
+#[test]
+fn selected_empty_project_draws_sidebar_selector() {
+    let palette = ScenePalette::themed(DerivedTheme::fallback());
+    let mut surface = CellSurface::new(24, 3, palette.fg, palette.bg);
+    let rows = [SidebarRow {
+        kind: SidebarRowKind::Project(0),
+        text: "PROJECT".into(),
+        fg: theme::TEXT,
+        bg: None,
+        inverted: true,
+        selector: true,
+        status: None,
+    }];
+    let viewport = [SidebarViewportItem {
+        row_index: 0,
+        visible_row: 0,
+        sticky: false,
+    }];
+
+    render_sidebar(
+        &mut surface,
+        CellRect::new(0, 0, 24, 3),
+        CellRect::new(0, 0, 24, 1),
+        &rows,
+        &viewport,
+        None,
+        &palette,
+        0,
+    );
+
+    assert_eq!(surface.cells[0].text, ">");
+    assert_eq!(surface.cells[0].fg, palette.accent);
 }
 
 #[test]
