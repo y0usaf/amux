@@ -3,7 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::pi;
-use crate::state::{merge_scanned_sessions, PersistedState, Project, Session};
+use crate::state::{
+    merge_scanned_sessions, PersistedProject, PersistedSession, PersistedState, Project, Session,
+};
 use crate::util::{normalize_project_path, project_name_from_path};
 
 use super::selection::{
@@ -75,17 +77,25 @@ impl Workspace {
     }
 
     pub(super) fn persist_selection(&mut self) {
-        self.persisted.projects = self
+        let next_projects: Vec<String> = self
             .projects
             .iter()
             .map(|project| project.selection_key())
             .collect();
-        self.persisted.selected_project = self
+        let next_cache = self.cached_projects();
+        let next_selected_project = self
             .current_project()
             .map(|project| project.selection_key());
-        self.persisted.selected_session = self
+        let next_selected_session = self
             .current_session()
             .and_then(Session::persisted_selection_key);
+
+        self.persisted = PersistedState::load_default().unwrap_or_else(|_| self.persisted.clone());
+        self.persisted.projects = merge_project_keys(&self.persisted.projects, &next_projects);
+        self.persisted.project_cache =
+            merge_project_cache(&self.persisted.project_cache, &next_cache);
+        self.persisted.selected_project = next_selected_project;
+        self.persisted.selected_session = next_selected_session;
         let _ = self.persisted.save_default();
     }
 
@@ -97,6 +107,9 @@ impl Workspace {
             .current_session()
             .map(|session| session.selection_key());
 
+        if let Ok(persisted) = PersistedState::load_default() {
+            self.persisted = persisted;
+        }
         let opened_project_paths =
             normalize_unique_project_paths(std::mem::take(&mut self.initial_project_paths));
         let opened_project_key = opened_project_paths
@@ -120,6 +133,7 @@ impl Workspace {
                 .iter()
                 .find(|project| project.path == path)
                 .cloned()
+                .or_else(|| self.cached_project_for_path(&path))
                 .unwrap_or_else(|| Project::new(path.clone()));
             project.path = path.clone();
             project.name = project_name_from_path(&path);
@@ -401,6 +415,120 @@ impl Workspace {
 
         project.sessions.push(Session::new_draft());
         Some(project.sessions.len() - 1)
+    }
+
+    fn cached_projects(&self) -> Vec<PersistedProject> {
+        self.projects
+            .iter()
+            .map(|project| PersistedProject {
+                path: project.selection_key(),
+                sessions: project
+                    .sessions
+                    .iter()
+                    .filter(|session| session.should_render_in_sidebar())
+                    .map(persisted_session_from_session)
+                    .collect(),
+            })
+            .collect()
+    }
+
+    fn cached_project_for_path(&self, path: &std::path::Path) -> Option<Project> {
+        let normalized = normalize_project_path(path);
+        let cached =
+            self.persisted.project_cache.iter().find(|project| {
+                normalize_project_path(&PathBuf::from(&project.path)) == normalized
+            })?;
+        let mut project = Project::new(normalized);
+        project.sessions = cached.sessions.iter().map(session_from_persisted).collect();
+        project.sort_sessions();
+        Some(project)
+    }
+}
+
+fn merge_project_keys(existing: &[String], current: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    current
+        .iter()
+        .chain(existing.iter())
+        .filter(|key| seen.insert((*key).clone()))
+        .cloned()
+        .collect()
+}
+
+fn merge_project_cache(
+    existing: &[PersistedProject],
+    current: &[PersistedProject],
+) -> Vec<PersistedProject> {
+    merge_project_keys(
+        &existing
+            .iter()
+            .map(|project| project.path.clone())
+            .collect::<Vec<_>>(),
+        &current
+            .iter()
+            .map(|project| project.path.clone())
+            .collect::<Vec<_>>(),
+    )
+    .into_iter()
+    .map(|path| {
+        let current_project = current.iter().find(|project| project.path == path);
+        let existing_project = existing.iter().find(|project| project.path == path);
+        PersistedProject {
+            path,
+            sessions: merge_persisted_sessions(
+                existing_project
+                    .map(|project| project.sessions.as_slice())
+                    .unwrap_or(&[]),
+                current_project
+                    .map(|project| project.sessions.as_slice())
+                    .unwrap_or(&[]),
+            ),
+        }
+    })
+    .collect()
+}
+
+fn merge_persisted_sessions(
+    existing: &[PersistedSession],
+    current: &[PersistedSession],
+) -> Vec<PersistedSession> {
+    let mut sessions = Vec::new();
+    for session in current.iter().chain(existing.iter()) {
+        if !sessions.iter().any(|merged: &PersistedSession| {
+            merged.local_id == session.local_id
+                || merged.pi_session_id == session.pi_session_id && session.pi_session_id.is_some()
+                || merged.session_file == session.session_file && session.session_file.is_some()
+        }) {
+            sessions.push(session.clone());
+        }
+    }
+    sessions
+}
+
+fn persisted_session_from_session(session: &Session) -> PersistedSession {
+    PersistedSession {
+        local_id: session.local_id.clone(),
+        name: session.name.clone(),
+        pi_session_id: session.pi_session_id.clone(),
+        session_file: session.session_file.clone(),
+        created_at_ms: session.created_at_ms,
+        updated_at_ms: session.updated_at_ms,
+        promoted_at_ms: session.promoted_at_ms,
+        draft: session.draft,
+    }
+}
+
+fn session_from_persisted(persisted: &PersistedSession) -> Session {
+    Session {
+        local_id: persisted.local_id.clone(),
+        name: persisted.name.clone(),
+        pi_session_id: persisted.pi_session_id.clone(),
+        session_file: persisted.session_file.clone(),
+        created_at_ms: persisted.created_at_ms,
+        updated_at_ms: persisted.updated_at_ms,
+        promoted_at_ms: persisted.promoted_at_ms,
+        runtime: Default::default(),
+        draft: persisted.draft,
     }
 }
 
