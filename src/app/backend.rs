@@ -162,8 +162,6 @@ impl HarnessCore {
         }
     }
 
-
-
     pub(super) fn current_project(&self) -> Option<&Project> {
         self.workspace.current_project()
     }
@@ -904,7 +902,7 @@ impl HarnessCore {
         let text = path.display().to_string();
         let pasted = self.paste_text_to_current_terminal(&text);
         if pasted {
-            self.set_note_text(format!("pasted image path: {}", path.display()));
+            self.set_note_text("pasted image");
         }
         pasted
     }

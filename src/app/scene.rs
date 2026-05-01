@@ -15,9 +15,10 @@ use super::theme::{self, DerivedTheme};
 const SCROLLBAR_TRACK_GLYPH: &str = "│";
 const SCROLLBAR_THUMB_GLYPH: &str = "┃";
 const SIDEBAR_SCROLLBAR_TRACK_FG: Color = Color::rgb(0, 0, 0);
-const STATUS_SEPARATOR_GLYPH: &str = "▌";
+const STATUS_SEPARATOR_GLYPH: &str = "│";
 const STATUS_RULE_GLYPH: &str = "╱";
-const SIDEBAR_RULE_GLYPH: &str = "╱";
+
+const SIDEBAR_SELECTOR_GLYPH: &str = "> ";
 
 #[derive(Clone, Copy)]
 pub(super) struct ScenePalette {
@@ -120,7 +121,6 @@ pub(super) fn harness_scene_layout(layout: &CellLayout) -> HarnessSceneLayout {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn render_harness_scene(
     surface: &mut CellSurface,
     layout: HarnessSceneLayout,
@@ -129,7 +129,6 @@ pub(super) fn render_harness_scene(
     palette: &ScenePalette,
     cursor_mode: TerminalCursorMode,
     mode: HarnessMode,
-    footer_hint: Option<&str>,
     now_ms: u64,
 ) -> Option<HardwareCursor> {
     if let Some(sidebar_panel) = layout.sidebar_panel {
@@ -159,7 +158,6 @@ pub(super) fn render_harness_scene(
         &frame_model.chrome,
         palette,
         mode,
-        footer_hint,
     );
     cursor
 }
@@ -171,32 +169,19 @@ pub(super) fn render_statusbar(
     chrome: &ChromeView,
     palette: &ScenePalette,
     mode: HarnessMode,
-    footer_hint: Option<&str>,
 ) {
     if panel.cols <= 0 || panel.rows <= 0 {
         return;
     }
 
     let statusline = CellRect::new(panel.col, panel.row, panel.cols, 1);
-    fill_horizontal_gradient(
-        surface,
-        statusline,
-        palette.statusbar_fg,
-        palette.statusbar_bg,
-        palette.accent_2,
-    );
-
-    if panel.rows > 1 {
-        surface.fill_rect(
-            CellRect::new(panel.col, panel.row + 1, panel.cols, panel.rows - 1),
-            palette.fg,
-            palette.bg,
-        );
-    }
+    let bg = statusline_bg(mode, &chrome.status, palette);
+    let fg = statusline_fg(mode, palette);
+    surface.fill_rect(statusline, fg, bg);
 
     let row = statusline.row;
     let main_col =
-        render_statusbar_sidebar_segment(surface, statusline, sidebar_panel, palette, mode);
+        render_statusbar_sidebar_segment(surface, statusline, sidebar_panel, palette, mode, bg);
     let main_cols = (panel.col + panel.cols - main_col).max(0);
     if main_cols <= 0 {
         return;
@@ -215,23 +200,21 @@ pub(super) fn render_statusbar(
     let center_cols = display_cell_width(&center) as i32;
 
     if left_cols > 0 {
-        surface.put_text(
-            main_col,
-            row,
-            left_cols,
-            palette.statusbar_fg,
-            palette.statusbar_bg,
-            &left,
-        );
+        surface.put_text(main_col, row, left_cols, fg, bg, &left);
     }
 
     if right_cols > 0 {
+        let right_fg = if matches!(mode, HarnessMode::Command) {
+            fg
+        } else {
+            statusline_status_color(&chrome.status, palette)
+        };
         surface.put_text(
             main_col + main_cols - right_cols,
             row,
             right_cols,
-            statusline_status_color(&chrome.status, palette),
-            palette.statusbar_bg,
+            right_fg,
+            bg,
             &right,
         );
     }
@@ -241,61 +224,27 @@ pub(super) fn render_statusbar(
         let left_limit_col = main_col + left_cols + i32::from(left_cols > 0);
         let right_limit_col = main_col + main_cols - right_cols - i32::from(right_cols > 0);
         if centered_col >= left_limit_col && centered_col + center_cols <= right_limit_col {
-            surface.put_text(
-                centered_col,
-                row,
-                center_cols,
-                palette.statusbar_fg,
-                palette.statusbar_bg,
-                &center,
-            );
+            surface.put_text(centered_col, row, center_cols, fg, bg, &center);
         }
     }
-
-    render_commandbar(surface, panel, palette, footer_hint);
 }
 
-fn render_commandbar(
-    surface: &mut CellSurface,
-    panel: CellRect,
-    palette: &ScenePalette,
-    footer_hint: Option<&str>,
-) {
-    if panel.rows < 2 {
-        return;
+fn statusline_fg(mode: HarnessMode, palette: &ScenePalette) -> Color {
+    if matches!(mode, HarnessMode::Command) {
+        // Crush-style warning chrome: dark text on the bright warning bar.
+        return palette.border;
     }
-
-    let row = panel.row + panel.rows - 1;
-    let bg = commandbar_bg(palette);
-    surface.fill_rect(
-        CellRect::new(panel.col, row, panel.cols, 1),
-        palette.muted,
-        bg,
-    );
-
-    let prompt = " :::";
-    let prompt_cols = display_cell_width(prompt) as i32;
-    if prompt_cols < panel.cols {
-        surface.put_text(panel.col, row, prompt_cols, palette.accent, bg, prompt);
-    }
-
-    let right = footer_hint.unwrap_or_default();
-    let right_cols = display_cell_width(right) as i32;
-
-    if right_cols > 0 && right_cols <= panel.cols.saturating_sub(prompt_cols + 1) {
-        surface.put_text(
-            panel.col + panel.cols - right_cols,
-            row,
-            right_cols,
-            palette.muted,
-            bg,
-            right,
-        );
-    }
+    palette.statusbar_fg
 }
 
-fn commandbar_bg(palette: &ScenePalette) -> Color {
-    theme::fade_toward(palette.bg, palette.border, 32)
+fn statusline_bg(mode: HarnessMode, status: &str, palette: &ScenePalette) -> Color {
+    if matches!(mode, HarnessMode::Command) {
+        return palette.warning;
+    }
+    if statusline_status_is_error(status) {
+        return palette.error;
+    }
+    palette.statusbar_bg
 }
 
 fn render_statusbar_sidebar_segment(
@@ -304,28 +253,21 @@ fn render_statusbar_sidebar_segment(
     sidebar_panel: Option<CellRect>,
     palette: &ScenePalette,
     mode: HarnessMode,
+    status_bg: Color,
 ) -> i32 {
     let row = panel.row;
+    let fg = statusline_fg(mode, palette);
     let Some(sidebar_panel) = sidebar_panel else {
         let mode_label = statusline_mode_label(mode);
         let mode_cols = display_cell_width(mode_label) as i32;
-        surface.put_text(
-            panel.col,
-            row,
-            mode_cols,
-            mode_fg(mode, palette),
-            mode_bg(mode, palette),
-            mode_label,
-        );
+        surface.put_text(panel.col, row, mode_cols, fg, status_bg, mode_label);
         if let Some(rect) = statusbar_new_project_rect(panel, None, mode) {
-            surface.put_text(
-                rect.col,
-                rect.row,
-                rect.cols,
-                palette.accent,
-                theme::fade_toward(palette.statusbar_bg, palette.sidebar_bg, 60),
-                "✚",
-            );
+            let plus_fg = if matches!(mode, HarnessMode::Command) {
+                fg
+            } else {
+                palette.accent
+            };
+            surface.put_text(rect.col, rect.row, rect.cols, plus_fg, status_bg, "✚");
             return rect.col + rect.cols + 1;
         }
         return mode_cols.min(panel.cols);
@@ -339,14 +281,7 @@ fn render_statusbar_sidebar_segment(
     let mode_label = statusline_mode_label(mode);
     let mode_cols = display_cell_width(mode_label) as i32;
     let mode_cols = mode_cols.min(sidebar_cols);
-    surface.put_text(
-        panel.col,
-        row,
-        mode_cols,
-        mode_fg(mode, palette),
-        mode_bg(mode, palette),
-        mode_label,
-    );
+    surface.put_text(panel.col, row, mode_cols, fg, status_bg, mode_label);
 
     let plus_rect = statusbar_new_project_rect(panel, Some(sidebar_panel), mode);
     let separator_col = panel.col + sidebar_cols - 1;
@@ -360,24 +295,24 @@ fn render_statusbar_sidebar_segment(
         brand_start,
         brand_end.saturating_sub(brand_start),
         palette,
+        mode,
+        status_bg,
     );
 
     if let Some(rect) = plus_rect {
-        surface.put_text(
-            rect.col,
-            rect.row,
-            rect.cols,
-            palette.accent,
-            theme::fade_toward(palette.statusbar_bg, palette.sidebar_bg, 60),
-            "✚",
-        );
+        let plus_fg = if matches!(mode, HarnessMode::Command) {
+            fg
+        } else {
+            palette.accent
+        };
+        surface.put_text(rect.col, rect.row, rect.cols, plus_fg, status_bg, "✚");
     }
 
     surface.set_cell(
         separator_col,
         row,
-        palette.accent_2,
-        palette.statusbar_bg,
+        SIDEBAR_SCROLLBAR_TRACK_FG,
+        status_bg,
         STATUS_SEPARATOR_GLYPH,
         false,
     );
@@ -390,6 +325,8 @@ fn render_statusline_rule(
     col: i32,
     cols: i32,
     palette: &ScenePalette,
+    mode: HarnessMode,
+    bg: Color,
 ) {
     if cols <= 0 {
         return;
@@ -397,36 +334,16 @@ fn render_statusline_rule(
     let denom = cols.saturating_sub(1).max(1) as u16;
     for offset in 0..cols {
         let mix = ((offset as u16 * 255) / denom) as u8;
-        surface.set_cell(
-            col + offset,
-            row,
-            theme::fade_toward(palette.accent, palette.accent_2, mix),
-            palette.statusbar_bg,
-            STATUS_RULE_GLYPH,
-            false,
-        );
+        let fg = if matches!(mode, HarnessMode::Command) {
+            statusline_fg(mode, palette)
+        } else {
+            theme::fade_toward(palette.accent, palette.accent_2, mix)
+        };
+        surface.set_cell(col + offset, row, fg, bg, STATUS_RULE_GLYPH, false);
     }
 }
 
-fn fill_horizontal_gradient(
-    surface: &mut CellSurface,
-    rect: CellRect,
-    fg: Color,
-    from: Color,
-    to: Color,
-) {
-    if rect.cols <= 0 || rect.rows <= 0 {
-        return;
-    }
-    let denom = rect.cols.saturating_sub(1).max(1) as u16;
-    for col_offset in 0..rect.cols {
-        let mix = ((col_offset as u16 * 255) / denom) as u8;
-        let bg = theme::fade_toward(from, to, mix);
-        for row in rect.row..(rect.row + rect.rows) {
-            surface.set_cell(rect.col + col_offset, row, fg, bg, " ", false);
-        }
-    }
-}
+
 
 pub(super) fn statusbar_new_project_rect(
     panel: CellRect,
@@ -457,20 +374,6 @@ pub(super) fn statusline_mode_label(mode: HarnessMode) -> &'static str {
     }
 }
 
-fn mode_fg(mode: HarnessMode, palette: &ScenePalette) -> Color {
-    match mode {
-        HarnessMode::Normal => palette.statusbar_bg,
-        HarnessMode::Command => palette.statusbar_fg,
-    }
-}
-
-fn mode_bg(mode: HarnessMode, palette: &ScenePalette) -> Color {
-    match mode {
-        HarnessMode::Normal => palette.border,
-        HarnessMode::Command => palette.warning,
-    }
-}
-
 fn statusline_left_text(chrome: &ChromeView) -> String {
     format!(" {} ", chrome.project)
 }
@@ -479,7 +382,7 @@ fn statusline_center_text(chrome: &ChromeView) -> String {
     if chrome.session.is_empty() {
         String::new()
     } else {
-        format!(" ◇ {} ", chrome.session)
+        format!(" {} ", chrome.session)
     }
 }
 
@@ -515,8 +418,18 @@ fn statusline_status_color(status: &str, palette: &ScenePalette) -> Color {
         "exited" => palette.warning,
         _ if status.starts_with("tool") => palette.running,
         _ if status.contains("queued") => palette.warning,
+        _ if statusline_status_is_error(status) => palette.statusbar_fg,
         _ => palette.accent_2,
     }
+}
+
+fn statusline_status_is_error(status: &str) -> bool {
+    let status = status.to_ascii_lowercase();
+    status == "error"
+        || status.contains("error")
+        || status.contains("unknown command")
+        || status.contains("not found")
+        || status.contains("usage:")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -617,7 +530,7 @@ pub(super) fn render_sidebar(
                         animated_sidebar_status_color(status, palette, now_ms, item.visible_row),
                     )
                 });
-                let branch = if active { "◇ " } else { "  " };
+                let branch = if active { SIDEBAR_SELECTOR_GLYPH } else { "  " };
                 let indent_cols = content.cols.min(display_cell_width(branch) as i32);
                 let reserved_cells = status
                     .map(|(glyph, _)| display_cell_width(glyph) as i32 + 1)
@@ -751,7 +664,7 @@ fn render_sidebar_project_rule(
     status: Option<SidebarStatusKind>,
     now_ms: u64,
     reverse: bool,
-    focused: bool,
+    _focused: bool,
     palette: &ScenePalette,
 ) {
     if rect.cols <= 0 {
@@ -763,61 +676,18 @@ fn render_sidebar_project_rule(
     } else {
         label_fg
     };
-    let max_label_cols = rect.cols.max(0) as usize;
-    let decorated_label = format!(" {} ", label);
-    let value = truncate_to_cells(&decorated_label, max_label_cols);
+    let value = truncate_to_cells(&format!("[{label}]"), rect.cols.max(0) as usize);
     let value_cols = display_cell_width(&value) as i32;
+    let label_rect = CellRect::new(
+        rect.col + rect.cols.saturating_sub(value_cols) / 2,
+        rect.row,
+        value_cols.min(rect.cols),
+        1,
+    );
 
-    if value_cols >= rect.cols {
-        surface.put_text_styled(
-            rect.col,
-            rect.row,
-            rect.cols,
-            label_fg,
-            bg,
-            &truncate_to_cells(&decorated_label, max_label_cols),
-            reverse,
-        );
-        return;
-    }
-
-    // Allow odd rule widths: the extra slash lands on one side at the faded outer edge.
-    let rule_cols = rect.cols - value_cols;
-    let left_cols = rule_cols / 2;
-    let right_cols = rule_cols - left_cols;
-
-    for offset in 0..left_cols {
-        let slot = offset as usize;
-        surface.set_cell(
-            rect.col + offset,
-            rect.row,
-            sidebar_project_rule_color(
-                status,
-                ProjectRuleSide::Left,
-                slot,
-                left_cols as usize,
-                now_ms,
-                focused,
-                palette,
-            ),
-            bg,
-            SIDEBAR_RULE_GLYPH,
-            reverse,
-        );
-    }
-
-    let label_rect = CellRect::new(rect.col + left_cols, rect.row, value_cols, 1);
-    if matches!(status, Some(SidebarStatusKind::Notification)) {
-        surface.put_text_styled(
-            label_rect.col,
-            label_rect.row,
-            label_rect.cols,
-            label_fg,
-            bg,
-            &value,
-            reverse,
-        );
-    } else {
+    let gradient_title =
+        !palette.monochrome && !matches!(status, Some(SidebarStatusKind::Notification));
+    if gradient_title {
         render_sidebar_gradient_text(
             surface,
             label_rect,
@@ -828,78 +698,19 @@ fn render_sidebar_project_rule(
             palette.accent_2,
             status,
             now_ms,
-            left_cols as usize,
+            0,
             palette,
         );
-    }
-
-    for offset in 0..right_cols {
-        // Count from the outer edge so any odd extra slash stays in the faded tail.
-        let slot = (right_cols - 1 - offset) as usize;
-        surface.set_cell(
-            rect.col + left_cols + value_cols + offset,
-            rect.row,
-            sidebar_project_rule_color(
-                status,
-                ProjectRuleSide::Right,
-                slot,
-                right_cols as usize,
-                now_ms,
-                focused,
-                palette,
-            ),
+    } else {
+        surface.put_text_styled(
+            label_rect.col,
+            label_rect.row,
+            label_rect.cols,
+            label_fg,
             bg,
-            SIDEBAR_RULE_GLYPH,
+            &value,
             reverse,
         );
-    }
-}
-
-#[derive(Clone, Copy)]
-enum ProjectRuleSide {
-    Left,
-    Right,
-}
-
-fn sidebar_project_rule_color(
-    status: Option<SidebarStatusKind>,
-    side: ProjectRuleSide,
-    slot: usize,
-    side_cols: usize,
-    now_ms: u64,
-    focused: bool,
-    palette: &ScenePalette,
-) -> Color {
-    // Ramp across each side: faded grey at the outer edge, brightest right next
-    // to the title, drawing the eye toward the project label. When focused,
-    // brighten the outer edge so the entire rule glows in accent territory.
-    let denom = side_cols.saturating_sub(1).max(1) as u32;
-    let slot_clamped = slot.min(denom as usize) as u32;
-    let env = ((slot_clamped * 255) / denom) as u8;
-    let peak = match side {
-        ProjectRuleSide::Left => palette.accent,
-        ProjectRuleSide::Right => palette.accent_2,
-    };
-    let faded = if focused {
-        // Light tint of the peak so the gradient stays visible without dropping
-        // into the muted/border range.
-        theme::fade_toward(peak, palette.fg, 96)
-    } else {
-        theme::fade_toward(palette.border, palette.muted, 64)
-    };
-    let base = theme::fade_toward(faded, peak, env);
-
-    let Some(status) = status else {
-        return base;
-    };
-    let status_color = sidebar_status_color_for_palette(status, palette);
-    match status {
-        SidebarStatusKind::Notification => status_color,
-        SidebarStatusKind::Active | SidebarStatusKind::Queued => {
-            let phase = ((now_ms / SIDEBAR_ANIMATION_FRAME_MS) as usize + slot) % 24;
-            let intensity = if phase < 12 { phase } else { 24 - phase };
-            theme::fade_toward(base, status_color, (intensity * 21).min(255) as u8)
-        }
     }
 }
 

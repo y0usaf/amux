@@ -114,6 +114,19 @@ impl AppConfig {
         Keymap::from_config(self)
     }
 
+    pub fn action_binding_texts(&self, action: AppAction) -> Vec<String> {
+        resolved_sequences(self, action_spec(action))
+            .into_iter()
+            .map(|sequence| {
+                sequence
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect()
+    }
+
     pub fn layout_widths(&self) -> LayoutWidths {
         LayoutWidths {
             sidebar: self.layout_sidebar_width(),
