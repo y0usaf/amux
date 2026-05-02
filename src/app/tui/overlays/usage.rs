@@ -53,7 +53,7 @@ fn usage_overlay_list_rows(rect: Rect) -> usize {
 
 #[cfg(test)]
 /// Scrollable daily rows; the total row stays fixed in the overlay.
-fn usage_overlay_lines(report: &PiUsageReport) -> Vec<String> {
+pub(in crate::app::tui) fn usage_overlay_lines(report: &PiUsageReport) -> Vec<String> {
     report.days.iter().map(usage_day_line).collect()
 }
 
