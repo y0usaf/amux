@@ -37,6 +37,8 @@ pub(super) const STATUS_FG: Color = BUTTER;
 pub(super) const STATUS_BG: Color = CHARPLE;
 pub(super) const BORDER: Color = CHARCOAL;
 pub(super) const RUNNING: Color = CITRON;
+pub(super) const SUCCESS: Color = JULEP;
+pub(super) const SUCCESS_SUBTLE: Color = GUAC;
 pub(super) const WARNING: Color = MUSTARD;
 pub(super) const ERROR: Color = SRIRACHA;
 const CURSOR: Color = DOLLY;
@@ -74,6 +76,8 @@ pub(super) struct DerivedTheme {
     pub(super) status_bg: Color,
     pub(super) border: Color,
     pub(super) running: Color,
+    pub(super) success: Color,
+    pub(super) success_subtle: Color,
     pub(super) warning: Color,
     pub(super) error: Color,
     pub(super) term_fg: Color,
@@ -101,6 +105,8 @@ impl DerivedTheme {
             status_bg: STATUS_BG,
             border: BORDER,
             running: RUNNING,
+            success: SUCCESS,
+            success_subtle: SUCCESS_SUBTLE,
             warning: WARNING,
             error: ERROR,
             term_fg: TERM_FG,
@@ -235,9 +241,12 @@ mod tests {
     use super::{
         ansi_index_to_color, brighten, fade_toward, screen_cell_colors, DerivedTheme,
         TerminalPalette, ACCENT, ACCENT_2, BORDER, CURSOR, DEFAULT, ERROR, MUTED, RUNNING,
-        STATUS_BG, STATUS_FG, TERM_FG, TERM_SELECTION_BG, TERM_SELECTION_FG, TEXT, WARNING,
+        STATUS_BG, STATUS_FG, SUCCESS, SUCCESS_SUBTLE, TERM_FG, TERM_SELECTION_BG,
+        TERM_SELECTION_FG, TEXT, WARNING,
     };
+
     use crate::render::Color;
+
     fn cell_from_bytes(bytes: &[u8]) -> vt100::Cell {
         let mut parser = vt100::Parser::new(1, 8, 0);
         parser.process(bytes);
@@ -294,10 +303,13 @@ mod tests {
         assert_eq!(theme.status_bg, STATUS_BG);
         assert_eq!(theme.border, BORDER);
         assert_eq!(theme.running, RUNNING);
+        assert_eq!(theme.success, SUCCESS);
+        assert_eq!(theme.success_subtle, SUCCESS_SUBTLE);
         assert_eq!(theme.warning, WARNING);
         assert_eq!(theme.error, ERROR);
         assert_eq!(theme.term_fg, TERM_FG);
         assert_eq!(theme.sidebar_bg, DEFAULT);
+        assert_eq!(theme.ansi, DerivedTheme::fallback().ansi);
     }
 
     #[test]

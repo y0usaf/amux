@@ -194,6 +194,7 @@ impl TuiApp {
             Ok(TuiCommand::Archive) => self.open_archive_viewer(),
             Ok(TuiCommand::Refresh) => self.core.run_action(AppAction::RefreshSession),
             Ok(TuiCommand::Reload) => self.core.run_action(AppAction::RefreshAllSessions),
+            Ok(TuiCommand::Usage) => self.open_usage_overlay(),
 
             Ok(TuiCommand::Quit) => return true,
             Ok(TuiCommand::Help) => self.open_help_overlay(),

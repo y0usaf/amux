@@ -6,6 +6,7 @@ pub(super) enum TuiCommand {
     Archive,
     Refresh,
     Reload,
+    Usage,
 
     Quit,
     Help,
@@ -30,6 +31,7 @@ pub(super) fn parse_command(input: &str) -> Result<TuiCommand, String> {
             Ok(TuiCommand::Open(expand_home_path(&path)))
         }
         "archive" | "archives" => Ok(TuiCommand::Archive),
+        "usage" => Ok(TuiCommand::Usage),
         "refresh" => Ok(TuiCommand::Refresh),
         "reload" => Ok(TuiCommand::Reload),
 
@@ -113,5 +115,11 @@ mod tests {
     fn parse_archive_command() {
         assert_eq!(parse_command("archive").unwrap(), TuiCommand::Archive);
         assert_eq!(parse_command(":archives").unwrap(), TuiCommand::Archive);
+    }
+
+    #[test]
+    fn parse_usage_command() {
+        assert_eq!(parse_command("usage").unwrap(), TuiCommand::Usage);
+        assert_eq!(parse_command(":usage").unwrap(), TuiCommand::Usage);
     }
 }

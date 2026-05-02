@@ -1,6 +1,6 @@
 use super::super::cell_surface::display_cell_width;
 use super::super::layout::CellLayout;
-use super::super::scene::{statusline_mode_label, HarnessMode};
+use super::super::scene::{statusline_mode_label, StatusbarState};
 
 #[derive(Clone, Debug)]
 pub(super) struct CommandLineState {
@@ -193,7 +193,7 @@ pub(super) fn command_line_start_col(layout: &CellLayout, surface_cols: i32) -> 
         return layout.sidebar.cols.min(surface_cols).max(0);
     }
 
-    display_cell_width(statusline_mode_label(HarnessMode::Command))
+    display_cell_width(&statusline_mode_label(StatusbarState::Command))
         .min(surface_cols.max(0) as usize) as i32
 }
 

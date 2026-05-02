@@ -32,18 +32,45 @@ use super::status::status_text_for_session;
 use super::terminal_manager::TerminalManager;
 use super::workspace::Workspace;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ShortcutOutcome {
     NoMatch,
     Pending,
     Triggered,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StatusNoteKind {
+    Ok,
+    Error,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ChromeView {
     pub(super) project: String,
     pub(super) status: String,
+    pub(super) status_kind: Option<StatusNoteKind>,
     pub(super) session: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StatusNote {
+    text: String,
+    kind: StatusNoteKind,
+    expires_at_ms: u64,
+}
+
+impl StatusNote {
+    fn new(text: String, kind: StatusNoteKind) -> Self {
+        Self {
+            text,
+            kind,
+            expires_at_ms: now_millis().saturating_add(5_000),
+        }
+    }
+
+    fn is_active(&self, now_ms: u64) -> bool {
+        now_ms < self.expires_at_ms
+    }
 }
 
 pub(super) struct HarnessCore {
@@ -57,7 +84,7 @@ pub(super) struct HarnessCore {
     sidebar_sync_to_selection: bool,
     terminal_selection_in_progress: bool,
     clipboard: Option<Clipboard>,
-    note: Option<String>,
+    note: Option<StatusNote>,
 }
 
 impl HarnessCore {
@@ -86,7 +113,7 @@ impl HarnessCore {
         };
         core.workspace.reload_projects_from_disk();
         if !core.terminal_manager.has_sidecar_extension() {
-            core.note = Some("sidecar extension not found".to_string());
+            core.set_note_error("sidecar extension not found");
         }
         Ok(core)
     }
@@ -139,7 +166,15 @@ impl HarnessCore {
     }
 
     pub(super) fn set_note_text(&mut self, note: impl Into<String>) {
-        self.note = Some(note.into());
+        self.set_note_error(note);
+    }
+
+    pub(super) fn set_note_ok(&mut self, note: impl Into<String>) {
+        self.note = Some(StatusNote::new(note.into(), StatusNoteKind::Ok));
+    }
+
+    pub(super) fn set_note_error(&mut self, note: impl Into<String>) {
+        self.note = Some(StatusNote::new(note.into(), StatusNoteKind::Error));
     }
 
     pub(super) fn clear_pending_key_chord(&mut self) {
@@ -179,22 +214,21 @@ impl HarnessCore {
     }
 
     pub(super) fn chrome_view(&self) -> ChromeView {
+        let now_ms = now_millis();
+        let note = self.note.as_ref().filter(|note| note.is_active(now_ms));
         ChromeView {
             project: self
                 .current_project()
                 .map(|project| project.name.clone())
                 .unwrap_or_else(|| "pi-harness".to_string()),
-            status: self
-                .note
-                .as_deref()
-                .map(ToOwned::to_owned)
-                .unwrap_or_else(|| {
-                    status_text_for_session(
-                        self.current_project().is_some(),
-                        self.current_session(),
-                        self.current_terminal_status(),
-                    )
-                }),
+            status: note.map(|note| note.text.clone()).unwrap_or_else(|| {
+                status_text_for_session(
+                    self.current_project().is_some(),
+                    self.current_session(),
+                    self.current_terminal_status(),
+                )
+            }),
+            status_kind: note.map(|note| note.kind),
             session: self
                 .current_session()
                 .map(|session| session.name.clone())
@@ -418,7 +452,7 @@ impl HarnessCore {
             Ok(result) => {
                 self.selection_changed_with_terminal_sync();
                 let action = if result.added { "opened" } else { "selected" };
-                self.set_note_text(format!("{action} {}", result.path.display()));
+                self.set_note_ok(format!("{action} {}", result.path.display()));
             }
             Err(note) => self.set_note_text(note),
         }
@@ -482,7 +516,7 @@ impl HarnessCore {
         self.persist_selection();
 
         let restored = format!("restored {} → {}", archived.name, project_path.display());
-        self.set_note_text(match open_note {
+        self.set_note_ok(match open_note {
             Some(note) => format!("{restored} ({note})"),
             None => restored,
         });
@@ -601,8 +635,22 @@ impl HarnessCore {
             changed |= self.apply_sidecar_snapshot(snapshot);
         }
 
-        let note = reconcile_terminal_note(self.note.as_deref(), self.current_terminal_status());
-        self.note = note;
+        let current_note = self.note.take();
+        let note = reconcile_terminal_note(
+            current_note.as_ref().map(|note| note.text.as_str()),
+            self.current_terminal_status(),
+        );
+        self.note = match note {
+            Some(note_text)
+                if current_note
+                    .as_ref()
+                    .is_some_and(|note| note.text == note_text) =>
+            {
+                current_note
+            }
+            Some(note_text) => Some(StatusNote::new(note_text, StatusNoteKind::Error)),
+            None => None,
+        };
         changed
     }
 
@@ -902,7 +950,7 @@ impl HarnessCore {
         let text = path.display().to_string();
         let pasted = self.paste_text_to_current_terminal(&text);
         if pasted {
-            self.set_note_text("pasted image");
+            self.set_note_ok("pasted image");
         }
         pasted
     }
@@ -1013,5 +1061,11 @@ mod tests {
             terminal_selection_point_for_cell_rect(rect, 2, 4, 6, 4),
             None
         );
+    }
+    #[test]
+    fn status_note_expires_after_default_ttl() {
+        let note = StatusNote::new("ok".to_string(), StatusNoteKind::Ok);
+        assert!(note.is_active(note.expires_at_ms.saturating_sub(1)));
+        assert!(!note.is_active(note.expires_at_ms));
     }
 }

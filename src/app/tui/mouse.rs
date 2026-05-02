@@ -83,7 +83,7 @@ impl TuiApp {
         }
         let sidebar_panel =
             (layout.sidebar.cols > 0 && layout.sidebar.rows > 0).then_some(layout.sidebar);
-        if statusbar_new_project_rect(layout.statusbar, sidebar_panel, self.current_mode())
+        if statusbar_new_project_rect(layout.statusbar, sidebar_panel)
             .is_some_and(|rect| rect.contains_cell(event.col, event.row))
         {
             self.start_command_line("open ");
