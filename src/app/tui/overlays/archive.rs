@@ -2,9 +2,8 @@ use crate::pi;
 use crate::state::ScannedSession;
 
 use super::super::raw::terminal_size;
-use crate::app::cell_surface::{
-    display_cell_width, draw_box, render_cell_scrollbar, truncate_to_cells, CellSurface,
-};
+use super::dialog::render_dialog_title_line;
+use crate::app::cell_surface::{draw_box, render_cell_scrollbar, truncate_to_cells, CellSurface};
 use crate::app::layout::CellRect as Rect;
 use crate::app::theme::{self, DerivedTheme};
 
@@ -108,7 +107,7 @@ fn archive_viewer_rect(cols: i32, rows: i32) -> Rect {
 }
 
 fn archive_viewer_list_rows(rect: Rect) -> usize {
-    rect.rows.saturating_sub(5) as usize
+    rect.rows.saturating_sub(7) as usize
 }
 
 pub(in crate::app::tui) fn render_archive_viewer(
@@ -117,43 +116,40 @@ pub(in crate::app::tui) fn render_archive_viewer(
     theme: &DerivedTheme,
 ) {
     let rect = archive_viewer_rect(surface.cols, surface.rows);
-    draw_box(surface, rect, theme.text, theme.surface, theme.border);
+    draw_box(
+        surface,
+        rect,
+        theme.text,
+        theme.surface_raised,
+        theme.status_bg,
+    );
     if rect.cols <= 2 || rect.rows <= 2 {
         return;
     }
 
-    let inner = rect.inset_edges(1, 1, 1, 1);
-    surface.put_text(
-        rect.col + 2,
-        rect.row,
-        rect.cols - 4,
-        theme.accent,
-        theme.surface,
-        " ARCHIVE ",
-    );
+    let inner = rect.inset_edges(2, 1, 2, 1);
+    surface.fill_rect(inner, theme.text, theme.surface);
     let count = format!(" {} archived ", viewer.sessions.len());
-    let count_col = rect.col + rect.cols - display_cell_width(&count) as i32 - 2;
-    if count_col > rect.col + 2 {
-        surface.put_text(
-            count_col,
-            rect.row,
-            rect.cols - 2,
-            theme.accent_2,
-            theme.surface,
-            &count,
-        );
-    }
+    render_dialog_title_line(
+        surface,
+        inner.row,
+        inner.col,
+        inner.cols,
+        " ARCHIVE ",
+        &count,
+        theme,
+    );
 
     let hint = "↑/↓/j/k select  Enter restore  r reload  q/Esc close";
     surface.put_text(
         inner.col,
-        inner.row,
+        inner.row + 2,
         inner.cols,
         theme.muted,
         theme.surface,
         hint,
     );
-    let header_row = inner.row + 1;
+    let header_row = inner.row + 3;
     surface.put_text(
         inner.col,
         header_row,
@@ -162,8 +158,7 @@ pub(in crate::app::tui) fn render_archive_viewer(
         theme.surface,
         "UPDATED  SESSION / PROJECT",
     );
-
-    let list_row = inner.row + 2;
+    let list_row = inner.row + 4;
     let footer_row = rect.row + rect.rows - 2;
     let list_rows = (footer_row - list_row).max(0) as usize;
     let list_width = (inner.cols - 1).max(0);

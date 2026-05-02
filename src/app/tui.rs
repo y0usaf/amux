@@ -61,6 +61,7 @@ mod theme_query;
 use command_line::{command_line_start_col, CommandLineState};
 use overlays::archive::{render_archive_viewer, ArchiveViewerState};
 use overlays::help::{render_help_overlay, HelpOverlayState};
+use overlays::usage::{render_usage_overlay, UsageOverlayState};
 use theme_query::{
     apply_terminal_palette_response, is_terminal_palette_response, parse_terminal_palette_response,
 };
@@ -74,6 +75,7 @@ struct TuiApp {
     command_line: Option<CommandLineState>,
     archive_viewer: Option<ArchiveViewerState>,
     help_overlay: Option<HelpOverlayState>,
+    usage_overlay: Option<UsageOverlayState>,
     theme: DerivedTheme,
     terminal_palette: TerminalPalette,
     last_theme_query: Instant,
@@ -91,6 +93,7 @@ impl TuiApp {
             command_line: None,
             archive_viewer: None,
             help_overlay: None,
+            usage_overlay: None,
             theme: DerivedTheme::fallback(),
             terminal_palette: TerminalPalette::fallback(),
             last_theme_query: Instant::now(),
@@ -175,7 +178,10 @@ impl TuiApp {
     }
 
     fn visible_sidebar_animation_active(&self) -> bool {
-        if self.archive_viewer.is_some() || self.help_overlay.is_some() {
+        if self.archive_viewer.is_some()
+            || self.help_overlay.is_some()
+            || self.usage_overlay.is_some()
+        {
             return false;
         }
         let (cols, rows) = terminal_size();
@@ -290,6 +296,10 @@ impl TuiApp {
             render_help_overlay(&mut surface, help, &self.core.config, &self.theme);
             hardware_cursor = None;
         }
+        if let Some(usage) = &mut self.usage_overlay {
+            render_usage_overlay(&mut surface, usage, &self.theme);
+            hardware_cursor = None;
+        }
         renderer.render(stdout, &surface, hardware_cursor)?;
         Ok(())
     }
@@ -349,6 +359,10 @@ impl TuiApp {
 
         if self.help_overlay.is_some() {
             self.handle_help_overlay_input(bytes);
+            return false;
+        }
+        if self.usage_overlay.is_some() {
+            self.handle_usage_overlay_input(bytes);
             return false;
         }
         if self.archive_viewer.is_some() {

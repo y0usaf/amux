@@ -6,6 +6,8 @@ mod files;
 mod scan;
 #[path = "pi/types.rs"]
 mod types;
+#[path = "pi/usage.rs"]
+mod usage;
 
 pub use crate::state::ScannedSession;
 pub use discovery::{
@@ -16,6 +18,10 @@ pub use files::{
 };
 pub use scan::{scan_archived_sessions, scan_live_sessions};
 pub use types::{PiSessionStage, PiSidecarSnapshot};
+pub use usage::{
+    load_usage_report, load_usage_report_from_path, PiUsageDay, PiUsageModelBreakdown,
+    PiUsageReport, PiUsageTotals,
+};
 
 pub const PI_SIDECAR_SOCKET_ENV: &str = "AGENT_HARNESS_PI_SIDECAR_SOCKET";
 pub const PI_SIDECAR_SESSION_KEY_ENV: &str = "AGENT_HARNESS_PI_SESSION_KEY";

@@ -9,6 +9,7 @@ pub(super) struct Cell {
     pub(super) text: String,
     pub(super) fg: Color,
     pub(super) bg: Color,
+    pub(super) bold: bool,
     pub(super) underline: bool,
     pub(super) reverse: bool,
     pub(super) continuation: bool,
@@ -20,6 +21,7 @@ impl Cell {
             text: " ".to_string(),
             fg,
             bg,
+            bold: false,
             underline: false,
             reverse: false,
             continuation: false,
@@ -96,6 +98,7 @@ impl CellSurface {
                 text: text.into(),
                 fg,
                 bg,
+                bold: false,
                 underline,
                 reverse,
                 continuation: false,
@@ -156,6 +159,7 @@ impl CellSurface {
                     },
                     fg,
                     bg,
+                    bold: false,
                     underline,
                     reverse,
                     continuation: offset > 0,
@@ -210,6 +214,59 @@ impl CellSurface {
                 false,
                 reverse,
             );
+            cursor += width;
+        }
+    }
+
+    pub(super) fn put_text_bold(
+        &mut self,
+        col: i32,
+        row: i32,
+        max_cols: i32,
+        fg: Color,
+        bg: Color,
+        value: &str,
+    ) {
+        self.put_text_bold_styled(col, row, max_cols, fg, bg, value, false);
+    }
+
+    pub(super) fn put_text_bold_styled(
+        &mut self,
+        col: i32,
+        row: i32,
+        max_cols: i32,
+        fg: Color,
+        bg: Color,
+        value: &str,
+        reverse: bool,
+    ) {
+        if max_cols <= 0 {
+            return;
+        }
+        let mut cursor = col;
+        let end = col + max_cols;
+        for ch in value.chars() {
+            if ch == '\n' || cursor >= end {
+                break;
+            }
+            let width = char_cell_width(ch);
+            if cursor + width > end {
+                break;
+            }
+            let mut buf = [0; 4];
+            self.put_cell_span_styled(
+                cursor,
+                row,
+                width,
+                ch.encode_utf8(&mut buf),
+                fg,
+                bg,
+                false,
+                reverse,
+            );
+            if let Some(cell) = self.cell_mut(cursor, row) {
+                cell.bold = true;
+            }
             cursor += width;
         }
     }

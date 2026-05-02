@@ -17,6 +17,7 @@ pub(super) struct AnsiRenderer {
 struct AnsiStyle {
     fg: Color,
     bg: Color,
+    bold: bool,
     underline: bool,
     reverse: bool,
 }
@@ -26,6 +27,7 @@ impl AnsiStyle {
         Self {
             fg: cell.fg,
             bg: cell.bg,
+            bold: cell.bold,
             underline: cell.underline,
             reverse: cell.reverse,
         }
@@ -138,6 +140,9 @@ fn render_hardware_cursor(
 fn write_style(stdout: &mut io::Stdout, style: AnsiStyle) -> io::Result<()> {
     write!(stdout, "\x1b[0m")?;
     write!(stdout, "{}{}", ansi_fg(style.fg), ansi_bg(style.bg))?;
+    if style.bold {
+        write!(stdout, "\x1b[1m")?;
+    }
     if style.underline {
         write!(stdout, "\x1b[4m")?;
     }

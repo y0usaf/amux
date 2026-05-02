@@ -1,7 +1,7 @@
 use crate::render::Color;
 use crate::terminal::TerminalSelectionRange;
 
-use super::backend::{ChromeView, FrameModel};
+use super::backend::{ChromeView, FrameModel, StatusNoteKind};
 use super::cell_surface::{
     display_cell_width, render_cell_scrollbar, truncate_to_cells, CellSurface,
 };
@@ -12,11 +12,14 @@ use super::sidebar::{
 };
 use super::terminal_view::{terminal_max_scrollback, terminal_screen_cells};
 use super::theme::{self, DerivedTheme};
+const STATUSLINE_MODE_LABEL_WIDTH: i32 = 9;
 const SCROLLBAR_TRACK_GLYPH: &str = "│";
 const SCROLLBAR_THUMB_GLYPH: &str = "┃";
 const SIDEBAR_SCROLLBAR_TRACK_FG: Color = Color::rgb(0, 0, 0);
 const STATUS_SEPARATOR_GLYPH: &str = "│";
 const STATUS_RULE_GLYPH: &str = "╱";
+const STATUS_NOTE_OK_FG: Color = Color::rgb(0, 0, 0);
+const STATUS_NOTE_ERROR_FG: Color = Color::rgb(255, 255, 255);
 
 const SIDEBAR_SELECTOR_GLYPH: &str = "> ";
 
@@ -37,6 +40,7 @@ pub(super) struct ScenePalette {
     pub(super) ansi: [Color; 16],
 
     pub(super) running: Color,
+    pub(super) success_subtle: Color,
     pub(super) warning: Color,
     pub(super) error: Color,
     pub(super) monochrome: bool,
@@ -60,6 +64,7 @@ impl ScenePalette {
             ansi: theme.ansi,
 
             running: theme.running,
+            success_subtle: theme.success_subtle,
             warning: theme.warning,
             error: theme.error,
             monochrome: false,
@@ -77,6 +82,27 @@ pub(super) enum TerminalCursorMode {
 pub(super) enum HarnessMode {
     Normal,
     Command,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StatusbarState {
+    Normal,
+    Command,
+    Ok,
+    Error,
+}
+
+impl StatusbarState {
+    fn resolve(mode: HarnessMode, chrome: &ChromeView) -> Self {
+        if matches!(mode, HarnessMode::Command) {
+            return Self::Command;
+        }
+        match chrome.status_kind {
+            Some(StatusNoteKind::Ok) => Self::Ok,
+            Some(StatusNoteKind::Error) => Self::Error,
+            None => Self::Normal,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,20 +200,21 @@ pub(super) fn render_statusbar(
         return;
     }
 
+    let state = StatusbarState::resolve(mode, chrome);
     let statusline = CellRect::new(panel.col, panel.row, panel.cols, 1);
-    let bg = statusline_bg(mode, &chrome.status, palette);
-    let fg = statusline_fg(mode, palette);
+    let bg = statusbar_bg(state, &chrome.status, palette);
+    let fg = statusbar_fg(state, palette);
     surface.fill_rect(statusline, fg, bg);
 
     let row = statusline.row;
     let main_col =
-        render_statusbar_sidebar_segment(surface, statusline, sidebar_panel, palette, mode, bg);
+        render_statusbar_sidebar_segment(surface, statusline, sidebar_panel, palette, state, bg);
     let main_cols = (panel.col + panel.cols - main_col).max(0);
     if main_cols <= 0 {
         return;
     }
 
-    let right = truncate_to_cells(&statusline_right_text(chrome), main_cols as usize);
+    let right = truncate_to_cells(&statusline_right_text(chrome, state), main_cols as usize);
     let right_cols = display_cell_width(&right) as i32;
     let left_max_cols = if right_cols > 0 {
         main_cols.saturating_sub(right_cols + 1)
@@ -204,19 +231,26 @@ pub(super) fn render_statusbar(
     }
 
     if right_cols > 0 {
-        let right_fg = if matches!(mode, HarnessMode::Command) {
-            fg
+        let right_fg = statusbar_right_fg(state, &chrome.status, palette);
+        if matches!(state, StatusbarState::Ok | StatusbarState::Error) {
+            surface.put_text_bold(
+                main_col + main_cols - right_cols,
+                row,
+                right_cols,
+                right_fg,
+                bg,
+                &right,
+            );
         } else {
-            statusline_status_color(&chrome.status, palette)
-        };
-        surface.put_text(
-            main_col + main_cols - right_cols,
-            row,
-            right_cols,
-            right_fg,
-            bg,
-            &right,
-        );
+            surface.put_text(
+                main_col + main_cols - right_cols,
+                row,
+                right_cols,
+                right_fg,
+                bg,
+                &right,
+            );
+        }
     }
 
     if center_cols > 0 && center_cols <= main_cols {
@@ -229,22 +263,32 @@ pub(super) fn render_statusbar(
     }
 }
 
-fn statusline_fg(mode: HarnessMode, palette: &ScenePalette) -> Color {
-    if matches!(mode, HarnessMode::Command) {
-        // Crush-style warning chrome: dark text on the bright warning bar.
-        return palette.border;
+fn statusbar_fg(state: StatusbarState, palette: &ScenePalette) -> Color {
+    match state {
+        StatusbarState::Command => palette.border,
+        StatusbarState::Ok => STATUS_NOTE_OK_FG,
+        StatusbarState::Error => STATUS_NOTE_ERROR_FG,
+        StatusbarState::Normal => palette.statusbar_fg,
     }
-    palette.statusbar_fg
 }
 
-fn statusline_bg(mode: HarnessMode, status: &str, palette: &ScenePalette) -> Color {
-    if matches!(mode, HarnessMode::Command) {
-        return palette.warning;
+fn statusbar_bg(state: StatusbarState, status: &str, palette: &ScenePalette) -> Color {
+    match state {
+        StatusbarState::Command => palette.warning,
+        StatusbarState::Ok => palette.success_subtle,
+        StatusbarState::Error => palette.error,
+        StatusbarState::Normal if statusline_status_is_error(status) => palette.error,
+        StatusbarState::Normal => palette.statusbar_bg,
     }
-    if statusline_status_is_error(status) {
-        return palette.error;
+}
+
+fn statusbar_right_fg(state: StatusbarState, status: &str, palette: &ScenePalette) -> Color {
+    match state {
+        StatusbarState::Ok => STATUS_NOTE_OK_FG,
+        StatusbarState::Error => STATUS_NOTE_ERROR_FG,
+        StatusbarState::Command => statusbar_fg(state, palette),
+        StatusbarState::Normal => statusline_status_color(status, palette),
     }
-    palette.statusbar_bg
 }
 
 fn render_statusbar_sidebar_segment(
@@ -252,17 +296,23 @@ fn render_statusbar_sidebar_segment(
     panel: CellRect,
     sidebar_panel: Option<CellRect>,
     palette: &ScenePalette,
-    mode: HarnessMode,
+    state: StatusbarState,
     status_bg: Color,
 ) -> i32 {
     let row = panel.row;
-    let fg = statusline_fg(mode, palette);
+    let fg = statusbar_fg(state, palette);
     let Some(sidebar_panel) = sidebar_panel else {
-        let mode_label = statusline_mode_label(mode);
-        let mode_cols = display_cell_width(mode_label) as i32;
-        surface.put_text(panel.col, row, mode_cols, fg, status_bg, mode_label);
-        if let Some(rect) = statusbar_new_project_rect(panel, None, mode) {
-            let plus_fg = if matches!(mode, HarnessMode::Command) {
+        let mode_label = statusline_mode_label(state);
+        surface.put_text_bold(
+            panel.col,
+            row,
+            STATUSLINE_MODE_LABEL_WIDTH,
+            fg,
+            status_bg,
+            &mode_label,
+        );
+        if let Some(rect) = statusbar_new_project_rect(panel, None) {
+            let plus_fg = if matches!(state, StatusbarState::Command) {
                 fg
             } else {
                 palette.accent
@@ -270,7 +320,7 @@ fn render_statusbar_sidebar_segment(
             surface.put_text(rect.col, rect.row, rect.cols, plus_fg, status_bg, "✚");
             return rect.col + rect.cols + 1;
         }
-        return mode_cols.min(panel.cols);
+        return STATUSLINE_MODE_LABEL_WIDTH.min(panel.cols);
     };
 
     let sidebar_cols = sidebar_panel.cols.min(panel.cols).max(0);
@@ -278,14 +328,19 @@ fn render_statusbar_sidebar_segment(
         return panel.col;
     }
 
-    let mode_label = statusline_mode_label(mode);
-    let mode_cols = display_cell_width(mode_label) as i32;
-    let mode_cols = mode_cols.min(sidebar_cols);
-    surface.put_text(panel.col, row, mode_cols, fg, status_bg, mode_label);
+    let mode_label = statusline_mode_label(state);
+    surface.put_text_bold(
+        panel.col,
+        row,
+        STATUSLINE_MODE_LABEL_WIDTH.min(sidebar_cols),
+        fg,
+        status_bg,
+        &mode_label,
+    );
 
-    let plus_rect = statusbar_new_project_rect(panel, Some(sidebar_panel), mode);
+    let plus_rect = statusbar_new_project_rect(panel, Some(sidebar_panel));
     let separator_col = panel.col + sidebar_cols - 1;
-    let brand_start = panel.col + mode_cols + 1;
+    let brand_start = panel.col + STATUSLINE_MODE_LABEL_WIDTH.min(sidebar_cols) + 1;
     let brand_end = plus_rect
         .map(|rect| rect.col.saturating_sub(1))
         .unwrap_or(separator_col);
@@ -295,12 +350,12 @@ fn render_statusbar_sidebar_segment(
         brand_start,
         brand_end.saturating_sub(brand_start),
         palette,
-        mode,
+        state,
         status_bg,
     );
 
     if let Some(rect) = plus_rect {
-        let plus_fg = if matches!(mode, HarnessMode::Command) {
+        let plus_fg = if matches!(state, StatusbarState::Command) {
             fg
         } else {
             palette.accent
@@ -325,7 +380,7 @@ fn render_statusline_rule(
     col: i32,
     cols: i32,
     palette: &ScenePalette,
-    mode: HarnessMode,
+    state: StatusbarState,
     bg: Color,
 ) {
     if cols <= 0 {
@@ -334,10 +389,11 @@ fn render_statusline_rule(
     let denom = cols.saturating_sub(1).max(1) as u16;
     for offset in 0..cols {
         let mix = ((offset as u16 * 255) / denom) as u8;
-        let fg = if matches!(mode, HarnessMode::Command) {
-            statusline_fg(mode, palette)
-        } else {
-            theme::fade_toward(palette.accent, palette.accent_2, mix)
+        let fg = match state {
+            StatusbarState::Ok => STATUS_NOTE_OK_FG,
+            StatusbarState::Error => STATUS_NOTE_ERROR_FG,
+            StatusbarState::Command => statusbar_fg(state, palette),
+            StatusbarState::Normal => theme::fade_toward(palette.accent, palette.accent_2, mix),
         };
         surface.set_cell(col + offset, row, fg, bg, STATUS_RULE_GLYPH, false);
     }
@@ -346,30 +402,31 @@ fn render_statusline_rule(
 pub(super) fn statusbar_new_project_rect(
     panel: CellRect,
     sidebar_panel: Option<CellRect>,
-    mode: HarnessMode,
 ) -> Option<CellRect> {
     if panel.cols <= 0 || panel.rows <= 0 {
         return None;
     }
 
     let row = panel.row;
-    let mode_cols = display_cell_width(statusline_mode_label(mode)) as i32;
     let plus_col = sidebar_panel
         .map(|sidebar_panel| panel.col + sidebar_panel.cols.min(panel.cols).max(0) - 3)
-        .unwrap_or(panel.col + mode_cols + 1);
+        .unwrap_or(panel.col + STATUSLINE_MODE_LABEL_WIDTH + 1);
     let limit_col = sidebar_panel
         .map(|sidebar_panel| panel.col + sidebar_panel.cols.min(panel.cols).max(0) - 1)
         .unwrap_or(panel.col + panel.cols);
 
-    (plus_col >= panel.col + mode_cols && plus_col < limit_col)
+    (plus_col >= panel.col + STATUSLINE_MODE_LABEL_WIDTH && plus_col < limit_col)
         .then_some(CellRect::new(plus_col, row, 1, 1))
 }
 
-pub(super) fn statusline_mode_label(mode: HarnessMode) -> &'static str {
-    match mode {
-        HarnessMode::Normal => " NORMAL ",
-        HarnessMode::Command => " COMMAND ",
-    }
+pub(super) fn statusline_mode_label(state: StatusbarState) -> String {
+    let text = match state {
+        StatusbarState::Command => "COMMAND",
+        StatusbarState::Ok => "OKAY!",
+        StatusbarState::Error => "ERROR!",
+        StatusbarState::Normal => "NORMAL",
+    };
+    format!(" {:<7} ", text)
 }
 
 fn statusline_left_text(chrome: &ChromeView) -> String {
@@ -384,15 +441,18 @@ fn statusline_center_text(chrome: &ChromeView) -> String {
     }
 }
 
-fn statusline_right_text(chrome: &ChromeView) -> String {
+fn statusline_right_text(chrome: &ChromeView, state: StatusbarState) -> String {
     if chrome.status.is_empty() {
-        String::new()
-    } else {
-        format!(
+        return String::new();
+    }
+    match state {
+        StatusbarState::Ok => format!(" OKAY! {} ", chrome.status),
+        StatusbarState::Error => format!(" ERROR! {} ", chrome.status),
+        _ => format!(
             " {} {} ",
             statusline_status_symbol(&chrome.status),
             chrome.status
-        )
+        ),
     }
 }
 
