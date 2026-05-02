@@ -9,7 +9,7 @@ members = ["crates/pi-harness-tui"]
 [dependencies]
 arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
 anyhow = "1"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 portable-pty = "0.9"

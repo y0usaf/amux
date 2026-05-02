@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use chrono::DateTime;
+use chrono::{DateTime, Local, TimeZone};
 use serde_json::Value;
 
 const PI_AGENT_DIR_ENV: &str = "PI_AGENT_DIR";
@@ -212,13 +212,20 @@ fn usage_entries_from_file(path: &Path) -> Vec<UsageEntry> {
 }
 
 fn usage_entry_from_value(value: &Value) -> Option<UsageEntry> {
+    usage_entry_from_value_in_timezone(value, &Local)
+}
+
+fn usage_entry_from_value_in_timezone<Tz: TimeZone>(
+    value: &Value,
+    time_zone: &Tz,
+) -> Option<UsageEntry> {
     let kind = value.get("type").and_then(Value::as_str);
     if kind.is_some_and(|kind| kind != "message") {
         return None;
     }
 
     let timestamp = value.get("timestamp")?.as_str()?;
-    let date = date_key_from_timestamp(timestamp)?;
+    let date = date_key_from_timestamp_in_timezone(timestamp, time_zone)?;
     let message = value.get("message")?;
     if message.get("role").and_then(Value::as_str) != Some("assistant") {
         return None;
@@ -278,14 +285,24 @@ fn number_as_u64(value: &Value) -> Option<u64> {
         })
 }
 
-fn date_key_from_timestamp(timestamp: &str) -> Option<String> {
+fn date_key_from_timestamp_in_timezone<Tz: TimeZone>(
+    timestamp: &str,
+    time_zone: &Tz,
+) -> Option<String> {
     let date_time = DateTime::parse_from_rfc3339(timestamp).ok()?;
-    Some(date_time.date_naive().format("%Y-%m-%d").to_string())
+    Some(
+        date_time
+            .with_timezone(time_zone)
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::FixedOffset;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestDir(PathBuf);
@@ -335,7 +352,8 @@ mod tests {
             }
         });
 
-        let entry = usage_entry_from_value(&value).unwrap();
+        let utc = FixedOffset::east_opt(0).unwrap();
+        let entry = usage_entry_from_value_in_timezone(&value, &utc).unwrap();
 
         assert_eq!(entry.date, "2026-01-01");
         assert_eq!(entry.model.as_deref(), Some("[pi] claude-opus-4-5"));
@@ -345,6 +363,23 @@ mod tests {
         assert_eq!(entry.totals.cache_creation_tokens, 20);
         assert_eq!(entry.total_tokens_for_dedupe, 180);
         assert_eq!(entry.totals.total_cost, 0.05);
+    }
+
+    #[test]
+    fn usage_entry_buckets_in_requested_timezone() {
+        let value = serde_json::json!({
+            "type": "message",
+            "timestamp": "2026-05-01T23:30:00Z",
+            "message": {
+                "role": "assistant",
+                "usage": { "input": 1, "output": 1 }
+            }
+        });
+
+        let east_two = FixedOffset::east_opt(2 * 60 * 60).unwrap();
+        let entry = usage_entry_from_value_in_timezone(&value, &east_two).unwrap();
+
+        assert_eq!(entry.date, "2026-05-02");
     }
 
     #[test]
@@ -394,9 +429,9 @@ mod tests {
             project_dir.join("session.jsonl"),
             concat!(
                 "{\"type\":\"session\",\"id\":\"s1\",\"cwd\":\"/tmp\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n",
-                "{\"type\":\"message\",\"timestamp\":\"2026-01-02T00:00:01Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4\",\"usage\":{\"input\":100,\"output\":50,\"cacheRead\":10,\"cacheWrite\":20,\"totalTokens\":180,\"cost\":{\"total\":0.05}}}}\n",
-                "{\"type\":\"message\",\"timestamp\":\"2026-01-02T00:00:01Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4\",\"usage\":{\"input\":100,\"output\":50,\"cacheRead\":10,\"cacheWrite\":20,\"totalTokens\":180,\"cost\":{\"total\":0.05}}}}\n",
-                "{\"type\":\"message\",\"timestamp\":\"2026-01-01T00:00:01Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-5\",\"usage\":{\"input\":7,\"output\":8,\"cost\":{\"total\":0.01}}}}\n"
+                "{\"type\":\"message\",\"timestamp\":\"2026-01-03T12:00:00Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4\",\"usage\":{\"input\":100,\"output\":50,\"cacheRead\":10,\"cacheWrite\":20,\"totalTokens\":180,\"cost\":{\"total\":0.05}}}}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2026-01-03T12:00:00Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4\",\"usage\":{\"input\":100,\"output\":50,\"cacheRead\":10,\"cacheWrite\":20,\"totalTokens\":180,\"cost\":{\"total\":0.05}}}}\n",
+                "{\"type\":\"message\",\"timestamp\":\"2026-01-01T12:00:00Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-5\",\"usage\":{\"input\":7,\"output\":8,\"cost\":{\"total\":0.01}}}}\n"
             ),
         )
         .unwrap();
@@ -412,8 +447,8 @@ mod tests {
         assert_eq!(report.totals.cache_creation_tokens, 20);
         assert!((report.totals.total_cost - 0.06).abs() < f64::EPSILON);
         assert_eq!(report.days.len(), 2);
-        assert_eq!(report.days[0].date, "2026-01-02");
+        assert!(report.days[0].date > report.days[1].date);
         assert_eq!(report.days[0].models_used, vec!["[pi] claude-sonnet-4"]);
-        assert_eq!(report.days[1].date, "2026-01-01");
+        assert_eq!(report.days[1].models_used, vec!["[pi] claude-opus-4-5"]);
     }
 }
