@@ -123,6 +123,8 @@ impl TuiApp {
         }
     }
 
+
+
     fn handle_terminal_palette_response(&mut self, bytes: &[u8]) -> bool {
         if !is_terminal_palette_response(bytes) {
             return false;

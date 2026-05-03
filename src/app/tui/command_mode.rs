@@ -196,6 +196,7 @@ impl TuiApp {
             Ok(TuiCommand::Reload) => self.core.run_action(AppAction::RefreshAllSessions),
             Ok(TuiCommand::Usage) => self.open_usage_overlay(),
 
+
             Ok(TuiCommand::Quit) => return true,
             Ok(TuiCommand::Help) => self.open_help_overlay(),
             Err(note) => self.core.set_note_text(note),
