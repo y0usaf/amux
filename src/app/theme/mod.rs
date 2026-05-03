@@ -1,50 +1,44 @@
+// The theme registry intentionally exposes the full Charmtone role set even
+// when current render code only consumes a subset; new sites are expected to
+// reach for the typed roles directly rather than hard-coding hexes.
+#![allow(dead_code)]
+
+//! Theme registry + derived theme tables.
+//!
+//! Currently ships a single Charmtone-derived theme (Pantera). Role-tag
+//! constants (`TEXT`, `MUTED`, …) are stable sentinels used by the
+//! scene/sidebar code to look up a palette colour at render time.
+
 use crate::render::Color;
 
-const DEFAULT: Color = Color::rgba(0, 0, 0, 0);
+pub(super) mod charmtone;
+mod pantera;
 
-// Curated dark palette.
-const CHARPLE: Color = Color::rgb(0x6b, 0x50, 0xff);
-const DOLLY: Color = Color::rgb(0xff, 0x60, 0xff);
-const BLUSH: Color = Color::rgb(0xff, 0x84, 0xff);
-const BOK: Color = Color::rgb(0x68, 0xff, 0xd6);
-const SRIRACHA: Color = Color::rgb(0xeb, 0x42, 0x68);
-const CORAL: Color = Color::rgb(0xff, 0x57, 0x7d);
-const MALIBU: Color = Color::rgb(0x00, 0xa4, 0xff);
-const ANCHOVY: Color = Color::rgb(0x71, 0x9a, 0xfc);
-const SARDINE: Color = Color::rgb(0x4f, 0xbe, 0xfe);
-const GUAC: Color = Color::rgb(0x12, 0xc7, 0x8f);
-const JULEP: Color = Color::rgb(0x00, 0xff, 0xb2);
-const MUSTARD: Color = Color::rgb(0xf5, 0xef, 0x34);
-const CITRON: Color = Color::rgb(0xe8, 0xff, 0x27);
-const PEPPER: Color = Color::rgb(0x20, 0x1f, 0x26);
-const BBQ: Color = Color::rgb(0x2d, 0x2c, 0x35);
-const CHARCOAL: Color = Color::rgb(0x3a, 0x39, 0x43);
-const IRON: Color = Color::rgb(0x4d, 0x4c, 0x57);
-const SQUID: Color = Color::rgb(0x85, 0x83, 0x92);
-const SMOKE: Color = Color::rgb(0xbf, 0xbc, 0xc8);
-const ASH: Color = Color::rgb(0xdf, 0xdb, 0xdd);
-const BUTTER: Color = Color::rgb(0xff, 0xfa, 0xf1);
+pub(super) const TRANSPARENT: Color = Color::rgba(0, 0, 0, 0);
 
-pub(super) const TEXT: Color = ASH;
-pub(super) const MUTED: Color = SQUID;
-pub(super) const HEADING: Color = SMOKE;
-pub(super) const ACCENT: Color = BOK;
-pub(super) const ACCENT_2: Color = DOLLY;
-pub(super) const SURFACE: Color = PEPPER;
-pub(super) const SURFACE_RAISED: Color = BBQ;
-pub(super) const SIDEBAR_BG: Color = DEFAULT;
-pub(super) const STATUS_FG: Color = BUTTER;
-pub(super) const STATUS_BG: Color = CHARPLE;
-pub(super) const BORDER: Color = CHARCOAL;
-pub(super) const RUNNING: Color = CITRON;
-pub(super) const SUCCESS: Color = JULEP;
-pub(super) const SUCCESS_SUBTLE: Color = GUAC;
-pub(super) const WARNING: Color = MUSTARD;
-pub(super) const ERROR: Color = SRIRACHA;
-const CURSOR: Color = DOLLY;
+// Role-tag sentinels. The actual rendered colour is resolved through
+// `palette_color()` against the active `ScenePalette`.
+pub(super) const TEXT: Color = charmtone::ASH;
+pub(super) const MUTED: Color = charmtone::SQUID;
+pub(super) const HEADING: Color = charmtone::SMOKE;
+pub(super) const ACCENT: Color = charmtone::BOK;
+pub(super) const ACCENT_2: Color = charmtone::DOLLY;
+pub(super) const RUNNING: Color = charmtone::CITRON;
+pub(super) const WARNING: Color = charmtone::MUSTARD;
+pub(super) const ERROR: Color = charmtone::SRIRACHA;
+pub(super) const SUCCESS: Color = charmtone::JULEP;
+pub(super) const SUCCESS_SUBTLE: Color = charmtone::GUAC;
+pub(super) const STATUS_FG: Color = charmtone::BUTTER;
+pub(super) const STATUS_BG: Color = charmtone::CHARPLE;
+pub(super) const BORDER: Color = charmtone::CHARCOAL;
+pub(super) const SURFACE: Color = charmtone::PEPPER;
+pub(super) const SURFACE_RAISED: Color = charmtone::BBQ;
 pub(super) const TERM_FG: Color = TEXT;
-const TERM_SELECTION_BG: Color = CHARPLE;
-const TERM_SELECTION_FG: Color = BUTTER;
+const CURSOR: Color = charmtone::DOLLY;
+const TERM_SELECTION_BG: Color = charmtone::CHARPLE;
+const TERM_SELECTION_FG: Color = charmtone::BUTTER;
+
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TerminalPalette {
@@ -57,17 +51,52 @@ impl TerminalPalette {
     pub(super) fn fallback() -> Self {
         Self {
             fg: Color::ansi_index(7),
-            bg: Color::rgba(0, 0, 0, 0),
+            bg: TRANSPARENT,
             ansi: std::array::from_fn(|index| Color::ansi_index(index as u8)),
         }
     }
 }
 
+/// Fully resolved theme table.
+///
+/// Field set is a superset of Crush's `quickStyleOpts` roles plus a handful
+/// of legacy aliases used by the existing render code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct DerivedTheme {
+    // Crush role vocabulary.
+    pub(super) primary: Color,
+    pub(super) secondary: Color,
+    pub(super) accent: Color,
+    pub(super) keyword: Color,
+    pub(super) on_primary: Color,
+
+    pub(super) fg_base: Color,
+    pub(super) fg_subtle: Color,
+    pub(super) fg_more_subtle: Color,
+    pub(super) fg_most_subtle: Color,
+
+    pub(super) bg_base: Color,
+    pub(super) bg_least_visible: Color,
+    pub(super) bg_less_visible: Color,
+    pub(super) bg_most_visible: Color,
+
+    pub(super) separator: Color,
+
+    pub(super) destructive: Color,
+    pub(super) error: Color,
+    pub(super) warning: Color,
+    pub(super) warning_subtle: Color,
+    pub(super) busy: Color,
+    pub(super) info: Color,
+    pub(super) info_more_subtle: Color,
+    pub(super) info_most_subtle: Color,
+    pub(super) success: Color,
+    pub(super) success_more_subtle: Color,
+    pub(super) success_most_subtle: Color,
+
+    // Legacy aliases retained for the current scene/overlay code.
     pub(super) text: Color,
     pub(super) muted: Color,
-    pub(super) accent: Color,
     pub(super) accent_2: Color,
     pub(super) surface: Color,
     pub(super) surface_raised: Color,
@@ -76,50 +105,43 @@ pub(super) struct DerivedTheme {
     pub(super) status_bg: Color,
     pub(super) border: Color,
     pub(super) running: Color,
-    pub(super) success: Color,
     pub(super) success_subtle: Color,
-    pub(super) warning: Color,
-    pub(super) error: Color,
     pub(super) term_fg: Color,
     pub(super) term_bg: Color,
+
     pub(super) ansi: [Color; 16],
 }
 
 impl DerivedTheme {
+    pub(super) fn fallback() -> Self {
+        pantera::theme()
+    }
+
+    /// Crush-style chrome is intentionally hardcoded; the terminal palette is
+    /// ignored so transparency / host background still show through. Kept
+    /// here so callers can re-resolve the theme on terminal palette events.
     pub(super) fn from_terminal_palette(_palette: TerminalPalette) -> Self {
-        // Crush-style chrome is intentionally hardcoded; keep backgrounds as
-        // terminal defaults so transparency / host background still show through.
         Self::fallback()
     }
-
-    pub(super) fn fallback() -> Self {
-        Self {
-            text: TEXT,
-            muted: MUTED,
-            accent: ACCENT,
-            accent_2: ACCENT_2,
-            surface: SURFACE,
-            surface_raised: SURFACE_RAISED,
-            sidebar_bg: SIDEBAR_BG,
-            status_fg: STATUS_FG,
-            status_bg: STATUS_BG,
-            border: BORDER,
-            running: RUNNING,
-            success: SUCCESS,
-            success_subtle: SUCCESS_SUBTLE,
-            warning: WARNING,
-            error: ERROR,
-            term_fg: TERM_FG,
-            term_bg: DEFAULT,
-            ansi: fallback_ansi_palette(),
-        }
-    }
 }
-
-const fn fallback_ansi_palette() -> [Color; 16] {
+pub(super) fn default_ansi_palette() -> [Color; 16] {
     [
-        PEPPER, SRIRACHA, JULEP, MUSTARD, MALIBU, DOLLY, BOK, SMOKE, IRON, CORAL, GUAC, CITRON,
-        ANCHOVY, BLUSH, SARDINE, ASH,
+        charmtone::PEPPER,
+        charmtone::SRIRACHA,
+        charmtone::JULEP,
+        charmtone::MUSTARD,
+        charmtone::MALIBU,
+        charmtone::DOLLY,
+        charmtone::BOK,
+        charmtone::SMOKE,
+        charmtone::IRON,
+        charmtone::CORAL,
+        charmtone::GUAC,
+        charmtone::CITRON,
+        charmtone::ANCHOVY,
+        charmtone::BLUSH,
+        charmtone::SARDINE,
+        charmtone::ASH,
     ]
 }
 
@@ -239,12 +261,13 @@ pub(super) fn fade_toward(color: Color, target: Color, mix: u8) -> Color {
 #[cfg(test)]
 mod tests {
     use super::{
-        ansi_index_to_color, brighten, fade_toward, screen_cell_colors, DerivedTheme,
-        TerminalPalette, ACCENT, ACCENT_2, BORDER, CURSOR, DEFAULT, ERROR, MUTED, RUNNING,
+        ansi_index_to_color, brighten, default_ansi_palette, fade_toward, screen_cell_colors,
+        DerivedTheme, TerminalPalette, ACCENT, ACCENT_2, BORDER, CURSOR, ERROR, MUTED, RUNNING,
         STATUS_BG, STATUS_FG, SUCCESS, SUCCESS_SUBTLE, TERM_FG, TERM_SELECTION_BG,
-        TERM_SELECTION_FG, TEXT, WARNING,
+        TERM_SELECTION_FG, TEXT, TRANSPARENT, WARNING,
     };
 
+    use super::charmtone as ct;
     use crate::render::Color;
 
     fn cell_from_bytes(bytes: &[u8]) -> vt100::Cell {
@@ -292,7 +315,46 @@ mod tests {
     }
 
     #[test]
-    fn fallback_theme_matches_default_roles() {
+    fn pantera_theme_matches_charmtone_role_mapping() {
+        let theme = DerivedTheme::fallback();
+
+        // Brand
+        assert_eq!(theme.primary, ct::CHARPLE);
+        assert_eq!(theme.secondary, ct::DOLLY);
+        assert_eq!(theme.accent, ct::BOK);
+        assert_eq!(theme.keyword, ct::BLUSH);
+        assert_eq!(theme.on_primary, ct::BUTTER);
+
+        // Foreground tiers
+        assert_eq!(theme.fg_base, ct::ASH);
+        assert_eq!(theme.fg_subtle, ct::SMOKE);
+        assert_eq!(theme.fg_more_subtle, ct::SQUID);
+        assert_eq!(theme.fg_most_subtle, ct::OYSTER);
+
+        // Background tiers
+        assert_eq!(theme.bg_base, ct::PEPPER);
+        assert_eq!(theme.bg_least_visible, ct::BBQ);
+        assert_eq!(theme.bg_less_visible, ct::CHARCOAL);
+        assert_eq!(theme.bg_most_visible, ct::IRON);
+
+        assert_eq!(theme.separator, ct::CHARCOAL);
+
+        // Status
+        assert_eq!(theme.destructive, ct::CORAL);
+        assert_eq!(theme.error, ct::SRIRACHA);
+        assert_eq!(theme.warning, ct::MUSTARD);
+        assert_eq!(theme.warning_subtle, ct::ZEST);
+        assert_eq!(theme.busy, ct::CITRON);
+        assert_eq!(theme.info, ct::MALIBU);
+        assert_eq!(theme.info_more_subtle, ct::SARDINE);
+        assert_eq!(theme.info_most_subtle, ct::DAMSON);
+        assert_eq!(theme.success, ct::JULEP);
+        assert_eq!(theme.success_more_subtle, ct::BOK);
+        assert_eq!(theme.success_most_subtle, ct::GUAC);
+    }
+
+    #[test]
+    fn legacy_role_aliases_match_pantera_constants() {
         let theme = DerivedTheme::fallback();
 
         assert_eq!(theme.text, TEXT);
@@ -308,8 +370,9 @@ mod tests {
         assert_eq!(theme.warning, WARNING);
         assert_eq!(theme.error, ERROR);
         assert_eq!(theme.term_fg, TERM_FG);
-        assert_eq!(theme.sidebar_bg, DEFAULT);
-        assert_eq!(theme.ansi, DerivedTheme::fallback().ansi);
+        assert_eq!(theme.sidebar_bg, TRANSPARENT);
+        assert_eq!(theme.term_bg, TRANSPARENT);
+        assert_eq!(theme.ansi, default_ansi_palette());
     }
 
     #[test]
@@ -356,20 +419,15 @@ mod tests {
     }
 
     #[test]
-    fn derived_theme_keeps_crush_chrome_and_terminal_default_background() {
+    fn from_terminal_palette_keeps_pantera_chrome() {
         let palette = TerminalPalette {
             fg: Color::rgb(0xd8, 0xd8, 0xd8),
             bg: Color::rgb(0x10, 0x14, 0x20),
             ansi: std::array::from_fn(|index| ansi_index_to_color(index as u8)),
         };
-        let theme = DerivedTheme::from_terminal_palette(palette);
-
-        assert_eq!(theme.text, TEXT);
-        assert_eq!(theme.accent, ACCENT);
-        assert_eq!(theme.status_fg, STATUS_FG);
-        assert_eq!(theme.status_bg, STATUS_BG);
-        assert_eq!(theme.term_bg, DEFAULT);
-        assert_eq!(theme.sidebar_bg, DEFAULT);
-        assert_eq!(theme.ansi, DerivedTheme::fallback().ansi);
+        assert_eq!(
+            DerivedTheme::from_terminal_palette(palette),
+            DerivedTheme::fallback()
+        );
     }
 }

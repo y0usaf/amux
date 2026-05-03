@@ -76,6 +76,7 @@ fn home_dir_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("~"))
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,4 +123,5 @@ mod tests {
         assert_eq!(parse_command("usage").unwrap(), TuiCommand::Usage);
         assert_eq!(parse_command(":usage").unwrap(), TuiCommand::Usage);
     }
+
 }
