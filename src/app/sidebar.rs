@@ -1,7 +1,7 @@
 use crate::render::Color;
 use crate::state::{Project, Session};
 
-use super::theme::{ACCENT, HEADING, MUTED, RUNNING, TEXT, WARNING};
+use super::theme::{HEADING, MUTED, RUNNING, SUCCESS, TEXT, WARNING};
 
 pub(super) const SIDEBAR_ANIMATION_FRAME_MS: u64 = 20;
 pub(super) const SIDEBAR_SPINNER_FRAMES: &[&str] = &[
@@ -200,7 +200,7 @@ pub(super) fn sidebar_status_color(status: SidebarStatusKind) -> Color {
     match status {
         SidebarStatusKind::Active => RUNNING,
         SidebarStatusKind::Queued => WARNING,
-        SidebarStatusKind::Notification => ACCENT,
+        SidebarStatusKind::Notification => SUCCESS,
     }
 }
 
@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(sidebar_status_color(SidebarStatusKind::Queued), WARNING);
         assert_eq!(
             sidebar_status_color(SidebarStatusKind::Notification),
-            ACCENT
+            SUCCESS
         );
     }
 

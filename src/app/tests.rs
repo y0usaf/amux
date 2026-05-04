@@ -27,6 +27,41 @@ fn snapshot(stage: PiSessionStage, queued: bool) -> PiSidecarSnapshot {
     }
 }
 
+const PROJECT_TITLE_FIRST_CELL: usize = 7;
+const PROJECT_TITLE_LAST_CELL: usize = 15;
+
+fn render_project_title(status: Option<SidebarStatusKind>) -> (ScenePalette, CellSurface) {
+    let palette = ScenePalette::themed(DerivedTheme::fallback());
+    let mut surface = CellSurface::new(24, 3, palette.fg, palette.bg);
+    let rows = [SidebarRow {
+        kind: SidebarRowKind::Project(0),
+        text: "Project".into(),
+        fg: theme::HEADING,
+        bg: None,
+        inverted: false,
+        selector: false,
+        status,
+    }];
+    let viewport = [SidebarViewportItem {
+        row_index: 0,
+        visible_row: 0,
+        sticky: false,
+    }];
+
+    render_sidebar(
+        &mut surface,
+        CellRect::new(0, 0, 24, 3),
+        CellRect::new(0, 0, 24, 1),
+        &rows,
+        &viewport,
+        None,
+        &palette,
+        0,
+    );
+
+    (palette, surface)
+}
+
 #[test]
 fn idle_snapshot_does_not_bind_empty_draft() {
     let session = Session::new_draft();
@@ -153,45 +188,44 @@ fn notification_status_tints_session_title() {
 
     let title_cell = &surface.cells[2];
     assert_eq!(title_cell.text, "U");
-    assert_eq!(title_cell.fg, palette.accent);
+    assert_eq!(title_cell.fg, palette.success);
 }
 
 #[test]
-fn project_title_uses_gradient_without_status() {
-    let palette = ScenePalette::themed(DerivedTheme::fallback());
-    let mut surface = CellSurface::new(24, 3, palette.fg, palette.bg);
-    let rows = [SidebarRow {
-        kind: SidebarRowKind::Project(0),
-        text: "PROJECT".into(),
-        fg: theme::HEADING,
-        bg: None,
-        inverted: false,
-        selector: false,
-        status: None,
-    }];
-    let viewport = [SidebarViewportItem {
-        row_index: 0,
-        visible_row: 0,
-        sticky: false,
-    }];
+fn project_title_uses_lifted_statusbar_purple_without_status() {
+    let (palette, surface) = render_project_title(None);
+    let idle_title_fg = theme::brighten(palette.statusbar_bg, 36);
 
-    render_sidebar(
-        &mut surface,
-        CellRect::new(0, 0, 24, 3),
-        CellRect::new(0, 0, 24, 1),
-        &rows,
-        &viewport,
-        None,
-        &palette,
-        0,
-    );
+    let first_title_cell = &surface.cells[PROJECT_TITLE_FIRST_CELL];
+    let last_title_cell = &surface.cells[PROJECT_TITLE_LAST_CELL];
+    assert_eq!(first_title_cell.text, "[");
+    assert_eq!(first_title_cell.fg, idle_title_fg);
+    assert_eq!(last_title_cell.text, "]");
+    assert_eq!(last_title_cell.fg, idle_title_fg);
+}
 
-    let first_title_cell = &surface.cells[7];
-    let last_title_cell = &surface.cells[15];
+#[test]
+fn active_project_title_uses_gradient() {
+    let (palette, surface) = render_project_title(Some(SidebarStatusKind::Active));
+
+    let first_title_cell = &surface.cells[PROJECT_TITLE_FIRST_CELL];
+    let last_title_cell = &surface.cells[PROJECT_TITLE_LAST_CELL];
     assert_eq!(first_title_cell.text, "[");
     assert_eq!(first_title_cell.fg, palette.accent);
     assert_eq!(last_title_cell.text, "]");
-    assert_eq!(last_title_cell.fg, palette.accent_2);
+    assert_ne!(last_title_cell.fg, first_title_cell.fg);
+}
+
+#[test]
+fn completed_project_title_uses_success_green() {
+    let (palette, surface) = render_project_title(Some(SidebarStatusKind::Notification));
+
+    let first_title_cell = &surface.cells[PROJECT_TITLE_FIRST_CELL];
+    let last_title_cell = &surface.cells[PROJECT_TITLE_LAST_CELL];
+    assert_eq!(first_title_cell.text, "[");
+    assert_eq!(first_title_cell.fg, palette.success);
+    assert_eq!(last_title_cell.text, "]");
+    assert_eq!(last_title_cell.fg, palette.success);
 }
 
 #[test]
