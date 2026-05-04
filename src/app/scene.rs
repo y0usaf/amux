@@ -40,6 +40,7 @@ pub(super) struct ScenePalette {
     pub(super) ansi: [Color; 16],
 
     pub(super) running: Color,
+    pub(super) success: Color,
     pub(super) success_subtle: Color,
     pub(super) warning: Color,
     pub(super) error: Color,
@@ -64,6 +65,7 @@ impl ScenePalette {
             ansi: theme.ansi,
 
             running: theme.running,
+            success: theme.success,
             success_subtle: theme.success_subtle,
             warning: theme.warning,
             error: theme.error,
@@ -758,10 +760,12 @@ fn render_sidebar_project_rule(
         1,
     );
 
-    let label_fg = if matches!(status, Some(SidebarStatusKind::Notification)) {
-        sidebar_status_color_for_palette(SidebarStatusKind::Notification, palette)
-    } else {
-        label_fg
+    let label_fg = match status {
+        Some(SidebarStatusKind::Notification) if !palette.monochrome => {
+            sidebar_status_color_for_palette(SidebarStatusKind::Notification, palette)
+        }
+        None if !palette.monochrome => theme::brighten(palette.statusbar_bg, 36),
+        _ => label_fg,
     };
     let value = truncate_to_cells(&format!("[{label}]"), label_area.cols.max(0) as usize);
     let value_cols = display_cell_width(&value) as i32;
@@ -772,8 +776,11 @@ fn render_sidebar_project_rule(
         1,
     );
 
-    let gradient_title =
-        !palette.monochrome && !matches!(status, Some(SidebarStatusKind::Notification));
+    let gradient_title = !palette.monochrome
+        && matches!(
+            status,
+            Some(SidebarStatusKind::Active | SidebarStatusKind::Queued)
+        );
     if gradient_title {
         render_sidebar_gradient_text(
             surface,
@@ -827,7 +834,7 @@ fn sidebar_status_color_for_palette(status: SidebarStatusKind, palette: &ScenePa
     match status {
         SidebarStatusKind::Active => palette.running,
         SidebarStatusKind::Queued => palette.warning,
-        SidebarStatusKind::Notification => palette.accent,
+        SidebarStatusKind::Notification => palette.success,
     }
 }
 
