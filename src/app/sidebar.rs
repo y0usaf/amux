@@ -267,7 +267,7 @@ pub(super) fn build_sidebar_rows(
         let status = project_sidebar_status(project);
         rows.push(SidebarRow {
             kind: SidebarRowKind::Project(project_index),
-            text: project.name.to_uppercase(),
+            text: project.name.clone(),
             fg: if project_focused { TEXT } else { HEADING },
             bg: None,
             inverted: project_focused,
@@ -475,6 +475,15 @@ mod tests {
 
         assert!(matches!(rows[0].kind, SidebarRowKind::Project(0)));
         assert!(rows[0].selector);
+    }
+
+    #[test]
+    fn project_header_preserves_name_case() {
+        let mut project = Project::new("mixed-case".into());
+        project.name = "Mixed Case".into();
+        let rows = build_sidebar_rows(&[project], 0, None, false);
+
+        assert_eq!(rows[0].text, "Mixed Case");
     }
 
     #[test]
