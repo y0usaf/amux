@@ -3,11 +3,13 @@ use crate::state::{Project, Session};
 
 use super::theme::{HEADING, MUTED, RUNNING, SUCCESS, TEXT, WARNING};
 
-pub(super) const SIDEBAR_ANIMATION_FRAME_MS: u64 = 20;
+pub(super) const SIDEBAR_ANIMATION_FRAME_MS: u64 = 10;
+pub(super) const SIDEBAR_SPINNER_FRAME_TICKS: u64 = 6;
+pub(super) const SIDEBAR_SPINNER_FRAME_MS: u64 =
+    SIDEBAR_ANIMATION_FRAME_MS * SIDEBAR_SPINNER_FRAME_TICKS;
 pub(super) const SIDEBAR_SPINNER_FRAMES: &[&str] = &[
     "⠋", "⠙", "⠹", "⠸", "⢸", "⢰", "⣰", "⣠", "⣤", "⣄", "⣆", "⡆", "⡇", "⠇", "⠏",
 ];
-pub(super) const SIDEBAR_SPINNER_FRAME_MS: u64 = 60;
 pub(super) const SIDEBAR_NOTIFICATION_GLYPH: &str = "⣿";
 
 #[derive(Clone, Debug)]
