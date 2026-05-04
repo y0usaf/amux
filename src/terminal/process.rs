@@ -82,6 +82,10 @@ pub(crate) fn spawn_process(
         .map_err(|error| format!("openpty failed: {error}"))?;
 
     let mut cmd = CommandBuilder::from_argv(argv);
+    cmd.env_clear();
+    for (key, value) in std::env::vars_os() {
+        cmd.env(key, value);
+    }
     cmd.cwd(&target.cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
