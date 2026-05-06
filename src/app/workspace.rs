@@ -71,6 +71,21 @@ impl Workspace {
         self.current_project()?.sessions.get(index)
     }
 
+    fn current_session_mut(&mut self) -> Option<&mut Session> {
+        let project_index = self.selected_project;
+        let session_index = self.selected_session?;
+        self.projects
+            .get_mut(project_index)?
+            .sessions
+            .get_mut(session_index)
+    }
+
+    fn view_selected_session(&mut self) {
+        if let Some(session) = self.current_session_mut() {
+            session.runtime.unread = false;
+        }
+    }
+
     pub(super) fn current_session_visible_in_sidebar(&self) -> bool {
         self.current_session()
             .is_some_and(Session::should_render_in_sidebar)
@@ -179,6 +194,7 @@ impl Workspace {
         if self.selected_session.is_none() {
             self.selected_session = self.ensure_default_session_for_project(self.selected_project);
         }
+        self.view_selected_session();
     }
 
     pub(super) fn promote_project_to_front(&mut self, project_index: usize) {
@@ -209,6 +225,7 @@ impl Workspace {
             self.selected_project = self.selected_project.min(self.projects.len() - 1);
             self.selected_session = self.ensure_default_session_for_project(self.selected_project);
         }
+        self.view_selected_session();
         self.persist_selection();
         true
     }
@@ -228,6 +245,7 @@ impl Workspace {
         {
             self.selected_project = index;
             self.selected_session = self.ensure_default_session_for_project(index);
+            self.view_selected_session();
             self.persist_selection();
             return Ok(OpenProjectResult { path, added: false });
         }
@@ -238,6 +256,7 @@ impl Workspace {
         self.projects.push(project);
         self.selected_project = self.projects.len().saturating_sub(1);
         self.selected_session = self.ensure_default_session_for_project(self.selected_project);
+        self.view_selected_session();
         self.persist_selection();
 
         Ok(OpenProjectResult { path, added: true })
@@ -304,6 +323,7 @@ impl Workspace {
             .get(target.project_index)
             .and_then(|project| next_selectable_session_index(project, target.session_index))
             .or_else(|| self.ensure_default_session_for_project(target.project_index));
+        self.view_selected_session();
         self.persist_selection();
     }
 
@@ -325,6 +345,7 @@ impl Workspace {
         };
 
         self.selected_session = Some(session_index);
+        self.view_selected_session();
         self.persist_selection();
     }
 
@@ -334,6 +355,7 @@ impl Workspace {
         }
         self.selected_project = index;
         self.selected_session = self.ensure_default_session_for_project(index);
+        self.view_selected_session();
         self.persist_selection();
         true
     }
@@ -356,6 +378,7 @@ impl Workspace {
         }
         self.selected_project = project_index;
         self.selected_session = Some(session_index);
+        self.view_selected_session();
         self.persist_selection();
         true
     }
@@ -592,6 +615,23 @@ mod tests {
         project.sessions = vec![Session::new_draft()];
 
         assert_eq!(cycle_session_indices(&project), vec![0]);
+    }
+
+    #[test]
+    fn restore_selection_clears_unread_notification() {
+        let mut project = Project::new(PathBuf::from("/tmp/project"));
+        let first = Session::new_draft();
+        let mut unread = Session::new_draft();
+        unread.runtime.unread = true;
+        let unread_id = unread.local_id.clone();
+        project.sessions = vec![first, unread];
+
+        let mut workspace = Workspace::new(Vec::new(), PersistedState::default());
+        workspace.projects = vec![project];
+        workspace.restore_selection(None, Some(unread_id));
+
+        assert_eq!(workspace.selected_session, Some(1));
+        assert!(!workspace.projects[0].sessions[1].runtime.unread);
     }
 
     #[test]
