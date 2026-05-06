@@ -38,8 +38,6 @@ const CURSOR: Color = charmtone::DOLLY;
 const TERM_SELECTION_BG: Color = charmtone::CHARPLE;
 const TERM_SELECTION_FG: Color = charmtone::BUTTER;
 
-
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TerminalPalette {
     pub(super) fg: Color,
