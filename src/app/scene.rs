@@ -580,6 +580,7 @@ pub(super) fn render_sidebar(
                     now_ms,
                     reverse,
                     row.selector,
+                    row.current,
                     palette,
                 );
             }
@@ -730,6 +731,7 @@ fn render_sidebar_project_rule(
     now_ms: u64,
     reverse: bool,
     show_selector: bool,
+    current_project: bool,
     palette: &ScenePalette,
 ) {
     if rect.cols <= 0 {
@@ -760,14 +762,15 @@ fn render_sidebar_project_rule(
         1,
     );
 
+    let idle_project_fg = theme::brighten(palette.statusbar_bg, 36);
     let label_fg = match status {
         Some(SidebarStatusKind::Notification) if !palette.monochrome => {
             sidebar_status_color_for_palette(SidebarStatusKind::Notification, palette)
         }
-        None if !palette.monochrome => theme::brighten(palette.statusbar_bg, 36),
+        None if !palette.monochrome => idle_project_fg,
         _ => label_fg,
     };
-    let value = truncate_to_cells(&format!("[{label}]"), label_area.cols.max(0) as usize);
+    let value = truncate_to_cells(&format!(" {label} "), label_area.cols.max(0) as usize);
     let value_cols = display_cell_width(&value) as i32;
     let label_rect = CellRect::new(
         label_area.col + label_area.cols.saturating_sub(value_cols) / 2,
@@ -781,6 +784,55 @@ fn render_sidebar_project_rule(
             status,
             Some(SidebarStatusKind::Active | SidebarStatusKind::Queued)
         );
+    if !reverse {
+        let left_rule = CellRect::new(
+            label_area.col,
+            label_area.row,
+            label_rect.col.saturating_sub(label_area.col),
+            1,
+        );
+        let right_rule_col = label_rect.col + label_rect.cols;
+        let right_rule = CellRect::new(
+            right_rule_col,
+            label_area.row,
+            (label_area.col + label_area.cols).saturating_sub(right_rule_col),
+            1,
+        );
+        if gradient_title {
+            render_sidebar_project_rule_gradient(
+                surface,
+                left_rule,
+                bg,
+                reverse,
+                status,
+                now_ms,
+                0,
+                idle_project_fg,
+                palette,
+            );
+            render_sidebar_project_rule_gradient(
+                surface,
+                right_rule,
+                bg,
+                reverse,
+                status,
+                now_ms,
+                left_rule.cols.max(0) as usize + value_cols.max(0) as usize,
+                idle_project_fg,
+                palette,
+            );
+        } else {
+            let rule_fg = sidebar_project_rule_fg(
+                label_fg,
+                idle_project_fg,
+                status,
+                current_project,
+                palette,
+            );
+            render_sidebar_project_rule_solid(surface, left_rule, rule_fg, bg);
+            render_sidebar_project_rule_solid(surface, right_rule, rule_fg, bg);
+        }
+    }
     if gradient_title {
         render_sidebar_gradient_text(
             surface,
@@ -796,7 +848,7 @@ fn render_sidebar_project_rule(
             palette,
         );
     } else {
-        surface.put_text_styled(
+        surface.put_text_bold_styled(
             label_rect.col,
             label_rect.row,
             label_rect.cols,
@@ -805,6 +857,68 @@ fn render_sidebar_project_rule(
             &value,
             reverse,
         );
+    }
+}
+
+fn render_sidebar_project_rule_solid(
+    surface: &mut CellSurface,
+    rect: CellRect,
+    fg: Color,
+    bg: Color,
+) {
+    if rect.cols <= 0 {
+        return;
+    }
+    for col in rect.col..(rect.col + rect.cols) {
+        surface.set_cell(col, rect.row, fg, bg, "━", false);
+    }
+}
+
+fn render_sidebar_project_rule_gradient(
+    surface: &mut CellSurface,
+    rect: CellRect,
+    bg: Color,
+    reverse: bool,
+    status: Option<SidebarStatusKind>,
+    now_ms: u64,
+    phase_slot: usize,
+    idle_project_fg: Color,
+    palette: &ScenePalette,
+) {
+    if rect.cols <= 0 {
+        return;
+    }
+    let value = "━".repeat(rect.cols as usize);
+    render_sidebar_gradient_text(
+        surface,
+        rect,
+        &value,
+        bg,
+        reverse,
+        idle_project_fg,
+        palette.statusbar_bg,
+        status,
+        now_ms,
+        phase_slot,
+        palette,
+    );
+}
+
+fn sidebar_project_rule_fg(
+    label_fg: Color,
+    idle_project_fg: Color,
+    status: Option<SidebarStatusKind>,
+    current_project: bool,
+    palette: &ScenePalette,
+) -> Color {
+    if palette.monochrome {
+        return label_fg;
+    }
+    match status {
+        Some(SidebarStatusKind::Notification) => label_fg,
+        Some(SidebarStatusKind::Active | SidebarStatusKind::Queued) => idle_project_fg,
+        None if current_project => palette.statusbar_fg,
+        None => palette.border,
     }
 }
 

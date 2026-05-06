@@ -37,6 +37,7 @@ pub(super) struct SidebarRow {
     pub(super) bg: Option<Color>,
     pub(super) inverted: bool,
     pub(super) selector: bool,
+    pub(super) current: bool,
     pub(super) status: Option<SidebarStatusKind>,
 }
 
@@ -273,8 +274,9 @@ pub(super) fn build_sidebar_rows(
             fg: if project_focused { TEXT } else { HEADING },
             bg: None,
             inverted: project_focused,
-            status,
             selector: project_focused,
+            current: project_selected,
+            status,
         });
 
         for (session_index, session) in project.sessions.iter().enumerate() {
@@ -294,8 +296,9 @@ pub(super) fn build_sidebar_rows(
                 fg: if selected { TEXT } else { MUTED },
                 bg: None,
                 inverted: selected,
-                status,
                 selector: selected,
+                current: selected,
+                status,
             });
         }
     }
@@ -551,8 +554,9 @@ mod tests {
                 fg: TEXT,
                 bg: None,
                 inverted: false,
-                status: None,
                 selector: false,
+                current: false,
+                status: None,
             })
             .collect();
 
