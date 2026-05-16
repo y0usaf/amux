@@ -463,6 +463,15 @@ impl HarnessCore {
         self.selection_changed();
     }
 
+    pub(super) fn cleanup_archive(&mut self) {
+        let evicted = pi::evict_old_archived_sessions(30);
+        if evicted > 0 {
+            self.set_note_ok(format!("removed {evicted} archived sessions older than 30 days"));
+        } else {
+            self.set_note_ok("no archived sessions older than 30 days");
+        }
+    }
+
     pub(super) fn archive_selected_session(&mut self) {
         let target = match self.workspace.archive_target() {
             Ok(target) => target,

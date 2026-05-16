@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub(super) enum TuiCommand {
     Open(PathBuf),
     Archive,
+    Cleanup,
     Refresh,
     Reload,
     Usage,
@@ -31,6 +32,7 @@ pub(super) fn parse_command(input: &str) -> Result<TuiCommand, String> {
             Ok(TuiCommand::Open(expand_home_path(&path)))
         }
         "archive" | "archives" => Ok(TuiCommand::Archive),
+        "cleanup" | "clean" => Ok(TuiCommand::Cleanup),
         "usage" => Ok(TuiCommand::Usage),
         "refresh" => Ok(TuiCommand::Refresh),
         "reload" => Ok(TuiCommand::Reload),

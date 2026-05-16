@@ -1,12 +1,17 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::files::{archive_dir, live_project_dir};
 use crate::state::ScannedSession;
-use crate::util::{normalize_project_path, session_name_from_text};
+use crate::util::{app_state_dir, normalize_project_path, session_name_from_text};
 
 pub fn scan_live_sessions(project_path: &Path) -> Vec<ScannedSession> {
     let Some(dir) = live_project_dir(project_path) else {
@@ -34,16 +39,265 @@ pub fn scan_archived_sessions() -> Vec<ScannedSession> {
         return Vec::new();
     };
 
-    let mut sessions = Vec::new();
-    for path in jsonl_files_in_dir(&dir) {
-        let Some(meta) = session_meta_from_path(&path) else {
-            continue;
-        };
-        sessions.push(scanned_session_from_meta(path, meta));
+    let files = jsonl_files_in_dir(&dir);
+    let mut cache = load_archive_cache();
+
+    // Prune entries for files that no longer exist
+    let filenames: HashSet<String> = files
+        .iter()
+        .filter_map(|p| p.file_name()?.to_str().map(str::to_owned))
+        .collect();
+    cache.entries.retain(|name, _| filenames.contains(name));
+
+    // Find files not yet in cache
+    let uncached: Vec<PathBuf> = files
+        .iter()
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| !cache.entries.contains_key(name))
+        })
+        .cloned()
+        .collect();
+
+    // Scan uncached files in parallel and add to cache
+    if !uncached.is_empty() {
+        for (filename, entry) in scan_files_parallel(&uncached) {
+            cache.entries.insert(filename, entry);
+        }
+        save_archive_cache(&cache);
     }
+
+    let mut sessions: Vec<ScannedSession> = files
+        .iter()
+        .filter_map(|path| {
+            let filename = path.file_name()?.to_str()?.to_owned();
+            let entry = cache.entries.get(&filename)?.clone();
+            Some(scanned_session_from_meta(path.clone(), cached_to_meta(entry)))
+        })
+        .collect();
 
     sort_scanned_sessions(&mut sessions);
     sessions
+}
+
+// Delete archived sessions whose mtime predates the cutoff. Returns the number deleted.
+pub fn evict_old_archived_sessions(max_age_days: u64) -> usize {
+    let Some(dir) = archive_dir() else {
+        return 0;
+    };
+    let Some(threshold) = SystemTime::now()
+        .checked_sub(Duration::from_secs(max_age_days * 24 * 3600))
+    else {
+        return 0;
+    };
+
+    let mut deleted = 0;
+    for path in jsonl_files_in_dir(&dir) {
+        let is_old = fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .is_some_and(|mtime| mtime <= threshold);
+        if is_old && fs::remove_file(&path).is_ok() {
+            deleted += 1;
+        }
+    }
+
+    if deleted > 0 {
+        // Remove deleted entries from the cache
+        let remaining: HashSet<String> = jsonl_files_in_dir(&dir)
+            .iter()
+            .filter_map(|p| p.file_name()?.to_str().map(str::to_owned))
+            .collect();
+        let mut cache = load_archive_cache();
+        cache.entries.retain(|name, _| remaining.contains(name));
+        save_archive_cache(&cache);
+    }
+
+    deleted
+}
+
+// --- Archive cache ---
+
+#[derive(Default, Serialize, Deserialize)]
+struct ArchiveCache {
+    #[serde(default)]
+    entries: HashMap<String, CachedEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct CachedEntry {
+    session_id: String,
+    cwd: String,
+    created_at_ms: u64,
+    updated_at_ms: u64,
+    name: Option<String>,
+    first_user_message: String,
+}
+
+fn archive_cache_path() -> PathBuf {
+    app_state_dir().join("archive-cache.json")
+}
+
+fn load_archive_cache() -> ArchiveCache {
+    let path = archive_cache_path();
+    let Ok(content) = fs::read_to_string(&path) else {
+        return ArchiveCache::default();
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+fn save_archive_cache(cache: &ArchiveCache) {
+    let Ok(content) = serde_json::to_string(cache) else {
+        return;
+    };
+    let path = archive_cache_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let tmp = path.with_extension("json.tmp");
+    if fs::write(&tmp, &content).is_ok() {
+        let _ = fs::rename(&tmp, &path).or_else(|_| {
+            fs::copy(&tmp, &path).map(|_| ())?;
+            fs::remove_file(&tmp)
+        });
+    }
+}
+
+fn meta_to_cached(meta: &ScanMeta) -> CachedEntry {
+    CachedEntry {
+        session_id: meta.session_id.clone(),
+        cwd: meta.cwd.to_string_lossy().into_owned(),
+        created_at_ms: meta.created_at_ms,
+        updated_at_ms: meta.updated_at_ms,
+        name: meta.name.clone(),
+        first_user_message: meta.first_user_message.clone(),
+    }
+}
+
+fn cached_to_meta(entry: CachedEntry) -> ScanMeta {
+    ScanMeta {
+        session_id: entry.session_id,
+        cwd: PathBuf::from(entry.cwd),
+        created_at_ms: entry.created_at_ms,
+        updated_at_ms: entry.updated_at_ms,
+        name: entry.name,
+        first_user_message: entry.first_user_message,
+    }
+}
+
+fn scan_files_parallel(files: &[PathBuf]) -> Vec<(String, CachedEntry)> {
+    if files.is_empty() {
+        return Vec::new();
+    }
+
+    let nthreads = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(files.len())
+        .min(16);
+
+    let (tx, rx) = mpsc::channel();
+    let chunk_size = (files.len() + nthreads - 1) / nthreads;
+
+    let handles: Vec<_> = files
+        .chunks(chunk_size)
+        .map(|chunk| {
+            let chunk = chunk.to_vec();
+            let tx = tx.clone();
+            thread::spawn(move || {
+                for path in &chunk {
+                    let Some(filename) = path.file_name().and_then(|n| n.to_str()) else {
+                        continue;
+                    };
+                    if let Some(meta) = session_archived_meta_from_path(path) {
+                        let _ = tx.send((filename.to_owned(), meta_to_cached(&meta)));
+                    }
+                }
+            })
+        })
+        .collect();
+
+    drop(tx);
+    let results: Vec<_> = rx.into_iter().collect();
+    for handle in handles {
+        let _ = handle.join();
+    }
+    results
+}
+
+// Archived sessions are frozen, so we use mtime for updated_at and cap reads
+// to avoid scanning hundreds of megabytes when the archive is large.
+const ARCHIVED_SESSION_READ_LIMIT: u64 = 65_536;
+
+fn session_archived_meta_from_path(path: &Path) -> Option<ScanMeta> {
+    let file = fs::File::open(path).ok()?;
+    let updated_at_ms = file
+        .metadata()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64);
+
+    let mut reader = BufReader::new(file.take(ARCHIVED_SESSION_READ_LIMIT));
+    let header = first_jsonl_value(&mut reader)?;
+    if header.get("type")?.as_str()? != "session" {
+        return None;
+    }
+
+    let session_id = header.get("id")?.as_str()?.to_string();
+    let cwd = PathBuf::from(header.get("cwd")?.as_str()?);
+    if !cwd.is_absolute() {
+        return None;
+    }
+    let created_at_ms = parse_rfc3339_ms(header.get("timestamp")?.as_str()?)?;
+
+    let mut meta = ScanMeta {
+        session_id,
+        cwd,
+        created_at_ms,
+        updated_at_ms: updated_at_ms.unwrap_or(created_at_ms),
+        name: None,
+        first_user_message: String::new(),
+    };
+
+    for line in reader.lines().map_while(Result::ok) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || !trimmed.starts_with('{') {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+            continue;
+        };
+
+        match value.get("type").and_then(Value::as_str).unwrap_or("") {
+            "session_info" => {
+                meta.name = value
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .filter(|name| !name.trim().is_empty());
+            }
+            "message" => {
+                let Some(message) = value.get("message") else {
+                    continue;
+                };
+                let Some(text) = title_source_from_user_message(message) else {
+                    continue;
+                };
+                if meta.first_user_message.is_empty() && !text.trim().is_empty() {
+                    meta.first_user_message = text;
+                }
+            }
+            _ => {}
+        }
+
+        if !meta.first_user_message.is_empty() && meta.name.is_some() {
+            break;
+        }
+    }
+
+    Some(meta)
 }
 
 fn scanned_session_from_meta(path: PathBuf, meta: ScanMeta) -> ScannedSession {

@@ -192,6 +192,7 @@ impl TuiApp {
         match parse_command(input) {
             Ok(TuiCommand::Open(path)) => self.core.open_project_path(path),
             Ok(TuiCommand::Archive) => self.open_archive_viewer(),
+            Ok(TuiCommand::Cleanup) => self.core.cleanup_archive(),
             Ok(TuiCommand::Refresh) => self.core.run_action(AppAction::RefreshSession),
             Ok(TuiCommand::Reload) => self.core.run_action(AppAction::RefreshAllSessions),
             Ok(TuiCommand::Usage) => self.open_usage_overlay(),
