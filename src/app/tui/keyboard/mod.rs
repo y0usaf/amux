@@ -100,25 +100,57 @@ fn key_stroke_for_kitty_csi_u(bytes: &[u8]) -> Option<KeyStroke> {
     let body = text.strip_prefix("\x1b[")?;
     let params = body.strip_suffix('u')?;
     let mut parts = params.split(';');
-    let key_code = parse_kitty_number(parts.next()?)?;
+    let key_codes = parse_kitty_numbers(parts.next()?)?;
     let mut modifiers = parts
         .next()
         .and_then(parse_kitty_number)
         .and_then(|value| u16::try_from(value).ok())
         .and_then(modifiers_from_csi_param)
         .unwrap_or_default();
-    if char::from_u32(key_code).is_some_and(|ch| ch.is_ascii_uppercase()) {
+    if key_codes
+        .iter()
+        .filter_map(|code| char::from_u32(*code))
+        .any(|ch| ch.is_ascii_uppercase())
+    {
         modifiers.shift = true;
     }
 
-    let key = kitty_key_token(key_code)?;
+    let key = kitty_key_token_from_candidates(&key_codes, modifiers)?;
     Some(KeyStroke { modifiers, key })
 }
 
 fn parse_kitty_number(text: &str) -> Option<u32> {
-    // Kitty can include alternate key/event metadata separated by ':'; the
-    // leading field is the primary codepoint/private-use key code we need.
-    text.split(':').next()?.parse::<u32>().ok()
+    text.parse::<u32>().ok()
+}
+
+fn parse_kitty_numbers(text: &str) -> Option<Vec<u32>> {
+    // Kitty can include alternate key/event metadata separated by ':'. Some
+    // terminals/multiplexers place the control-character text code first and
+    // the physical key's printable code later (for example Ctrl+J as 10:106),
+    // so keep the full candidate list instead of only the first number.
+    let numbers: Option<Vec<u32>> = text.split(':').map(parse_kitty_number).collect();
+    numbers.filter(|values| !values.is_empty())
+}
+
+fn kitty_key_token_from_candidates(key_codes: &[u32], modifiers: KeyModifiers) -> Option<KeyToken> {
+    let primary = *key_codes.first()?;
+    if modifiers.control && is_kitty_control_code(primary) {
+        if let Some(key) = key_codes[1..]
+            .iter()
+            .find_map(|code| match kitty_key_token(*code) {
+                Some(KeyToken::Character(text)) => Some(KeyToken::Character(text)),
+                _ => None,
+            })
+        {
+            return Some(key);
+        }
+    }
+
+    key_codes.iter().find_map(|code| kitty_key_token(*code))
+}
+
+fn is_kitty_control_code(key_code: u32) -> bool {
+    key_code < 0x20 || key_code == 0x7f
 }
 
 fn kitty_key_token(key_code: u32) -> Option<KeyToken> {
@@ -283,7 +315,7 @@ mod tests {
 
     #[test]
     fn kitty_protocol_disambiguates_ctrl_h_and_backspace() {
-        let shift_enter = decode_key_input(b"[13;2u").unwrap();
+        let shift_enter = decode_key_input(b"\x1b[13;2u").unwrap();
         assert_eq!(
             shift_enter.stroke,
             named_key(
@@ -294,7 +326,7 @@ mod tests {
                 },
             )
         );
-        assert_eq!(shift_enter.terminal_bytes, b"[13;2u".to_vec());
+        assert_eq!(shift_enter.terminal_bytes, b"\x1b[13;2u".to_vec());
 
         let ctrl_h = decode_key_input(b"\x1b[104;5u").unwrap();
         assert_eq!(
@@ -328,5 +360,28 @@ mod tests {
             )
         );
         assert_eq!(ctrl_backspace.terminal_bytes, b"\x1b[127;5u".to_vec());
+    }
+
+    #[test]
+    fn kitty_protocol_uses_alternate_printable_codes_for_ctrl_home_row_keys() {
+        for (sequence, key) in [
+            (b"\x1b[8:104;5u".as_slice(), 'h'),
+            (b"\x1b[10:106;5u".as_slice(), 'j'),
+            (b"\x1b[11:107;5u".as_slice(), 'k'),
+            (b"\x1b[12:108;5u".as_slice(), 'l'),
+        ] {
+            let decoded = decode_key_input(sequence).unwrap();
+            assert_eq!(
+                decoded.stroke,
+                char_key(
+                    key,
+                    KeyModifiers {
+                        control: true,
+                        ..KeyModifiers::default()
+                    },
+                )
+            );
+            assert_eq!(decoded.terminal_bytes, sequence.to_vec());
+        }
     }
 }
