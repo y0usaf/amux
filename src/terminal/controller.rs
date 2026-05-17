@@ -45,7 +45,6 @@ pub struct TerminalController {
     rows: u16,
     cols: u16,
     scrollback: usize,
-    max_scrollback: usize,
     selection: TerminalSelection,
 }
 
@@ -64,7 +63,6 @@ impl TerminalController {
             rows: DEFAULT_TERMINAL_ROWS,
             cols: DEFAULT_TERMINAL_COLS,
             scrollback: 0,
-            max_scrollback: 0,
             selection: TerminalSelection::default(),
         }
     }
@@ -82,10 +80,8 @@ impl TerminalController {
         self.stop();
         self.target = target;
         self.scrollback = 0;
-        self.max_scrollback = 0;
         self.selection.clear();
         self.parser = Parser::new(self.rows, self.cols, TERMINAL_SCROLLBACK);
-        self.refresh_max_scrollback();
 
         match self.target.clone() {
             Some(target) => {
@@ -179,7 +175,6 @@ impl TerminalController {
         self.rows = rows;
         self.cols = cols;
         self.parser.screen_mut().set_size(rows, cols);
-        self.refresh_max_scrollback();
         self.clear_selection();
         self.set_scrollback(self.scrollback);
 
@@ -201,13 +196,11 @@ impl TerminalController {
             match process.rx.try_recv() {
                 Ok(HostEvent::Output(bytes)) => {
                     self.parser.process(&bytes);
-                    self.refresh_max_scrollback();
                     self.scrollback = self.parser.screen().scrollback();
                     if self.scrollback == 0 {
                         self.parser.screen_mut().set_scrollback(0);
                     }
                     self.status = TerminalStatus::Running;
-                    self.refresh_max_scrollback();
                     changed = true;
                 }
                 Ok(HostEvent::Exited(status)) => {
@@ -262,7 +255,9 @@ impl TerminalController {
     }
 
     pub fn max_scrollback(&self) -> usize {
-        self.max_scrollback
+        let mut snapshot = self.parser.screen().clone();
+        snapshot.set_scrollback(usize::MAX);
+        snapshot.scrollback()
     }
 
     pub fn begin_selection(&mut self, point: TerminalSelectionPoint) -> bool {
@@ -337,12 +332,6 @@ impl TerminalController {
             self.clear_selection();
         }
         changed
-    }
-
-    fn refresh_max_scrollback(&mut self) {
-        let mut snapshot = self.parser.screen().clone();
-        snapshot.set_scrollback(usize::MAX);
-        self.max_scrollback = snapshot.scrollback();
     }
 
     fn write_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
