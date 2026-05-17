@@ -659,6 +659,7 @@ dependencies = [
  "arboard",
  "chrono",
  "image",
+ "libc",
  "log",
  "portable-pty",
  "serde",

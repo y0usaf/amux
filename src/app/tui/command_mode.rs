@@ -2,7 +2,7 @@ use crate::config::{AppAction, KeyModifiers, KeyStroke, KeyToken, NamedKeyToken}
 
 use super::command::{parse_command, TuiCommand};
 use super::command_line::CommandLineState;
-use super::input::key_stroke_for_bytes;
+use super::keyboard::key_stroke_for_bytes;
 use super::TuiApp;
 
 impl TuiApp {

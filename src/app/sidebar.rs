@@ -1,7 +1,7 @@
 use crate::render::Color;
 use crate::state::{Project, Session};
 
-use super::theme::{HEADING, MUTED, RUNNING, SUCCESS, TEXT, WARNING};
+use super::theme::{ERROR, HEADING, MUTED, RUNNING, SUCCESS, TEXT, WARNING};
 
 pub(super) const SIDEBAR_ANIMATION_FRAME_MS: u64 = 10;
 pub(super) const SIDEBAR_SPINNER_FRAME_TICKS: u64 = 6;
@@ -26,6 +26,7 @@ pub(super) enum SidebarRowKind {
 pub(super) enum SidebarStatusKind {
     Active,
     Queued,
+    Interrupted,
     Notification,
 }
 
@@ -192,6 +193,8 @@ pub(super) fn session_sidebar_status(session: &Session) -> Option<SidebarStatusK
         Some(SidebarStatusKind::Active)
     } else if session.runtime.queued {
         Some(SidebarStatusKind::Queued)
+    } else if session.runtime.interrupted {
+        Some(SidebarStatusKind::Interrupted)
     } else if session.runtime.unread {
         Some(SidebarStatusKind::Notification)
     } else {
@@ -203,6 +206,7 @@ pub(super) fn sidebar_status_color(status: SidebarStatusKind) -> Color {
     match status {
         SidebarStatusKind::Active => RUNNING,
         SidebarStatusKind::Queued => WARNING,
+        SidebarStatusKind::Interrupted => ERROR,
         SidebarStatusKind::Notification => SUCCESS,
     }
 }
@@ -215,7 +219,9 @@ pub(super) fn sidebar_status_glyph(status: SidebarStatusKind, now_ms: u64) -> &'
                 % SIDEBAR_SPINNER_FRAMES.len();
             SIDEBAR_SPINNER_FRAMES[frame]
         }
-        SidebarStatusKind::Notification => SIDEBAR_NOTIFICATION_GLYPH,
+        SidebarStatusKind::Interrupted | SidebarStatusKind::Notification => {
+            SIDEBAR_NOTIFICATION_GLYPH
+        }
     }
 }
 
@@ -223,7 +229,7 @@ fn spinner_phase_offset(status: SidebarStatusKind) -> usize {
     match status {
         SidebarStatusKind::Active => 0,
         SidebarStatusKind::Queued => SIDEBAR_SPINNER_FRAMES.len() / 2,
-        SidebarStatusKind::Notification => 0,
+        SidebarStatusKind::Interrupted | SidebarStatusKind::Notification => 0,
     }
 }
 
@@ -233,6 +239,7 @@ fn project_sidebar_status(project: &Project) -> Option<SidebarStatusKind> {
 
     for session in &project.sessions {
         match session_sidebar_status(session) {
+            Some(SidebarStatusKind::Interrupted) => return Some(SidebarStatusKind::Interrupted),
             Some(SidebarStatusKind::Notification) => return Some(SidebarStatusKind::Notification),
             Some(SidebarStatusKind::Active) => active = true,
             Some(SidebarStatusKind::Queued) => queued = true,
@@ -414,6 +421,7 @@ mod tests {
     fn status_color_maps_each_kind() {
         assert_eq!(sidebar_status_color(SidebarStatusKind::Active), RUNNING);
         assert_eq!(sidebar_status_color(SidebarStatusKind::Queued), WARNING);
+        assert_eq!(sidebar_status_color(SidebarStatusKind::Interrupted), ERROR);
         assert_eq!(
             sidebar_status_color(SidebarStatusKind::Notification),
             SUCCESS

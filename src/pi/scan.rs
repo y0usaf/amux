@@ -19,12 +19,16 @@ pub fn scan_live_sessions(project_path: &Path) -> Vec<ScannedSession> {
     };
 
     let normalized_project_path = normalize_project_path(project_path);
+    let mut normalized_cwds = HashMap::new();
     let mut sessions = Vec::new();
     for path in jsonl_files_in_dir(&dir) {
         let Some(meta) = session_meta_from_path(&path) else {
             continue;
         };
-        if normalize_project_path(&meta.cwd) != normalized_project_path {
+        let normalized_cwd = normalized_cwds
+            .entry(meta.cwd.clone())
+            .or_insert_with(|| normalize_project_path(&meta.cwd));
+        if *normalized_cwd != normalized_project_path {
             continue;
         }
         sessions.push(scanned_session_from_meta(path, meta));
@@ -133,6 +137,7 @@ struct CachedEntry {
     updated_at_ms: u64,
     name: Option<String>,
     first_user_message: String,
+    interrupted: bool,
 }
 
 fn archive_cache_path() -> PathBuf {
@@ -172,6 +177,7 @@ fn meta_to_cached(meta: &ScanMeta) -> CachedEntry {
         updated_at_ms: meta.updated_at_ms,
         name: meta.name.clone(),
         first_user_message: meta.first_user_message.clone(),
+        interrupted: meta.interrupted,
     }
 }
 
@@ -183,6 +189,7 @@ fn cached_to_meta(entry: CachedEntry) -> ScanMeta {
         updated_at_ms: entry.updated_at_ms,
         name: entry.name,
         first_user_message: entry.first_user_message,
+        interrupted: entry.interrupted,
     }
 }
 
@@ -259,6 +266,7 @@ fn session_archived_meta_from_path(path: &Path) -> Option<ScanMeta> {
         updated_at_ms: updated_at_ms.unwrap_or(created_at_ms),
         name: None,
         first_user_message: String::new(),
+        interrupted: false,
     };
 
     for line in reader.lines().map_while(Result::ok) {
@@ -282,6 +290,9 @@ fn session_archived_meta_from_path(path: &Path) -> Option<ScanMeta> {
                 let Some(message) = value.get("message") else {
                     continue;
                 };
+                if let Some(stop_reason) = message_stop_reason(message) {
+                    meta.interrupted = stop_reason == "aborted";
+                }
                 let Some(text) = title_source_from_user_message(message) else {
                     continue;
                 };
@@ -308,6 +319,7 @@ fn scanned_session_from_meta(path: PathBuf, meta: ScanMeta) -> ScannedSession {
         updated_at_ms,
         name,
         first_user_message,
+        interrupted,
     } = meta;
 
     ScannedSession {
@@ -319,6 +331,7 @@ fn scanned_session_from_meta(path: PathBuf, meta: ScanMeta) -> ScannedSession {
         name: name
             .filter(|name| !name.trim().is_empty())
             .unwrap_or_else(|| session_name_from_text(&first_user_message)),
+        interrupted,
     }
 }
 
@@ -338,6 +351,7 @@ struct ScanMeta {
     updated_at_ms: u64,
     name: Option<String>,
     first_user_message: String,
+    interrupted: bool,
 }
 
 fn session_meta_from_path(path: &Path) -> Option<ScanMeta> {
@@ -362,6 +376,7 @@ fn session_meta_from_path(path: &Path) -> Option<ScanMeta> {
         updated_at_ms: created_at_ms,
         name: None,
         first_user_message: String::new(),
+        interrupted: false,
     };
     let mut has_messages = false;
 
@@ -407,6 +422,10 @@ fn session_meta_from_path(path: &Path) -> Option<ScanMeta> {
     }
 
     has_messages.then_some(meta)
+}
+
+fn message_stop_reason(message: &Value) -> Option<&str> {
+    message.get("stopReason").and_then(Value::as_str)
 }
 
 fn title_source_from_user_message(message: &Value) -> Option<String> {

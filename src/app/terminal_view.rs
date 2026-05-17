@@ -3,18 +3,18 @@ use crate::terminal::{terminal_selection_span, TerminalSelectionRange};
 
 use super::theme::screen_cell_colors;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct TerminalCellView {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TerminalCellView<'a> {
     pub(super) row: u16,
     pub(super) col: u16,
     pub(super) span: u16,
-    pub(super) text: String,
+    pub(super) text: &'a str,
     pub(super) fg: Color,
     pub(super) bg: Color,
     pub(super) underline: bool,
 }
 
-pub(super) fn terminal_screen_cells(
+pub(super) fn for_each_terminal_screen_cell<F>(
     screen: &vt100::Screen,
     rows: u16,
     cols: u16,
@@ -23,11 +23,13 @@ pub(super) fn terminal_screen_cells(
     default_bg: Color,
     ansi_palette: &[Color; 16],
     draw_cursor: bool,
-) -> Vec<TerminalCellView> {
+    mut visit: F,
+) where
+    F: FnMut(TerminalCellView<'_>),
+{
     let (screen_rows, screen_cols) = screen.size();
     let (cursor_row, cursor_col) = screen.cursor_position();
     let cursor_visible = draw_cursor && screen.scrollback() == 0 && !screen.hide_cursor();
-    let mut cells = Vec::new();
 
     for row in 0..screen_rows.min(rows) {
         let row_selection = terminal_selection_span(selection, row, screen_cols);
@@ -62,29 +64,20 @@ pub(super) fn terminal_screen_cells(
                 default_bg,
                 ansi_palette,
             );
-            let text = if cell.contents().is_empty() {
-                " ".to_string()
-            } else {
-                cell.contents().to_string()
-            };
 
-            cells.push(TerminalCellView {
+            visit(TerminalCellView {
                 row,
                 col,
                 span,
-                text,
+                text: if cell.contents().is_empty() {
+                    " "
+                } else {
+                    cell.contents()
+                },
                 fg,
                 bg,
                 underline: cell.underline(),
             });
         }
     }
-
-    cells
-}
-
-pub(super) fn terminal_max_scrollback(screen: &vt100::Screen) -> usize {
-    let mut snapshot = screen.clone();
-    snapshot.set_scrollback(usize::MAX);
-    snapshot.scrollback()
 }

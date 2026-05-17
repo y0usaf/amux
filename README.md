@@ -39,7 +39,7 @@ Notes:
 - `Ctrl+Shift+R` → reload Pi sessions from disk
 - `Ctrl+Delete` → archive selected session
 - archive viewer: `↑`/`↓`/`j`/`k` select, `Enter` restores to original project cwd, `r` reloads, `q`/`Esc` closes
-- usage overlay: usage totals table; `r` reloads, `q`/`Esc` closes
+- usage overlay: usage totals table/tree by date/model with per-model costs; `r` reloads, `q`/`Esc` closes
 - `Ctrl+Shift+Delete` / `Ctrl+Shift+D` → remove selected project
 - `Ctrl+Left` / `Ctrl+Right` → prev/next project
 - `Ctrl+Up` / `Ctrl+Down` → prev/next session

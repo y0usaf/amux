@@ -1,5 +1,6 @@
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
@@ -12,14 +13,16 @@ use super::scene::{
     harness_scene_layout, render_harness_scene, HarnessMode, ScenePalette, TerminalCursorMode,
 };
 use super::sidebar::SIDEBAR_ANIMATION_FRAME_MS;
-use super::theme::{DerivedTheme, TerminalPalette};
+use super::theme::{DerivedTheme, TerminalPalette, TRANSPARENT};
 
 mod ansi;
 mod input;
+mod keyboard;
 mod raw;
 
 use ansi::AnsiRenderer;
-use input::{key_stroke_for_bytes, mouse_event_for_bytes};
+use input::mouse_event_for_bytes;
+use keyboard::{decode_key_input, is_ctrl_char};
 use raw::{spawn_stdin_reader, terminal_size, RawTerminal};
 
 const TUI_WHEEL_LINES: i32 = 3;
@@ -35,17 +38,22 @@ enum TuiEvent {
 
 pub fn run(initial_project_paths: Vec<PathBuf>) -> anyhow::Result<()> {
     let (tx, rx) = mpsc::channel();
-    let notify = tui_notify(tx.clone());
-    let mut app = TuiApp::new(notify, initial_project_paths)?;
+    let wake_pending = Arc::new(AtomicBool::new(false));
+    let notify = tui_notify(tx.clone(), wake_pending.clone());
+    let mut app = TuiApp::new(notify, wake_pending, initial_project_paths)?;
     let _raw_terminal = RawTerminal::enter()?;
     app.inherit_terminal_theme();
     spawn_stdin_reader(tx);
     app.run(rx)
 }
 
-fn tui_notify(tx: mpsc::Sender<TuiEvent>) -> Notify {
+fn tui_notify(tx: mpsc::Sender<TuiEvent>, wake_pending: Arc<AtomicBool>) -> Notify {
     Arc::new(move || {
-        let _ = tx.send(TuiEvent::Wake);
+        if !wake_pending.swap(true, Ordering::AcqRel) {
+            if tx.send(TuiEvent::Wake).is_err() {
+                wake_pending.store(false, Ordering::Release);
+            }
+        }
     })
 }
 
@@ -79,10 +87,16 @@ struct TuiApp {
     theme: DerivedTheme,
     terminal_palette: TerminalPalette,
     last_theme_query: Instant,
+    wake_pending: Arc<AtomicBool>,
+    surface: CellSurface,
 }
 
 impl TuiApp {
-    fn new(notify: Notify, initial_project_paths: Vec<PathBuf>) -> anyhow::Result<Self> {
+    fn new(
+        notify: Notify,
+        wake_pending: Arc<AtomicBool>,
+        initial_project_paths: Vec<PathBuf>,
+    ) -> anyhow::Result<Self> {
         let core = HarnessCore::new(notify, initial_project_paths)?;
         let mut app = Self {
             core,
@@ -97,6 +111,13 @@ impl TuiApp {
             theme: DerivedTheme::fallback(),
             terminal_palette: TerminalPalette::fallback(),
             last_theme_query: Instant::now(),
+            wake_pending,
+            surface: CellSurface::new(
+                1,
+                1,
+                DerivedTheme::fallback().text,
+                DerivedTheme::fallback().term_bg,
+            ),
         };
         app.core.sync_terminals();
         Ok(app)
@@ -148,6 +169,7 @@ impl TuiApp {
                 break;
             }
 
+            self.core.flush_pending_persist(false);
             self.maybe_query_terminal_theme();
             let animation_active = self.visible_sidebar_animation_active();
             self.schedule_animation_redraw(animation_active);
@@ -174,6 +196,7 @@ impl TuiApp {
             }
         }
 
+        self.core.flush_pending_persist(true);
         Ok(())
     }
 
@@ -235,7 +258,10 @@ impl TuiApp {
                 self.needs_redraw = true;
                 should_quit
             }
-            TuiEvent::Wake => false,
+            TuiEvent::Wake => {
+                self.wake_pending.store(false, Ordering::Release);
+                false
+            }
         }
     }
 
@@ -255,6 +281,7 @@ impl TuiApp {
         let (cols, rows) = terminal_size();
         let layout = compute_cell_layout(cols, rows, self.core.config.layout_widths());
         let visible_sidebar_rows = sidebar_content_rect(layout.sidebar).rows.max(0) as usize;
+        let mode = self.current_mode();
         let frame_model = self.core.prepare_frame(
             layout.terminal.rows.max(1) as u16,
             layout.terminal.cols.max(1) as u16,
@@ -267,13 +294,14 @@ impl TuiApp {
         palette.muted = theme.muted;
         palette.statusbar_bg = theme.status_bg;
         palette.statusbar_fg = theme.status_fg;
-        let mut surface =
-            CellSurface::new(i32::from(cols), i32::from(rows), palette.fg, palette.bg);
-        surface.fill_rect(
-            Rect::new(0, 0, i32::from(cols), i32::from(rows)),
-            palette.fg,
-            palette.bg,
-        );
+        // Keep the sidebar divider readable by mirroring the host terminal's bg.
+        palette.sidebar_divider = if self.terminal_palette.bg == TRANSPARENT {
+            theme.separator
+        } else {
+            self.terminal_palette.bg.negative()
+        };
+        let mut surface = std::mem::take(&mut self.surface);
+        surface.reset(i32::from(cols), i32::from(rows), palette.fg, palette.bg);
 
         let mut hardware_cursor = render_harness_scene(
             &mut surface,
@@ -282,7 +310,7 @@ impl TuiApp {
             None,
             &palette,
             TerminalCursorMode::Hardware,
-            self.current_mode(),
+            mode,
             crate::util::now_millis(),
         );
         if let Some(command_cursor) = self.render_command_line_overlay(&mut surface, &layout) {
@@ -300,7 +328,7 @@ impl TuiApp {
             render_usage_overlay(&mut surface, usage, &self.theme);
             hardware_cursor = None;
         }
-        renderer.render(stdout, &surface, hardware_cursor)?;
+        self.surface = renderer.render(stdout, surface, hardware_cursor)?;
         Ok(())
     }
 
@@ -348,11 +376,11 @@ impl TuiApp {
             return false;
         }
 
-        if bytes == [0x11] {
+        if is_ctrl_char(bytes, 'q') {
             return true;
         }
 
-        if bytes == [0x07] {
+        if is_ctrl_char(bytes, 'g') {
             self.toggle_help_overlay();
             return false;
         }
@@ -383,13 +411,16 @@ impl TuiApp {
             return false;
         }
 
-        if let Some(stroke) = key_stroke_for_bytes(bytes) {
-            if self.handle_scroll_key(&stroke) {
+        let mut terminal_input_bytes = None;
+        if let Some(key_input) = decode_key_input(bytes) {
+            if self.handle_scroll_key(&key_input.stroke) {
                 return false;
             }
 
-            match self.core.handle_shortcut_stroke(stroke) {
-                ShortcutOutcome::NoMatch => {}
+            match self.core.handle_shortcut_stroke(key_input.stroke) {
+                ShortcutOutcome::NoMatch => {
+                    terminal_input_bytes = Some(key_input.terminal_bytes);
+                }
                 ShortcutOutcome::Pending => return false,
                 ShortcutOutcome::Triggered => return false,
             }
@@ -397,8 +428,9 @@ impl TuiApp {
             self.core.clear_pending_key_chord();
         }
 
+        let terminal_bytes = terminal_input_bytes.as_deref().unwrap_or(bytes);
         self.core
-            .send_bytes_to_current_terminal(bytes, "terminal input");
+            .send_bytes_to_current_terminal(terminal_bytes, "terminal input");
         false
     }
 

@@ -10,6 +10,7 @@ pub struct SessionRuntime {
     pub running: bool,
     pub status: Option<String>,
     pub queued: bool,
+    pub interrupted: bool,
     pub tool_name: Option<String>,
     pub unread: bool,
     pub last_sidecar_ts_ms: u64,
@@ -85,6 +86,7 @@ impl Session {
         self.session_file = Some(scan.session_file);
         self.created_at_ms = self.created_at_ms.min(scan.created_at_ms);
         self.updated_at_ms = self.updated_at_ms.max(scan.updated_at_ms);
+        self.runtime.interrupted = scan.interrupted;
         self.draft = false;
     }
 
@@ -107,6 +109,7 @@ impl Session {
             && self.session_file.is_none()
             && !self.runtime.is_active()
             && self.runtime.status.is_none()
+            && !self.runtime.interrupted
             && !self.runtime.unread
     }
 

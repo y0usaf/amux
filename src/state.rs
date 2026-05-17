@@ -21,7 +21,8 @@ pub use sort::compare_sessions;
 #[cfg(test)]
 mod tests {
     use super::{
-        compare_sessions, merge_scanned_sessions, PersistedState, ScannedSession, Session,
+        compare_sessions, merge_scanned_sessions, PersistedProject, PersistedState, ScannedSession,
+        Session,
     };
 
     #[test]
@@ -127,6 +128,25 @@ mod tests {
     }
 
     #[test]
+    fn empty_projects_stay_empty_when_project_cache_exists() {
+        let mut state = PersistedState {
+            projects: Vec::new(),
+            project_cache: vec![PersistedProject {
+                path: "/tmp/closed-project".into(),
+                sessions: Vec::new(),
+            }],
+            selected_project: Some("/tmp/closed-project".into()),
+            ..PersistedState::default()
+        };
+
+        state.normalize();
+
+        assert!(state.projects.is_empty());
+        assert!(state.project_cache.is_empty());
+        assert_eq!(state.selected_project, None);
+    }
+
+    #[test]
     fn queued_draft_is_not_ephemeral_and_counts_for_activity() {
         let mut session = Session::new_draft();
         session.runtime.queued = true;
@@ -170,6 +190,7 @@ mod tests {
             name: "Imported".into(),
             created_at_ms: 100,
             updated_at_ms: 200,
+            interrupted: false,
         });
 
         assert_eq!(session.name, "Imported");
@@ -192,6 +213,7 @@ mod tests {
             name: "Imported".into(),
             created_at_ms: 100,
             updated_at_ms: 100,
+            interrupted: false,
         });
         session.updated_at_ms = 500;
 
@@ -202,6 +224,7 @@ mod tests {
             name: "Imported".into(),
             created_at_ms: 300,
             updated_at_ms: 200,
+            interrupted: false,
         });
 
         assert_eq!(session.created_at_ms, 100);
@@ -221,6 +244,7 @@ mod tests {
             name: "Imported".into(),
             created_at_ms: 100,
             updated_at_ms: 200,
+            interrupted: false,
         });
 
         assert_eq!(session.name, "Pinned name");
@@ -294,6 +318,7 @@ mod tests {
                 created_at_ms: 100,
                 updated_at_ms: 200,
                 name: "Imported".into(),
+                interrupted: false,
             }],
         );
 
@@ -323,6 +348,7 @@ mod tests {
                     created_at_ms: 100,
                     updated_at_ms: 200,
                     name: "Imported".into(),
+                    interrupted: false,
                 },
                 ScannedSession {
                     session_id: "pi-session-1".into(),
@@ -331,6 +357,7 @@ mod tests {
                     created_at_ms: 100,
                     updated_at_ms: 800,
                     name: "Imported again".into(),
+                    interrupted: false,
                 },
             ],
         );
@@ -408,6 +435,7 @@ mod tests {
             name: "Imported".into(),
             created_at_ms: 700,
             updated_at_ms: 200,
+            interrupted: false,
         });
 
         assert_eq!(session.created_at_ms, 100);

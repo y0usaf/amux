@@ -1,11 +1,14 @@
 use crate::config::{KeyModifiers, KeyToken, NamedKeyToken};
 
-use super::input::{key_stroke_for_bytes, mouse_event_for_bytes, MouseEventKind, WheelDirection};
+use super::input::{mouse_event_for_bytes, MouseEventKind, WheelDirection};
+use super::keyboard::key_stroke_for_bytes;
 use super::overlays::archive::{archive_viewer_visible_rows_for_terminal, ArchiveViewerState};
 use super::overlays::help::{
     help_overlay_lines, help_overlay_visible_rows_for_terminal, HelpOverlayState,
 };
-use super::overlays::usage::{usage_overlay_visible_rows_for_terminal, UsageOverlayState};
+use super::overlays::usage::{
+    usage_overlay_line_count, usage_overlay_visible_rows_for_terminal, UsageOverlayState,
+};
 use super::{TuiApp, TUI_WHEEL_LINES};
 
 impl TuiApp {
@@ -187,7 +190,8 @@ impl TuiApp {
     pub(super) fn set_usage_scroll(&mut self, scroll: usize) {
         if let Some(usage) = &mut self.usage_overlay {
             let visible_rows = usage_overlay_visible_rows_for_terminal().max(1);
-            usage.scroll = scroll.min(usage.report.days.len().saturating_sub(visible_rows));
+            usage.scroll =
+                scroll.min(usage_overlay_line_count(&usage.report).saturating_sub(visible_rows));
         }
     }
 

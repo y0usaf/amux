@@ -17,8 +17,10 @@ pub(super) struct Cell {
 
 impl Cell {
     fn blank(fg: Color, bg: Color) -> Self {
+        let mut text = String::with_capacity(1);
+        text.push(' ');
         Self {
-            text: " ".to_string(),
+            text,
             fg,
             bg,
             bold: false,
@@ -26,6 +28,34 @@ impl Cell {
             reverse: false,
             continuation: false,
         }
+    }
+
+    fn reset(&mut self, fg: Color, bg: Color) {
+        self.update(" ", fg, bg, false, false, false, false);
+    }
+
+    fn update(
+        &mut self,
+        text: &str,
+        fg: Color,
+        bg: Color,
+        bold: bool,
+        underline: bool,
+        reverse: bool,
+        continuation: bool,
+    ) {
+        self.text.clear();
+        if text.is_empty() {
+            self.text.push(' ');
+        } else {
+            self.text.push_str(text);
+        }
+        self.fg = fg;
+        self.bg = bg;
+        self.bold = bold;
+        self.underline = underline;
+        self.reverse = reverse;
+        self.continuation = continuation;
     }
 }
 
@@ -36,6 +66,12 @@ pub(super) struct CellSurface {
     pub(super) cells: Vec<Cell>,
 }
 
+impl Default for CellSurface {
+    fn default() -> Self {
+        Self::new(1, 1, Color::default(), Color::default())
+    }
+}
+
 impl CellSurface {
     pub(super) fn new(cols: i32, rows: i32, fg: Color, bg: Color) -> Self {
         let cols = cols.max(1);
@@ -44,6 +80,25 @@ impl CellSurface {
             cols,
             rows,
             cells: vec![Cell::blank(fg, bg); (cols * rows) as usize],
+        }
+    }
+
+    pub(super) fn reset(&mut self, cols: i32, rows: i32, fg: Color, bg: Color) {
+        let cols = cols.max(1);
+        let rows = rows.max(1);
+        let len = (cols * rows) as usize;
+        self.cols = cols;
+        self.rows = rows;
+        if self.cells.len() < len {
+            self.cells.reserve(len - self.cells.len());
+            while self.cells.len() < len {
+                self.cells.push(Cell::blank(fg, bg));
+            }
+        } else {
+            self.cells.truncate(len);
+        }
+        for cell in &mut self.cells {
+            cell.reset(fg, bg);
         }
     }
 
@@ -63,10 +118,10 @@ impl CellSurface {
         let col0 = rect.col.max(0);
         let col1 = (rect.col + rect.cols).min(self.cols).max(col0);
         for row in row0..row1 {
-            for col in col0..col1 {
-                if let Some(cell) = self.cell_mut(col, row) {
-                    *cell = Cell::blank(fg, bg);
-                }
+            let start = (row * self.cols + col0) as usize;
+            let end = (row * self.cols + col1) as usize;
+            for cell in &mut self.cells[start..end] {
+                cell.reset(fg, bg);
             }
         }
     }
@@ -94,15 +149,8 @@ impl CellSurface {
         reverse: bool,
     ) {
         if let Some(cell) = self.cell_mut(col, row) {
-            *cell = Cell {
-                text: text.into(),
-                fg,
-                bg,
-                bold: false,
-                underline,
-                reverse,
-                continuation: false,
-            };
+            let text = text.into();
+            cell.update(&text, fg, bg, false, underline, reverse, false);
         }
     }
 
@@ -147,23 +195,8 @@ impl CellSurface {
         let span = span.max(1);
         for offset in 0..span {
             if let Some(cell) = self.cell_mut(col + offset, row) {
-                *cell = Cell {
-                    text: if offset == 0 {
-                        if text.is_empty() {
-                            " ".to_string()
-                        } else {
-                            text.to_string()
-                        }
-                    } else {
-                        " ".to_string()
-                    },
-                    fg,
-                    bg,
-                    bold: false,
-                    underline,
-                    reverse,
-                    continuation: offset > 0,
-                };
+                let value = if offset == 0 { text } else { " " };
+                cell.update(value, fg, bg, false, underline, reverse, offset > 0);
             }
         }
     }

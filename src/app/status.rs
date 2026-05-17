@@ -23,6 +23,9 @@ pub(super) fn status_text_for_session(
             }
             return status;
         }
+        if session.runtime.interrupted {
+            return "interrupted".to_string();
+        }
         if session.draft {
             return "new session".to_string();
         }
@@ -73,6 +76,18 @@ mod tests {
         assert_eq!(
             status_text_for_session(true, Some(&session), None),
             "tool · grep"
+        );
+    }
+
+    #[test]
+    fn status_text_reports_interrupted_session() {
+        let mut session = Session::new_draft();
+        session.draft = false;
+        session.runtime.interrupted = true;
+
+        assert_eq!(
+            status_text_for_session(true, Some(&session), None),
+            "interrupted"
         );
     }
 

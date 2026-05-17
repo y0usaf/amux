@@ -382,6 +382,15 @@ mod tests {
     }
 
     #[test]
+    fn negative_color_inverts_rgb_channels_and_leaves_ansi_values_alone() {
+        assert_eq!(
+            Color::rgb(0x12, 0x34, 0x56).negative(),
+            Color::rgb(0xed, 0xcb, 0xa9)
+        );
+        assert_eq!(Color::ansi_index(12).negative(), Color::ansi_index(12));
+    }
+
+    #[test]
     fn terminal_cell_colors_apply_selection_and_cursor_after_style_processing() {
         let bold_dim_inverse = cell_from_bytes(b"\x1b[1;2;7mX");
         let term_bg = Color::rgb(10, 13, 18);

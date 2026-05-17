@@ -10,12 +10,11 @@ use super::sidebar::{
     sidebar_status_glyph, SidebarRow, SidebarRowKind, SidebarStatusKind, SidebarViewportItem,
     SIDEBAR_ANIMATION_FRAME_MS,
 };
-use super::terminal_view::{terminal_max_scrollback, terminal_screen_cells};
+use super::terminal_view::for_each_terminal_screen_cell;
 use super::theme::{self, DerivedTheme};
 const STATUSLINE_MODE_LABEL_WIDTH: i32 = 9;
 const SCROLLBAR_TRACK_GLYPH: &str = "│";
 const SCROLLBAR_THUMB_GLYPH: &str = "┃";
-const SIDEBAR_SCROLLBAR_TRACK_FG: Color = Color::rgb(0, 0, 0);
 const STATUS_SEPARATOR_GLYPH: &str = "│";
 const STATUS_RULE_GLYPH: &str = "╱";
 const STATUS_NOTE_OK_FG: Color = Color::rgb(0, 0, 0);
@@ -30,6 +29,7 @@ pub(super) struct ScenePalette {
     pub(super) statusbar_bg: Color,
     pub(super) statusbar_fg: Color,
     pub(super) sidebar_bg: Color,
+    pub(super) sidebar_divider: Color,
     pub(super) border: Color,
     pub(super) muted: Color,
     pub(super) term_fg: Color,
@@ -55,6 +55,7 @@ impl ScenePalette {
             statusbar_fg: theme.status_fg,
             statusbar_bg: theme.status_bg,
             sidebar_bg: theme.sidebar_bg,
+            sidebar_divider: theme.separator,
             border: theme.border,
             muted: theme.muted,
             term_fg: theme.term_fg,
@@ -152,7 +153,7 @@ pub(super) fn harness_scene_layout(layout: &CellLayout) -> HarnessSceneLayout {
 pub(super) fn render_harness_scene(
     surface: &mut CellSurface,
     layout: HarnessSceneLayout,
-    frame_model: &FrameModel,
+    frame_model: &FrameModel<'_>,
     hovered_sidebar_row: Option<usize>,
     palette: &ScenePalette,
     cursor_mode: TerminalCursorMode,
@@ -174,8 +175,9 @@ pub(super) fn render_harness_scene(
     let cursor = render_terminal(
         surface,
         layout.terminal,
-        &frame_model.terminal_screen,
+        frame_model.terminal_screen,
         frame_model.terminal_selection,
+        frame_model.terminal_max_scrollback,
         palette,
         cursor_mode,
     );
@@ -368,7 +370,7 @@ fn render_statusbar_sidebar_segment(
     surface.set_cell(
         separator_col,
         row,
-        SIDEBAR_SCROLLBAR_TRACK_FG,
+        palette.sidebar_divider,
         status_bg,
         STATUS_SEPARATOR_GLYPH,
         false,
@@ -463,7 +465,7 @@ fn statusline_status_symbol(status: &str) -> &'static str {
         "thinking" => "⋯",
         "outputting" => "⟡",
         "running" | "launching" => "●",
-        "error" => "×",
+        "error" | "interrupted" => "×",
         "exited" => "◌",
         _ if status.starts_with("tool") => "⚙",
         _ if status.contains("queued") => "▶",
@@ -474,7 +476,7 @@ fn statusline_status_symbol(status: &str) -> &'static str {
 fn statusline_status_color(status: &str, palette: &ScenePalette) -> Color {
     match status {
         "thinking" | "outputting" | "running" | "launching" => palette.running,
-        "error" => palette.error,
+        "error" | "interrupted" => palette.error,
         "exited" => palette.warning,
         _ if status.starts_with("tool") => palette.running,
         _ if status.contains("queued") => palette.warning,
@@ -518,7 +520,7 @@ pub(super) fn render_sidebar(
             surface.set_cell(
                 scrollbar_col,
                 content.row + offset,
-                SIDEBAR_SCROLLBAR_TRACK_FG,
+                palette.sidebar_divider,
                 palette.sidebar_bg,
                 SCROLLBAR_TRACK_GLYPH,
                 false,
@@ -533,7 +535,7 @@ pub(super) fn render_sidebar(
                 visible_rows,
                 rows.len(),
                 viewport_scroll_from_rows(viewport),
-                SIDEBAR_SCROLLBAR_TRACK_FG,
+                palette.sidebar_divider,
                 palette.sidebar_bg,
                 SCROLLBAR_TRACK_GLYPH,
                 palette.accent_2,
@@ -640,8 +642,11 @@ pub(super) fn render_sidebar(
                         palette,
                     );
                 } else {
-                    let title_fg = if matches!(row.status, Some(SidebarStatusKind::Notification)) {
-                        sidebar_status_color_for_palette(SidebarStatusKind::Notification, palette)
+                    let title_fg = if matches!(
+                        row.status,
+                        Some(SidebarStatusKind::Interrupted | SidebarStatusKind::Notification)
+                    ) {
+                        sidebar_status_color_for_palette(row.status.unwrap(), palette)
                     } else {
                         row_fg
                     };
@@ -915,7 +920,7 @@ fn sidebar_project_rule_fg(
         return label_fg;
     }
     match status {
-        Some(SidebarStatusKind::Notification) => label_fg,
+        Some(SidebarStatusKind::Interrupted | SidebarStatusKind::Notification) => label_fg,
         Some(SidebarStatusKind::Active | SidebarStatusKind::Queued) => idle_project_fg,
         None if current_project => palette.statusbar_fg,
         None => palette.border,
@@ -930,14 +935,14 @@ fn animated_sidebar_status_color(
 ) -> Color {
     let base = sidebar_status_color_for_palette(status, palette);
     match status {
-        SidebarStatusKind::Notification => base,
+        SidebarStatusKind::Interrupted | SidebarStatusKind::Notification => base,
         SidebarStatusKind::Active | SidebarStatusKind::Queued => {
             let phase = ((now_ms / SIDEBAR_ANIMATION_FRAME_MS) as usize + slot) % 24;
             let intensity = if phase < 12 { phase } else { 24 - phase };
             let peak = match status {
                 SidebarStatusKind::Active => palette.accent_2,
                 SidebarStatusKind::Queued => palette.accent,
-                SidebarStatusKind::Notification => base,
+                SidebarStatusKind::Interrupted | SidebarStatusKind::Notification => base,
             };
             theme::fade_toward(base, peak, (intensity * 10).min(180) as u8)
         }
@@ -948,6 +953,7 @@ fn sidebar_status_color_for_palette(status: SidebarStatusKind, palette: &ScenePa
     match status {
         SidebarStatusKind::Active => palette.running,
         SidebarStatusKind::Queued => palette.warning,
+        SidebarStatusKind::Interrupted => palette.error,
         SidebarStatusKind::Notification => palette.success,
     }
 }
@@ -1011,8 +1017,9 @@ fn palette_color(color: Color, palette: &ScenePalette) -> Color {
 pub(super) fn render_terminal(
     surface: &mut CellSurface,
     layout: TerminalSceneLayout,
-    screen: &vt100::Screen,
+    screen: Option<&vt100::Screen>,
     selection: Option<TerminalSelectionRange>,
+    max_scrollback: usize,
     palette: &ScenePalette,
     cursor_mode: TerminalCursorMode,
 ) -> Option<HardwareCursor> {
@@ -1020,6 +1027,9 @@ pub(super) fn render_terminal(
     if layout.terminal.rows <= 0 || layout.terminal.cols <= 0 {
         return None;
     }
+    let Some(screen) = screen else {
+        return None;
+    };
 
     blit_terminal_screen(
         surface,
@@ -1029,7 +1039,7 @@ pub(super) fn render_terminal(
         palette,
         cursor_mode == TerminalCursorMode::Cell,
     );
-    render_terminal_scrollback(surface, layout, screen, palette);
+    render_terminal_scrollback(surface, layout, screen, max_scrollback, palette);
 
     match cursor_mode {
         TerminalCursorMode::Hardware => hardware_cursor_for_screen(layout.terminal, screen),
@@ -1045,7 +1055,7 @@ fn blit_terminal_screen(
     palette: &ScenePalette,
     draw_cursor: bool,
 ) {
-    for cell in terminal_screen_cells(
+    for_each_terminal_screen_cell(
         screen,
         rect.rows.max(0) as u16,
         rect.cols.max(0) as u16,
@@ -1054,27 +1064,28 @@ fn blit_terminal_screen(
         palette.term_bg,
         &palette.ansi,
         draw_cursor,
-    ) {
-        surface.put_cell_span(
-            rect.col + i32::from(cell.col),
-            rect.row + i32::from(cell.row),
-            i32::from(cell.span),
-            &cell.text,
-            cell.fg,
-            cell.bg,
-            cell.underline,
-        );
-    }
+        |cell| {
+            surface.put_cell_span(
+                rect.col + i32::from(cell.col),
+                rect.row + i32::from(cell.row),
+                i32::from(cell.span),
+                cell.text,
+                cell.fg,
+                cell.bg,
+                cell.underline,
+            );
+        },
+    );
 }
 
 fn render_terminal_scrollback(
     surface: &mut CellSurface,
     layout: TerminalSceneLayout,
     screen: &vt100::Screen,
+    max_scroll: usize,
     palette: &ScenePalette,
 ) {
     let visible_rows = usize::from(screen.size().0);
-    let max_scroll = terminal_max_scrollback(screen);
     if visible_rows == 0 || max_scroll == 0 || layout.terminal.rows <= 0 {
         return;
     }

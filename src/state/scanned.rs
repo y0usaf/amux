@@ -8,4 +8,5 @@ pub struct ScannedSession {
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
     pub name: String,
+    pub interrupted: bool,
 }

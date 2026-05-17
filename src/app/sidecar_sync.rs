@@ -27,6 +27,7 @@ mod tests {
             session_name: Some("Imported session".into()),
             stage,
             queued: false,
+            interrupted: false,
             tool_name: None,
             ts_ms,
         }
@@ -44,6 +45,7 @@ mod tests {
             session_name: None,
             stage: crate::pi::PiSessionStage::Idle,
             queued: false,
+            interrupted: false,
             tool_name: None,
             ts_ms: 0,
         };
@@ -62,9 +64,19 @@ mod tests {
             session_name: None,
             stage: crate::pi::PiSessionStage::Tool,
             queued: false,
+            interrupted: false,
             tool_name: Some("grep".into()),
             ts_ms: 0,
         };
+
+        assert!(should_bind_sidecar_session(&session, &snapshot));
+    }
+
+    #[test]
+    fn interrupted_snapshot_binds_new_session() {
+        let session = Session::new_draft();
+        let mut snapshot = snapshot(crate::pi::PiSessionStage::Idle, 150);
+        snapshot.interrupted = true;
 
         assert!(should_bind_sidecar_session(&session, &snapshot));
     }
@@ -81,6 +93,7 @@ mod tests {
             session_name: None,
             stage: crate::pi::PiSessionStage::Idle,
             queued: false,
+            interrupted: false,
             tool_name: None,
             ts_ms: 0,
         };
@@ -160,6 +173,19 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_snapshot_sets_runtime_flag() {
+        let mut session = Session::new_draft();
+        session.local_id = "local-session-1".into();
+
+        let mut next = snapshot(crate::pi::PiSessionStage::Idle, 150);
+        next.interrupted = true;
+        apply_snapshot_to_session(&mut session, &next, false, 250);
+
+        assert!(session.runtime.interrupted);
+        assert_eq!(session.runtime.status, None);
+    }
+
+    #[test]
     fn stale_snapshot_does_not_regress_runtime_state() {
         let mut session = Session::new_draft();
         session.local_id = "local-session-1".into();
@@ -174,6 +200,7 @@ mod tests {
             SidecarApplyResult {
                 reordered: true,
                 promote_project: true,
+                identity_changed: true,
             }
         );
         assert!(session.runtime.running);
@@ -216,6 +243,7 @@ mod tests {
             SidecarApplyResult {
                 reordered: true,
                 promote_project: false,
+                identity_changed: false,
             }
         );
         assert!(!session.runtime.running);
@@ -246,6 +274,7 @@ mod tests {
             SidecarApplyResult {
                 reordered: true,
                 promote_project: false,
+                identity_changed: false,
             }
         );
         assert!(!session.runtime.running);
@@ -297,6 +326,7 @@ mod tests {
             SidecarApplyResult {
                 reordered: true,
                 promote_project: true,
+                identity_changed: true,
             }
         );
         assert_eq!(session.pi_session_id.as_deref(), Some("pi-session-1"));
@@ -347,6 +377,7 @@ mod tests {
             SidecarApplyResult {
                 reordered: true,
                 promote_project: false,
+                identity_changed: false,
             }
         );
         assert!(!session.runtime.running);
@@ -414,6 +445,7 @@ mod tests {
                 session_name: Some("Imported session".into()),
                 stage: crate::pi::PiSessionStage::Idle,
                 queued: true,
+                interrupted: false,
                 tool_name: None,
                 ts_ms: 150,
             },

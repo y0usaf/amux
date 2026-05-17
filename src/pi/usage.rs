@@ -1,7 +1,9 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 
 use chrono::{DateTime, Local, TimeZone};
 use serde_json::Value;
@@ -64,11 +66,29 @@ pub struct PiUsageReport {
 
 #[derive(Clone, Debug, PartialEq)]
 struct UsageEntry {
-    timestamp: String,
+    timestamp_ms: i64,
     date: String,
     model: Option<String>,
     totals: PiUsageTotals,
     total_tokens_for_dedupe: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FileCacheKey {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+#[derive(Clone)]
+struct CachedUsageEntries {
+    key: FileCacheKey,
+    entries: Arc<[UsageEntry]>,
+}
+
+static USAGE_ENTRIES_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedUsageEntries>>> = OnceLock::new();
+
+fn usage_entries_cache() -> &'static Mutex<HashMap<PathBuf, CachedUsageEntries>> {
+    USAGE_ENTRIES_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[derive(Default)]
@@ -101,9 +121,9 @@ pub fn load_usage_report_from_path(path: &Path) -> PiUsageReport {
     let mut by_day = BTreeMap::<String, DayAccumulator>::new();
 
     for file in files {
-        for entry in usage_entries_from_file(&file) {
-            let hash = format!("pi:{}:{}", entry.timestamp, entry.total_tokens_for_dedupe);
-            if !processed_hashes.insert(hash) {
+        let entries = usage_entries_from_file(&file);
+        for entry in entries.iter() {
+            if !processed_hashes.insert((entry.timestamp_ms, entry.total_tokens_for_dedupe)) {
                 report.skipped_duplicates = report.skipped_duplicates.saturating_add(1);
                 continue;
             }
@@ -111,9 +131,9 @@ pub fn load_usage_report_from_path(path: &Path) -> PiUsageReport {
             report.entries = report.entries.saturating_add(1);
             report.totals.add(&entry.totals);
 
-            let day = by_day.entry(entry.date).or_default();
+            let day = by_day.entry(entry.date.clone()).or_default();
             day.totals.add(&entry.totals);
-            let model_name = entry.model.unwrap_or_else(|| "unknown".to_string());
+            let model_name = entry.model.clone().unwrap_or_else(|| "unknown".to_string());
             day.models.entry(model_name).or_default().add(&entry.totals);
         }
     }
@@ -145,9 +165,10 @@ pub fn load_usage_report_from_path(path: &Path) -> PiUsageReport {
 
 fn default_usage_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os(PI_AGENT_DIR_ENV) {
-        let path = path.to_string_lossy().trim().to_string();
-        if !path.is_empty() {
-            let resolved = resolve_path(Path::new(&path));
+        let value = path.to_string_lossy();
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let resolved = resolve_path(Path::new(trimmed));
             if resolved.is_dir() {
                 return Some(resolved);
             }
@@ -188,7 +209,46 @@ fn collect_jsonl_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-fn usage_entries_from_file(path: &Path) -> Vec<UsageEntry> {
+fn file_cache_key(path: &Path) -> Option<FileCacheKey> {
+    let metadata = fs::metadata(path).ok()?;
+    Some(FileCacheKey {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+    })
+}
+
+fn usage_entries_from_file(path: &Path) -> Arc<[UsageEntry]> {
+    let cache_key = file_cache_key(path);
+    if let Some(cache_key) = cache_key.as_ref() {
+        if let Some(cached) = usage_entries_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(path)
+            .filter(|cached| cached.key == *cache_key)
+            .cloned()
+        {
+            return cached.entries;
+        }
+    }
+
+    let entries = parse_usage_entries_from_file(path);
+    let entries: Arc<[UsageEntry]> = entries.into();
+    if let Some(cache_key) = cache_key {
+        usage_entries_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                path.to_path_buf(),
+                CachedUsageEntries {
+                    key: cache_key,
+                    entries: entries.clone(),
+                },
+            );
+    }
+    entries
+}
+
+fn parse_usage_entries_from_file(path: &Path) -> Vec<UsageEntry> {
     let Ok(file) = fs::File::open(path) else {
         return Vec::new();
     };
@@ -225,7 +285,12 @@ fn usage_entry_from_value_in_timezone<Tz: TimeZone>(
     }
 
     let timestamp = value.get("timestamp")?.as_str()?;
-    let date = date_key_from_timestamp_in_timezone(timestamp, time_zone)?;
+    let date_time = DateTime::parse_from_rfc3339(timestamp).ok()?;
+    let date = date_time
+        .with_timezone(time_zone)
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
     let message = value.get("message")?;
     if message.get("role").and_then(Value::as_str) != Some("assistant") {
         return None;
@@ -253,10 +318,10 @@ fn usage_entry_from_value_in_timezone<Tz: TimeZone>(
     let model = message
         .get("model")
         .and_then(Value::as_str)
-        .map(|model| format!("[pi] {model}"));
+        .map(str::to_string);
 
     Some(UsageEntry {
-        timestamp: timestamp.to_string(),
+        timestamp_ms: date_time.timestamp_millis(),
         date,
         model,
         totals: PiUsageTotals {
@@ -283,20 +348,6 @@ fn number_as_u64(value: &Value) -> Option<u64> {
                     .then_some(number as u64)
             })
         })
-}
-
-fn date_key_from_timestamp_in_timezone<Tz: TimeZone>(
-    timestamp: &str,
-    time_zone: &Tz,
-) -> Option<String> {
-    let date_time = DateTime::parse_from_rfc3339(timestamp).ok()?;
-    Some(
-        date_time
-            .with_timezone(time_zone)
-            .date_naive()
-            .format("%Y-%m-%d")
-            .to_string(),
-    )
 }
 
 #[cfg(test)]
@@ -356,7 +407,7 @@ mod tests {
         let entry = usage_entry_from_value_in_timezone(&value, &utc).unwrap();
 
         assert_eq!(entry.date, "2026-01-01");
-        assert_eq!(entry.model.as_deref(), Some("[pi] claude-opus-4-5"));
+        assert_eq!(entry.model.as_deref(), Some("claude-opus-4-5"));
         assert_eq!(entry.totals.input_tokens, 100);
         assert_eq!(entry.totals.output_tokens, 50);
         assert_eq!(entry.totals.cache_read_tokens, 10);
@@ -448,7 +499,7 @@ mod tests {
         assert!((report.totals.total_cost - 0.06).abs() < f64::EPSILON);
         assert_eq!(report.days.len(), 2);
         assert!(report.days[0].date > report.days[1].date);
-        assert_eq!(report.days[0].models_used, vec!["[pi] claude-sonnet-4"]);
-        assert_eq!(report.days[1].models_used, vec!["[pi] claude-opus-4-5"]);
+        assert_eq!(report.days[0].models_used, vec!["claude-sonnet-4"]);
+        assert_eq!(report.days[1].models_used, vec!["claude-opus-4-5"]);
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use arboard::Clipboard;
@@ -23,7 +24,7 @@ use super::clipboard_image::{clipboard_image_path, clipboard_image_path_from_arb
 use super::layout::CellRect;
 use super::sidebar::{
     build_sidebar_rows, clamp_sidebar_scroll_value, ensure_sidebar_selection_visible_for_state,
-    scroll_sidebar_by_rows_value, selected_sidebar_selection_span_for_state, sidebar_has_spinner,
+    scroll_sidebar_by_rows_value, selected_sidebar_selection_span_for_state,
     sidebar_viewport_items, sticky_sidebar_anchor_row, SidebarRow, SidebarRowKind,
     SidebarSelectionSpan, SidebarStatusKind, SidebarViewportItem,
 };
@@ -59,6 +60,91 @@ struct StatusNote {
     expires_at_ms: u64,
 }
 
+#[derive(Default)]
+struct SessionLocator {
+    by_harness_session_id: HashMap<String, (usize, usize)>,
+    by_pi_session_id: HashMap<String, (usize, usize)>,
+    by_session_file: HashMap<PathBuf, (usize, usize)>,
+}
+
+impl SessionLocator {
+    fn rebuild(projects: &[Project]) -> Self {
+        let mut locator = Self::default();
+        for (project_index, project) in projects.iter().enumerate() {
+            for (session_index, session) in project.sessions.iter().enumerate() {
+                let location = (project_index, session_index);
+                locator
+                    .by_harness_session_id
+                    .entry(session.local_id.clone())
+                    .or_insert(location);
+                if let Some(pi_session_id) = session.pi_session_id.as_ref() {
+                    locator
+                        .by_pi_session_id
+                        .entry(pi_session_id.clone())
+                        .or_insert(location);
+                }
+                if let Some(session_file) = session.session_file.as_ref() {
+                    locator
+                        .by_session_file
+                        .entry(session_file.clone())
+                        .or_insert(location);
+                }
+            }
+        }
+        locator
+    }
+
+    fn locate(&self, snapshot: &PiSidecarSnapshot) -> Option<(usize, usize)> {
+        let mut matched = None;
+        if let Some(harness_session_id) = snapshot.harness_session_id.as_ref() {
+            matched = earliest_session_location(
+                matched,
+                self.by_harness_session_id.get(harness_session_id).copied(),
+            );
+        }
+        matched = earliest_session_location(
+            matched,
+            self.by_pi_session_id.get(&snapshot.session_id).copied(),
+        );
+        if let Some(session_file) = snapshot.session_file.as_ref() {
+            matched =
+                earliest_session_location(matched, self.by_session_file.get(session_file).copied());
+        }
+        matched
+    }
+
+    fn refresh_session(
+        &mut self,
+        project_index: usize,
+        session_index: usize,
+        session: &Session,
+        prev_pi_session_id: Option<String>,
+        prev_session_file: Option<PathBuf>,
+    ) {
+        let location = (project_index, session_index);
+        self.by_harness_session_id
+            .insert(session.local_id.clone(), location);
+
+        if let Some(prev_pi_session_id) = prev_pi_session_id.as_ref() {
+            if self.by_pi_session_id.get(prev_pi_session_id) == Some(&location) {
+                self.by_pi_session_id.remove(prev_pi_session_id);
+            }
+        }
+        if let Some(prev_session_file) = prev_session_file.as_ref() {
+            if self.by_session_file.get(prev_session_file) == Some(&location) {
+                self.by_session_file.remove(prev_session_file);
+            }
+        }
+        if let Some(pi_session_id) = session.pi_session_id.as_ref() {
+            self.by_pi_session_id
+                .insert(pi_session_id.clone(), location);
+        }
+        if let Some(session_file) = session.session_file.as_ref() {
+            self.by_session_file.insert(session_file.clone(), location);
+        }
+    }
+}
+
 impl StatusNote {
     fn new(text: String, kind: StatusNoteKind) -> Self {
         Self {
@@ -83,6 +169,7 @@ pub(super) struct HarnessCore {
     sidebar_scroll: usize,
     sidebar_sync_to_selection: bool,
     terminal_selection_in_progress: bool,
+    terminals_dirty: bool,
     clipboard: Option<Clipboard>,
     note: Option<StatusNote>,
 }
@@ -108,6 +195,7 @@ impl HarnessCore {
             sidebar_scroll: 0,
             sidebar_sync_to_selection: true,
             terminal_selection_in_progress: false,
+            terminals_dirty: true,
             clipboard: None,
             note: None,
         };
@@ -119,12 +207,25 @@ impl HarnessCore {
     }
 }
 
-pub(super) struct FrameModel {
+fn earliest_session_location(
+    current: Option<(usize, usize)>,
+    next: Option<(usize, usize)>,
+) -> Option<(usize, usize)> {
+    match (current, next) {
+        (Some(current), Some(next)) => Some(current.min(next)),
+        (Some(current), None) => Some(current),
+        (None, Some(next)) => Some(next),
+        (None, None) => None,
+    }
+}
+
+pub(super) struct FrameModel<'a> {
     pub(super) chrome: ChromeView,
     pub(super) sidebar_rows: Vec<SidebarRow>,
     pub(super) sidebar_viewport: Vec<SidebarViewportItem>,
-    pub(super) terminal_screen: vt100::Screen,
+    pub(super) terminal_screen: Option<&'a vt100::Screen>,
     pub(super) terminal_selection: Option<TerminalSelectionRange>,
+    pub(super) terminal_max_scrollback: usize,
 }
 
 #[cfg(test)]
@@ -211,6 +312,10 @@ impl HarnessCore {
 
     pub(super) fn persist_selection(&mut self) {
         self.workspace.persist_selection();
+    }
+
+    pub(super) fn flush_pending_persist(&mut self, force: bool) {
+        self.workspace.flush_persisted_state(force);
     }
 
     pub(super) fn chrome_view(&self) -> ChromeView {
@@ -355,10 +460,6 @@ impl HarnessCore {
         self.terminal_manager.resize_all(rows.max(1), cols.max(1));
     }
 
-    pub(super) fn remove_terminal_for_session_id(&mut self, session_id: &str) {
-        self.terminal_manager.remove(session_id);
-    }
-
     pub(super) fn restart_terminal_for_session(
         &mut self,
         project_index: usize,
@@ -393,37 +494,55 @@ impl HarnessCore {
     }
 
     pub(super) fn sync_terminals(&mut self) {
-        let selected_session_id = self
-            .current_session()
-            .map(|session| session.local_id.clone());
-        let projects = self.workspace.projects().to_vec();
-        let errors = self
-            .terminal_manager
-            .sync(&projects, selected_session_id.as_deref());
+        let errors = {
+            let (workspace, terminal_manager) = (&self.workspace, &mut self.terminal_manager);
+            let selected_session_id = workspace
+                .current_session()
+                .map(|session| session.local_id.as_str());
+            terminal_manager.sync(workspace.projects(), selected_session_id)
+        };
+        self.terminals_dirty = false;
         for error in errors {
             self.set_note_text(error);
         }
     }
 
+    fn mark_terminals_dirty(&mut self) {
+        self.terminals_dirty = true;
+    }
+
+    fn ensure_terminals_synced(&mut self) {
+        if self.terminals_dirty {
+            self.sync_terminals();
+        }
+    }
+
     pub(super) fn drain_terminal_events(&mut self) -> bool {
-        let selected_session_id = self
+        let (workspace, terminal_manager) = (&self.workspace, &mut self.terminal_manager);
+        let selected_session_id = workspace
             .current_session()
-            .map(|session| session.local_id.clone());
-        self.terminal_manager
-            .drain_events(selected_session_id.as_deref())
+            .map(|session| session.local_id.as_str());
+        terminal_manager.drain_events(selected_session_id)
     }
 
     pub(super) fn selection_changed(&mut self) {
+        let selected_session_id = self
+            .workspace
+            .current_session()
+            .map(|session| session.local_id.as_str());
+        self.terminal_manager
+            .sync_selected_terminal_scroll(selected_session_id);
         self.sync_sidebar_to_selection();
     }
 
     pub(super) fn selection_changed_with_terminal_sync(&mut self) {
+        self.mark_terminals_dirty();
         self.sync_sidebar_to_selection();
-        self.sync_terminals();
     }
 
     pub(super) fn reload_projects_from_disk(&mut self) {
         self.workspace.reload_projects_from_disk();
+        self.mark_terminals_dirty();
         self.selection_changed();
     }
 
@@ -460,7 +579,7 @@ impl HarnessCore {
 
     pub(super) fn refresh_project_from_scan(&mut self, project_index: usize) {
         self.workspace.refresh_project_from_scan(project_index);
-        self.selection_changed();
+        self.selection_changed_with_terminal_sync();
     }
 
     pub(super) fn cleanup_archive(&mut self) {
@@ -481,15 +600,25 @@ impl HarnessCore {
             }
         };
 
+        let terminal_stopped = match self.terminal_manager.stop_and_remove(&target.session_id) {
+            Ok(stopped) => stopped,
+            Err(error) => {
+                self.set_note_text(error);
+                return;
+            }
+        };
+
         if let Some(path) = target.session_file.as_ref() {
             if let Err(error) = pi::archive_session_file(path) {
+                if terminal_stopped {
+                    self.mark_terminals_dirty();
+                }
                 self.set_note_text(error);
                 return;
             }
         }
 
         self.workspace.remove_archived_session(&target);
-        self.remove_terminal_for_session_id(&target.session_id);
         self.selection_changed_with_terminal_sync();
     }
 
@@ -539,7 +668,7 @@ impl HarnessCore {
 
     pub(super) fn select_project(&mut self, index: usize) {
         if self.workspace.select_project(index) {
-            self.selection_changed_with_terminal_sync();
+            self.selection_changed();
         }
     }
 
@@ -548,19 +677,19 @@ impl HarnessCore {
             .workspace
             .select_session_in_project(project_index, session_index)
         {
-            self.selection_changed_with_terminal_sync();
+            self.selection_changed();
         }
     }
 
     pub(super) fn cycle_projects(&mut self, delta: i32) {
         if self.workspace.cycle_projects(delta) {
-            self.selection_changed_with_terminal_sync();
+            self.selection_changed();
         }
     }
 
     pub(super) fn cycle_sessions(&mut self, delta: i32) {
         if self.workspace.cycle_sessions(delta) {
-            self.selection_changed_with_terminal_sync();
+            self.selection_changed();
         }
     }
 
@@ -574,7 +703,8 @@ impl HarnessCore {
         };
 
         self.refresh_project_from_scan(project_index);
-        self.sync_terminals();
+        self.mark_terminals_dirty();
+        self.ensure_terminals_synced();
 
         if let Some((project_index, session_index)) =
             self.workspace.selected_terminal_restart_target()
@@ -585,36 +715,23 @@ impl HarnessCore {
 
     pub(super) fn refresh_all_sessions(&mut self) {
         self.reload_projects_from_disk();
-        self.sync_terminals();
+        self.ensure_terminals_synced();
         let project_count = self.workspace.projects().len();
         for project_index in 0..project_count {
             self.restart_idle_terminals_for_project(project_index);
         }
     }
 
-    pub(super) fn apply_sidecar_snapshot(&mut self, snapshot: PiSidecarSnapshot) -> bool {
+    fn apply_sidecar_snapshot(
+        &mut self,
+        snapshot: PiSidecarSnapshot,
+        locator: &mut SessionLocator,
+    ) -> bool {
         if !snapshot.is_valid() {
             return false;
         }
 
-        let mut matched = None;
-        for (project_index, project) in self.workspace.projects().iter().enumerate() {
-            for (session_index, session) in project.sessions.iter().enumerate() {
-                if session.matches_identity(
-                    snapshot.harness_session_id.as_deref(),
-                    &snapshot.session_id,
-                    snapshot.session_file.as_deref(),
-                ) {
-                    matched = Some((project_index, session_index));
-                    break;
-                }
-            }
-            if matched.is_some() {
-                break;
-            }
-        }
-
-        let Some((project_index, session_index)) = matched else {
+        let Some((project_index, session_index)) = locator.locate(&snapshot) else {
             return false;
         };
         let selected = self.workspace.selected_project_index() == project_index
@@ -622,26 +739,64 @@ impl HarnessCore {
         let selected_session_key = self
             .current_session()
             .map(|session| session.local_id.clone());
-        let update = {
+        let (update, prev_pi_session_id, prev_session_file) = {
             let session = &mut self.workspace.projects_mut()[project_index].sessions[session_index];
-            apply_snapshot_to_session(session, &snapshot, selected, now_millis())
+            let prev_pi_session_id = session.pi_session_id.clone();
+            let prev_session_file = session.session_file.clone();
+            let update = apply_snapshot_to_session(session, &snapshot, selected, now_millis());
+            (update, prev_pi_session_id, prev_session_file)
         };
 
+        if update.identity_changed {
+            self.mark_terminals_dirty();
+        }
+
+        let mut rebuilt = false;
         if update.reordered {
             self.workspace.projects_mut()[project_index].sort_sessions();
-            self.restore_selection(None, selected_session_key);
+            self.restore_selection(None, selected_session_key.clone());
+            rebuilt = true;
         }
         if update.promote_project {
             self.promote_project_to_front(project_index);
+            rebuilt = true;
         }
-        self.persist_selection();
+        if rebuilt {
+            *locator = SessionLocator::rebuild(self.workspace.projects());
+        } else if let Some(session) = self
+            .workspace
+            .projects()
+            .get(project_index)
+            .and_then(|project| project.sessions.get(session_index))
+        {
+            locator.refresh_session(
+                project_index,
+                session_index,
+                session,
+                prev_pi_session_id,
+                prev_session_file,
+            );
+        }
+
         true
     }
 
     pub(super) fn process_background_events(&mut self) -> bool {
         let mut changed = self.drain_terminal_events();
+        let mut snapshots = Vec::new();
         while let Some(snapshot) = { self.sidecar.try_recv() } {
-            changed |= self.apply_sidecar_snapshot(snapshot);
+            snapshots.push(snapshot);
+        }
+        if !snapshots.is_empty() {
+            let mut locator = SessionLocator::rebuild(self.workspace.projects());
+            let mut sidecar_changed = false;
+            for snapshot in snapshots {
+                sidecar_changed |= self.apply_sidecar_snapshot(snapshot, &mut locator);
+            }
+            if sidecar_changed {
+                self.persist_selection();
+            }
+            changed |= sidecar_changed;
         }
 
         let current_note = self.note.take();
@@ -692,10 +847,6 @@ impl HarnessCore {
             } => self.select_session_in_project(project_index, session_index),
             SidebarRowKind::Label => {}
         }
-    }
-
-    pub(super) fn has_sidebar_spinner(&self) -> bool {
-        sidebar_has_spinner(self.workspace.projects())
     }
 
     pub(super) fn visible_sidebar_has_spinner(&self, visible_sidebar_rows: usize) -> bool {
@@ -821,8 +972,8 @@ impl HarnessCore {
         terminal_rows: u16,
         terminal_cols: u16,
         visible_sidebar_rows: usize,
-    ) -> FrameModel {
-        self.sync_terminals();
+    ) -> FrameModel<'_> {
+        self.ensure_terminals_synced();
         self.resize_terminals(terminal_rows, terminal_cols);
 
         let sidebar_rows = self.sidebar_rows();
@@ -840,17 +991,16 @@ impl HarnessCore {
             visible_sidebar_rows,
             sticky_sidebar_anchor,
         );
-        let terminal_selection = self
+        let (terminal_screen, terminal_selection, terminal_max_scrollback) = self
             .current_terminal()
-            .and_then(TerminalController::selection_range);
-        let terminal_screen = self
-            .current_terminal()
-            .map(|terminal| terminal.screen().clone())
-            .unwrap_or_else(|| {
-                vt100::Parser::new(terminal_rows.max(1), terminal_cols.max(1), 0)
-                    .screen()
-                    .clone()
-            });
+            .map(|terminal| {
+                (
+                    Some(terminal.screen()),
+                    terminal.selection_range(),
+                    terminal.max_scrollback(),
+                )
+            })
+            .unwrap_or((None, None, 0));
 
         FrameModel {
             chrome: self.chrome_view(),
@@ -858,6 +1008,7 @@ impl HarnessCore {
             sidebar_viewport,
             terminal_screen,
             terminal_selection,
+            terminal_max_scrollback,
         }
     }
 

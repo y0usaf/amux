@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use super::input::split_input_chunks;
+use super::keyboard::{ENTER_KITTY_KEYBOARD_MODE, EXIT_KITTY_KEYBOARD_MODE};
 use super::TuiEvent;
 
 pub(super) struct RawTerminal {
@@ -18,7 +19,8 @@ impl RawTerminal {
         let mut stdout = io::stdout();
         write!(
             stdout,
-            "\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?2004h\x1b[?25l\x1b[2J\x1b[H"
+            "\x1b[?1049h{}\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?2004h\x1b[?25l\x1b[2J\x1b[H",
+            ENTER_KITTY_KEYBOARD_MODE
         )?;
         stdout.flush()?;
         Ok(Self { saved_stty })
@@ -30,7 +32,8 @@ impl Drop for RawTerminal {
         let mut stdout = io::stdout();
         let _ = write!(
             stdout,
-            "\x1b[0m\x1b[?2004l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l"
+            "\x1b[0m{}\x1b[?2004l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l",
+            EXIT_KITTY_KEYBOARD_MODE
         );
         let _ = stdout.flush();
         let _ = stty_inherit(&[self.saved_stty.trim()]);

@@ -42,6 +42,8 @@ pub struct PiSidecarSnapshot {
     #[serde(default)]
     pub queued: bool,
     #[serde(default)]
+    pub interrupted: bool,
+    #[serde(default)]
     pub tool_name: Option<String>,
     #[serde(default)]
     pub ts_ms: u64,
@@ -85,6 +87,7 @@ mod tests {
             session_name: None,
             stage: PiSessionStage::Idle,
             queued: false,
+            interrupted: false,
             tool_name: None,
             ts_ms: 0,
         };
