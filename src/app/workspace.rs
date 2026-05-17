@@ -4,7 +4,8 @@ use std::path::PathBuf;
 
 use crate::pi;
 use crate::state::{
-    merge_scanned_sessions, PersistedProject, PersistedSession, PersistedState, Project, Session,
+    default_state_path, merge_scanned_sessions, PersistedProject, PersistedSession, PersistedState,
+    Project, Session,
 };
 use crate::util::{normalize_project_path, project_name_from_path};
 
@@ -92,26 +93,35 @@ impl Workspace {
     }
 
     pub(super) fn persist_selection(&mut self) {
-        let next_projects: Vec<String> = self
-            .projects
-            .iter()
-            .map(|project| project.selection_key())
-            .collect();
-        let next_cache = self.cached_projects();
-        let next_selected_project = self
-            .current_project()
-            .map(|project| project.selection_key());
-        let next_selected_session = self
-            .current_session()
-            .and_then(Session::persisted_selection_key);
+        let snapshot = self.persisted_snapshot();
+        if self.persisted == snapshot {
+            return;
+        }
+        self.persisted = snapshot;
+        self.persisted.enqueue_default_save();
+    }
 
-        self.persisted = PersistedState::load_default().unwrap_or_else(|_| self.persisted.clone());
-        self.persisted.projects = merge_project_keys(&self.persisted.projects, &next_projects);
-        self.persisted.project_cache =
-            merge_project_cache(&self.persisted.project_cache, &next_cache);
-        self.persisted.selected_project = next_selected_project;
-        self.persisted.selected_session = next_selected_session;
-        let _ = self.persisted.save_default();
+    pub(super) fn flush_persisted_state(&mut self, force: bool) {
+        if force {
+            PersistedState::flush_default_save_queue();
+        }
+    }
+
+    fn persisted_snapshot(&self) -> PersistedState {
+        PersistedState {
+            projects: self
+                .projects
+                .iter()
+                .map(|project| project.selection_key())
+                .collect(),
+            project_cache: self.cached_projects(),
+            selected_project: self
+                .current_project()
+                .map(|project| project.selection_key()),
+            selected_session: self
+                .current_session()
+                .and_then(Session::persisted_selection_key),
+        }
     }
 
     pub(super) fn reload_projects_from_disk(&mut self) {
@@ -122,22 +132,18 @@ impl Workspace {
             .current_session()
             .map(|session| session.selection_key());
 
-        if let Ok(persisted) = PersistedState::load_default() {
-            self.persisted = persisted;
-        }
+        let state_file_exists = default_state_path().exists();
         let opened_project_paths =
             normalize_unique_project_paths(std::mem::take(&mut self.initial_project_paths));
         let opened_project_key = opened_project_paths
             .first()
             .map(|path| path.to_string_lossy().into_owned());
 
-        let mut project_paths: Vec<PathBuf> = if !self.persisted.projects.is_empty() {
-            self.persisted.projects.iter().map(PathBuf::from).collect()
-        } else if opened_project_paths.is_empty() {
-            vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))]
-        } else {
-            Vec::new()
-        };
+        let mut project_paths: Vec<PathBuf> =
+            self.persisted.projects.iter().map(PathBuf::from).collect();
+        if project_paths.is_empty() && opened_project_paths.is_empty() && !state_file_exists {
+            project_paths.push(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        }
         project_paths.extend(opened_project_paths);
         project_paths = normalize_unique_project_paths(project_paths);
 
@@ -468,66 +474,6 @@ impl Workspace {
     }
 }
 
-fn merge_project_keys(existing: &[String], current: &[String]) -> Vec<String> {
-    let mut seen = HashSet::new();
-    current
-        .iter()
-        .chain(existing.iter())
-        .filter(|key| seen.insert((*key).clone()))
-        .cloned()
-        .collect()
-}
-
-fn merge_project_cache(
-    existing: &[PersistedProject],
-    current: &[PersistedProject],
-) -> Vec<PersistedProject> {
-    merge_project_keys(
-        &existing
-            .iter()
-            .map(|project| project.path.clone())
-            .collect::<Vec<_>>(),
-        &current
-            .iter()
-            .map(|project| project.path.clone())
-            .collect::<Vec<_>>(),
-    )
-    .into_iter()
-    .map(|path| {
-        let current_project = current.iter().find(|project| project.path == path);
-        let existing_project = existing.iter().find(|project| project.path == path);
-        PersistedProject {
-            path,
-            sessions: merge_persisted_sessions(
-                existing_project
-                    .map(|project| project.sessions.as_slice())
-                    .unwrap_or(&[]),
-                current_project
-                    .map(|project| project.sessions.as_slice())
-                    .unwrap_or(&[]),
-            ),
-        }
-    })
-    .collect()
-}
-
-fn merge_persisted_sessions(
-    existing: &[PersistedSession],
-    current: &[PersistedSession],
-) -> Vec<PersistedSession> {
-    let mut sessions = Vec::new();
-    for session in current.iter().chain(existing.iter()) {
-        if !sessions.iter().any(|merged: &PersistedSession| {
-            merged.local_id == session.local_id
-                || merged.pi_session_id == session.pi_session_id && session.pi_session_id.is_some()
-                || merged.session_file == session.session_file && session.session_file.is_some()
-        }) {
-            sessions.push(session.clone());
-        }
-    }
-    sessions
-}
-
 fn persisted_session_from_session(session: &Session) -> PersistedSession {
     PersistedSession {
         local_id: session.local_id.clone(),
@@ -586,7 +532,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{cycle_session_indices, session_is_idle, Workspace};
-    use crate::state::{PersistedState, Project, Session};
+    use crate::state::{PersistedProject, PersistedState, Project, Session};
 
     #[test]
     fn queued_sessions_are_not_idle() {
@@ -632,6 +578,49 @@ mod tests {
 
         assert_eq!(workspace.selected_session, Some(1));
         assert!(!workspace.projects[0].sessions[1].runtime.unread);
+    }
+
+    #[test]
+    fn persisted_snapshot_uses_current_workspace_authoritatively() {
+        let stale_state = PersistedState {
+            projects: vec!["/tmp/removed-project".into()],
+            project_cache: vec![PersistedProject {
+                path: "/tmp/removed-project".into(),
+                sessions: Vec::new(),
+            }],
+            selected_project: Some("/tmp/removed-project".into()),
+            selected_session: Some("removed-session".into()),
+        };
+        let mut visible_session = Session::new_draft();
+        visible_session.local_id = "local-session-1".into();
+        visible_session.pi_session_id = Some("pi-session-1".into());
+        visible_session.draft = false;
+        let hidden_draft = Session::new_draft();
+        let mut current_project = Project::new(PathBuf::from("/tmp/current-project"));
+        current_project.sessions = vec![visible_session, hidden_draft];
+
+        let mut workspace = Workspace::new(Vec::new(), stale_state);
+        workspace.projects = vec![current_project];
+        workspace.selected_project = 0;
+        workspace.selected_session = Some(0);
+
+        let snapshot = workspace.persisted_snapshot();
+
+        assert_eq!(snapshot.projects, vec!["/tmp/current-project".to_string()]);
+        assert_eq!(
+            snapshot.selected_project.as_deref(),
+            Some("/tmp/current-project")
+        );
+        assert_eq!(snapshot.selected_session.as_deref(), Some("pi-session-1"));
+        assert_eq!(snapshot.project_cache.len(), 1);
+        assert_eq!(snapshot.project_cache[0].path, "/tmp/current-project");
+        assert_eq!(snapshot.project_cache[0].sessions.len(), 1);
+        assert_eq!(
+            snapshot.project_cache[0].sessions[0]
+                .pi_session_id
+                .as_deref(),
+            Some("pi-session-1")
+        );
     }
 
     #[test]

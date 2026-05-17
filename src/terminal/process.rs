@@ -1,7 +1,8 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 
@@ -46,12 +47,54 @@ pub(crate) struct HostProcess {
     pub(crate) writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pub(crate) killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
     pub(crate) rx: Receiver<HostEvent>,
+    pub(crate) pid: Option<u32>,
 }
 
 pub(crate) enum HostEvent {
     Output(Vec<u8>),
     Exited(String),
     Error(String),
+}
+
+impl HostProcess {
+    pub(crate) fn terminate(&self) -> Result<(), String> {
+        let mut killer = self
+            .killer
+            .lock()
+            .map_err(|_| "terminal killer lock poisoned".to_string())?;
+        match killer.kill() {
+            Ok(()) => Ok(()),
+            Err(error) if process_is_missing_error(&error) => Ok(()),
+            Err(error) => Err(format!("terminate failed: {error}")),
+        }
+    }
+
+    pub(crate) fn force_kill(&self) -> Result<(), String> {
+        match self.pid {
+            Some(pid) => force_kill_pid(pid),
+            None => self.terminate(),
+        }
+    }
+
+    pub(crate) fn wait_for_exit(&mut self, timeout: Duration) -> Result<bool, String> {
+        if timeout.is_zero() {
+            return Ok(false);
+        }
+
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(false);
+            }
+            match self.rx.recv_timeout(remaining) {
+                Ok(HostEvent::Exited(_)) => return Ok(true),
+                Ok(HostEvent::Output(_) | HostEvent::Error(_)) => {}
+                Err(RecvTimeoutError::Timeout) => return Ok(false),
+                Err(RecvTimeoutError::Disconnected) => return Ok(true),
+            }
+        }
+    }
 }
 
 pub(crate) fn spawn_process(
@@ -99,6 +142,7 @@ pub(crate) fn spawn_process(
         .slave
         .spawn_command(cmd)
         .map_err(|error| format!("spawn failed: {error}"))?;
+    let pid = child.process_id();
     let killer = Arc::new(Mutex::new(child.clone_killer()));
     let mut reader = pair
         .master
@@ -155,5 +199,38 @@ pub(crate) fn spawn_process(
         writer,
         killer,
         rx,
+        pid,
     })
+}
+
+#[cfg(unix)]
+fn force_kill_pid(pid: u32) -> Result<(), String> {
+    let result = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if process_is_missing_error(&error) {
+        return Ok(());
+    }
+    Err(format!("force kill failed for pid {pid}: {error}"))
+}
+
+#[cfg(not(unix))]
+fn force_kill_pid(_pid: u32) -> Result<(), String> {
+    Err("force kill unavailable on this platform".to_string())
+}
+
+fn process_is_missing_error(error: &std::io::Error) -> bool {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        return error.raw_os_error() == Some(libc::ESRCH);
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }

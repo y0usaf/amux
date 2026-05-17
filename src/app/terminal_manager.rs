@@ -1,9 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::notify::Notify;
 use crate::state::{Project, Session};
 use crate::terminal::{TerminalController, TerminalStatus, TerminalTarget};
+
+const TERMINAL_STOP_GRACEFUL_TIMEOUT: Duration = Duration::from_millis(750);
+const TERMINAL_STOP_FORCE_TIMEOUT: Duration = Duration::from_millis(250);
 
 pub(super) struct TerminalManager {
     notify: Notify,
@@ -47,10 +51,19 @@ impl TerminalManager {
         Some(self.current(session_id)?.status())
     }
 
-    pub(super) fn remove(&mut self, session_id: &str) {
-        if let Some(mut terminal) = self.controllers.remove(session_id) {
-            terminal.stop();
+    pub(super) fn stop_and_remove(&mut self, session_id: &str) -> Result<bool, String> {
+        let Some(terminal) = self.controllers.get_mut(session_id) else {
+            return Ok(false);
+        };
+        terminal
+            .stop_and_wait(TERMINAL_STOP_GRACEFUL_TIMEOUT, TERMINAL_STOP_FORCE_TIMEOUT)
+            .map_err(|error| format!("terminal stop: {error}"))?;
+
+        self.controllers.remove(session_id);
+        if self.last_selected_session_id.as_deref() == Some(session_id) {
+            self.last_selected_session_id = None;
         }
+        Ok(true)
     }
 
     pub(super) fn resize_all(&mut self, rows: u16, cols: u16) {
@@ -116,7 +129,8 @@ impl TerminalManager {
         projects: &[Project],
         selected_session_id: Option<&str>,
     ) -> Vec<String> {
-        let mut active_ids = HashSet::new();
+        let mut active_ids =
+            HashSet::with_capacity(projects.iter().map(|project| project.sessions.len()).sum());
         let mut errors = Vec::new();
         let notify = self.notify.clone();
 
@@ -163,7 +177,7 @@ impl TerminalManager {
         )
     }
 
-    fn sync_selected_terminal_scroll(&mut self, selected_session_id: Option<&str>) {
+    pub(super) fn sync_selected_terminal_scroll(&mut self, selected_session_id: Option<&str>) {
         if self.last_selected_session_id.as_deref() == selected_session_id {
             return;
         }

@@ -14,8 +14,10 @@ pub(super) fn should_bind_sidecar_session(session: &Session, snapshot: &PiSideca
         || session.session_file.is_some()
         || session.runtime.running
         || session.runtime.queued
+        || session.runtime.interrupted
         || snapshot.stage.is_active()
         || snapshot.queued
+        || snapshot.interrupted
 }
 
 pub(super) fn sidecar_order_update(
@@ -49,6 +51,7 @@ pub(super) fn sidecar_order_update(
 pub(super) struct SidecarApplyResult {
     pub(super) reordered: bool,
     pub(super) promote_project: bool,
+    pub(super) identity_changed: bool,
 }
 
 fn terminal_status_note(status: Option<&TerminalStatus>) -> Option<String> {
@@ -99,6 +102,8 @@ pub(super) fn apply_snapshot_to_session(
 
     let timestamp = snapshot.ts_ms.max(now_ms);
     let prev_trackable = session.counts_for_activity_ordering();
+    let prev_pi_session_id = session.pi_session_id.clone();
+    let prev_session_file = session.session_file.clone();
     let should_bind = should_bind_sidecar_session(session, snapshot);
 
     if should_bind {
@@ -122,6 +127,7 @@ pub(super) fn apply_snapshot_to_session(
     session.runtime.running = snapshot.stage.is_active();
     session.runtime.status = snapshot.stage.as_runtime_status().map(ToOwned::to_owned);
     session.runtime.queued = snapshot.queued;
+    session.runtime.interrupted = snapshot.interrupted;
     session.runtime.tool_name = if matches!(snapshot.stage, crate::pi::PiSessionStage::Tool) {
         snapshot.tool_name.clone()
     } else {
@@ -132,6 +138,8 @@ pub(super) fn apply_snapshot_to_session(
     }
 
     let mut result = SidecarApplyResult::default();
+    result.identity_changed =
+        session.pi_session_id != prev_pi_session_id || session.session_file != prev_session_file;
     let trackable = session.counts_for_activity_ordering();
     match sidecar_order_update(
         prev_running,

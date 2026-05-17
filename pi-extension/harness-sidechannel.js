@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import net from "node:net"
 import { homedir } from "node:os"
 
@@ -456,6 +457,7 @@ function registerSidechannel(pi) {
 	let stage = "idle"
 	let queued = false
 	let toolName = undefined
+	let interrupted = false
 	let lastSnapshotKey = undefined
 	const activeTools = new Map()
 
@@ -480,6 +482,53 @@ function registerSidechannel(pi) {
 		if (eventType.startsWith("thinking")) return "thinking"
 		if (eventType.startsWith("text") || eventType.startsWith("toolcall")) return "outputting"
 		return stage
+	}
+
+	function stopReasonFromEvent(event) {
+		for (const candidate of [
+			event?.stopReason,
+			event?.reason,
+			event?.message?.stopReason,
+			event?.assistantMessage?.stopReason,
+		]) {
+			if (typeof candidate === "string" && candidate.length > 0) return candidate
+		}
+		return undefined
+	}
+
+	function lastStopReasonFromSessionFile(path) {
+		if (!path) return undefined
+		try {
+			let lastStopReason = undefined
+			const content = readFileSync(path, "utf8")
+			for (const line of content.split("\n")) {
+				if (!line.includes("stopReason")) continue
+				try {
+					const value = JSON.parse(line)
+					const stopReason = value?.message?.stopReason || value?.stopReason
+					if (typeof stopReason === "string" && stopReason.length > 0) {
+						lastStopReason = stopReason
+					}
+				} catch {
+					// Ignore partial/corrupt lines while Pi is still writing the log.
+				}
+			}
+			return lastStopReason
+		} catch {
+			return undefined
+		}
+	}
+
+	function refreshInterruptedFromSessionFile() {
+		const stopReason = lastStopReasonFromSessionFile(sessionFile)
+		if (stopReason !== undefined) interrupted = stopReason === "aborted"
+	}
+
+	function rememberSessionContext(ctx) {
+		if (!ctx) return
+		sessionId = ctx.sessionManager.getSessionId()
+		sessionFile = ctx.sessionManager.getSessionFile()
+		queued = ctx.hasPendingMessages()
 	}
 
 	function scheduleReconnect() {
@@ -513,11 +562,7 @@ function registerSidechannel(pi) {
 	}
 
 	function emitSnapshot(ctx, force = false) {
-		if (ctx) {
-			sessionId = ctx.sessionManager.getSessionId()
-			sessionFile = ctx.sessionManager.getSessionFile()
-			queued = ctx.hasPendingMessages()
-		}
+		rememberSessionContext(ctx)
 		if (!sessionId) return
 
 		const snapshot = {
@@ -528,6 +573,7 @@ function registerSidechannel(pi) {
 			sessionName: currentName(),
 			stage,
 			queued,
+			interrupted,
 			toolName,
 		}
 		const snapshotKey = JSON.stringify(snapshot)
@@ -553,8 +599,10 @@ function registerSidechannel(pi) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		clearRuntimeState()
+		rememberSessionContext(ctx)
+		refreshInterruptedFromSessionFile()
 		stage = ctx.isIdle() ? "idle" : "thinking"
-		emitSnapshot(ctx, true)
+		emitSnapshot(undefined, true)
 		if (!titlePoll) {
 			titlePoll = setInterval(() => emitSnapshot(), TITLE_POLL_MS)
 			titlePoll.unref?.()
@@ -588,12 +636,14 @@ function registerSidechannel(pi) {
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		maybeSetSessionName(event.prompt, event.images)
+		interrupted = false
 		stage = activeTools.size > 0 ? "tool" : "thinking"
 		toolName = activeTools.size > 0 ? anyToolName() : undefined
 		emitSnapshot(ctx, true)
 	})
 
 	pi.on("agent_start", async (_event, ctx) => {
+		interrupted = false
 		stage = activeTools.size > 0 ? "tool" : "thinking"
 		toolName = activeTools.size > 0 ? anyToolName() : undefined
 		emitSnapshot(ctx, true)
@@ -646,9 +696,23 @@ function registerSidechannel(pi) {
 		emitSnapshot(ctx, true)
 	})
 
-	pi.on("agent_end", async (_event, ctx) => {
+	pi.on("agent_end", async (event, ctx) => {
 		clearRuntimeState()
-		emitSnapshot(ctx, true)
+		rememberSessionContext(ctx)
+		const stopReason = stopReasonFromEvent(event)
+		if (stopReason !== undefined) {
+			interrupted = stopReason === "aborted"
+		} else {
+			refreshInterruptedFromSessionFile()
+		}
+		emitSnapshot(undefined, true)
+
+		const refreshTimer = setTimeout(() => {
+			if (stage !== "idle") return
+			refreshInterruptedFromSessionFile()
+			emitSnapshot(undefined, true)
+		}, 50)
+		refreshTimer.unref?.()
 	})
 }
 

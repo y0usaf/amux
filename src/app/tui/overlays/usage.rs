@@ -1,12 +1,15 @@
-use crate::app::cell_surface::{draw_box, render_cell_scrollbar, truncate_to_cells, CellSurface};
+use crate::app::cell_surface::{
+    display_cell_width, draw_box, render_cell_scrollbar, truncate_to_cells, CellSurface,
+};
 use crate::app::layout::CellRect as Rect;
 use crate::app::theme::{self, DerivedTheme};
-use crate::pi::{self, PiUsageDay, PiUsageReport, PiUsageTotals};
+use crate::pi::{self, PiUsageDay, PiUsageModelBreakdown, PiUsageReport, PiUsageTotals};
 
 use super::super::raw::terminal_size;
 use super::dialog::render_dialog_title_line;
 
-const USAGE_MODEL_COLS: usize = 28;
+const USAGE_TREE_COLS: usize = 40;
+const USAGE_VALUE_COLS: [usize; 6] = [10, 10, 10, 10, 10, 9];
 const USAGE_FOOTER_HINT: &str = "↑/↓/j/k · r reload · q/Esc";
 
 #[derive(Clone, Debug)]
@@ -29,7 +32,7 @@ impl UsageOverlayState {
     }
 
     pub(in crate::app::tui) fn clamp_scroll(&mut self, visible_rows: usize) {
-        let lines = self.report.days.len();
+        let lines = usage_overlay_line_count(&self.report);
         self.scroll = self.scroll.min(lines.saturating_sub(visible_rows));
     }
 }
@@ -48,13 +51,32 @@ fn usage_overlay_rect(cols: i32, rows: i32) -> Rect {
 }
 
 fn usage_overlay_list_rows(rect: Rect) -> usize {
-    rect.rows.saturating_sub(6) as usize
+    rect.rows.saturating_sub(8) as usize
 }
 
-#[cfg(test)]
-/// Scrollable daily rows; the total row stays fixed in the overlay.
+pub(in crate::app::tui) fn usage_overlay_line_count(report: &PiUsageReport) -> usize {
+    let data_rows = report
+        .days
+        .iter()
+        .map(|day| 1 + day.model_breakdowns.len())
+        .sum::<usize>();
+    data_rows.saturating_add(report.days.len().saturating_sub(1))
+}
+
+/// Scrollable day/model rows; the total row stays fixed in the overlay.
 pub(in crate::app::tui) fn usage_overlay_lines(report: &PiUsageReport) -> Vec<String> {
-    report.days.iter().map(usage_day_line).collect()
+    let mut lines = Vec::with_capacity(usage_overlay_line_count(report));
+    for (day_index, day) in report.days.iter().enumerate() {
+        lines.push(usage_day_line(day));
+        let models = sorted_model_breakdowns(day);
+        for (index, breakdown) in models.iter().enumerate() {
+            lines.push(usage_model_line(breakdown, index + 1 == models.len()));
+        }
+        if day_index + 1 < report.days.len() {
+            lines.push(usage_separator_line());
+        }
+    }
+    lines
 }
 
 pub(in crate::app::tui) fn render_usage_overlay(
@@ -83,8 +105,10 @@ pub(in crate::app::tui) fn render_usage_overlay(
     );
 
     let header_row = inner.row + 1;
-    let total_row = inner.row + 2;
-    let list_row = inner.row + 3;
+    let header_separator_row = inner.row + 2;
+    let total_row = inner.row + 3;
+    let total_separator_row = inner.row + 4;
+    let list_row = inner.row + 5;
     let footer_row = inner.row + inner.rows - 1;
     let list_rows = (footer_row - list_row).max(0) as usize;
     let list_width = (inner.cols - 1).max(0);
@@ -99,6 +123,16 @@ pub(in crate::app::tui) fn render_usage_overlay(
         &header_line,
     );
 
+    let separator_line = usage_separator_line();
+    surface.put_text(
+        inner.col,
+        header_separator_row,
+        inner.cols,
+        theme.border,
+        theme.surface,
+        &separator_line,
+    );
+
     let total_line = usage_total_line(&usage.report.totals);
     surface.put_text_bold(
         inner.col,
@@ -108,27 +142,35 @@ pub(in crate::app::tui) fn render_usage_overlay(
         theme.surface,
         &total_line,
     );
+    surface.put_text(
+        inner.col,
+        total_separator_row,
+        inner.cols,
+        theme.border,
+        theme.surface,
+        &separator_line,
+    );
 
     usage.clamp_scroll(list_rows);
+    let lines = usage_overlay_lines(&usage.report);
 
-    for (row_offset, day) in usage
-        .report
-        .days
-        .iter()
-        .skip(usage.scroll)
-        .take(list_rows)
-        .enumerate()
-    {
+    for (row_offset, line) in lines.iter().skip(usage.scroll).take(list_rows).enumerate() {
         let row = list_row + row_offset as i32;
-        let line = usage_day_line(day);
-        surface.put_text(
-            inner.col,
-            row,
-            list_width,
-            theme::brighten(theme.muted, 32),
-            theme.surface,
-            &truncate_to_cells(&line, list_width as usize),
-        );
+        let is_separator = is_usage_separator_line(line);
+        let is_total = is_usage_total_line(line);
+        let fg = if is_separator {
+            theme.border
+        } else if is_total {
+            theme.text
+        } else {
+            theme::brighten(theme.muted, 32)
+        };
+        let text = truncate_to_cells(line, list_width as usize);
+        if is_total {
+            surface.put_text_bold(inner.col, row, list_width, fg, theme.surface, &text);
+        } else {
+            surface.put_text(inner.col, row, list_width, fg, theme.surface, &text);
+        }
     }
     render_cell_scrollbar(
         surface,
@@ -136,7 +178,7 @@ pub(in crate::app::tui) fn render_usage_overlay(
         list_row,
         list_rows as i32,
         list_rows,
-        usage.report.days.len(),
+        usage_overlay_line_count(&usage.report),
         usage.scroll,
         theme.border,
         theme.surface,
@@ -156,51 +198,86 @@ pub(in crate::app::tui) fn render_usage_overlay(
 }
 
 fn usage_header_line() -> String {
-    format!(
-        "{:<10} {:<28} {:>10} {:>10} {:>10} {:>10} {:>10} {:>9}",
-        "DATE", "MODELS", "INPUT", "OUTPUT", "CACHE+", "CACHE↺", "TOTAL", "COST"
+    usage_table_line(
+        "DATE / MODEL",
+        ["INPUT", "OUTPUT", "CACHE+", "CACHE↺", "TOTAL", "COST"],
     )
+}
+
+fn usage_separator_line() -> String {
+    let mut line = "─".repeat(USAGE_TREE_COLS);
+    for width in USAGE_VALUE_COLS {
+        line.push('┼');
+        line.push_str(&"─".repeat(width));
+    }
+    line
+}
+
+fn is_usage_separator_line(line: &str) -> bool {
+    line.starts_with('─')
+}
+
+fn is_usage_total_line(line: &str) -> bool {
+    !is_usage_separator_line(line) && !line.starts_with("  ├─ ") && !line.starts_with("  └─ ")
 }
 
 fn usage_total_line(totals: &PiUsageTotals) -> String {
-    usage_row_line("TOTAL", "", totals)
+    usage_row_line("TOTAL", totals)
 }
 
 fn usage_day_line(day: &PiUsageDay) -> String {
-    usage_row_line(
-        &day.date,
-        &format_models_display(&day.models_used),
-        &day.totals,
-    )
+    usage_row_line(&day.date, &day.totals)
 }
 
-fn usage_row_line(label: &str, models: &str, totals: &PiUsageTotals) -> String {
-    format!(
-        "{:<10} {:<28} {:>10} {:>10} {:>10} {:>10} {:>10} {:>9}",
+fn usage_model_line(breakdown: &PiUsageModelBreakdown, is_last: bool) -> String {
+    let branch = if is_last { "  └─ " } else { "  ├─ " };
+    let label = format!("{branch}{}", format_model_name(&breakdown.model_name));
+    usage_row_line(&label, &breakdown.totals)
+}
+
+fn sorted_model_breakdowns(day: &PiUsageDay) -> Vec<PiUsageModelBreakdown> {
+    let mut models = day.model_breakdowns.clone();
+    models.sort_by(|a, b| format_model_name(&a.model_name).cmp(&format_model_name(&b.model_name)));
+    models
+}
+
+fn usage_row_line(label: &str, totals: &PiUsageTotals) -> String {
+    let input = format_u64(totals.input_tokens);
+    let output = format_u64(totals.output_tokens);
+    let cache_creation = format_u64(totals.cache_creation_tokens);
+    let cache_read = format_u64(totals.cache_read_tokens);
+    let total = format_u64(totals.total_tokens());
+    let cost = format_currency(totals.total_cost);
+    usage_table_line(
         label,
-        truncate_to_cells(models, USAGE_MODEL_COLS),
-        format_u64(totals.input_tokens),
-        format_u64(totals.output_tokens),
-        format_u64(totals.cache_creation_tokens),
-        format_u64(totals.cache_read_tokens),
-        format_u64(totals.total_tokens()),
-        format_currency(totals.total_cost)
+        [&input, &output, &cache_creation, &cache_read, &total, &cost],
     )
 }
 
-fn format_models_display(models: &[String]) -> String {
-    let mut models = models
-        .iter()
-        .map(|model| format_model_name(model))
-        .collect::<Vec<_>>();
-    models.sort();
-    models.dedup();
-    models.join(", ")
+fn usage_table_line(label: &str, values: [&str; 6]) -> String {
+    let mut line = format_cell_left(label, USAGE_TREE_COLS);
+    for (value, width) in values.iter().zip(USAGE_VALUE_COLS.iter()) {
+        line.push('│');
+        line.push_str(&format_cell_right(value, *width));
+    }
+    line
+}
+
+fn format_cell_left(value: &str, width: usize) -> String {
+    let value = truncate_to_cells(value, width);
+    let padding = width.saturating_sub(display_cell_width(&value));
+    format!("{value}{}", " ".repeat(padding))
+}
+
+fn format_cell_right(value: &str, width: usize) -> String {
+    let value = truncate_to_cells(value, width);
+    let padding = width.saturating_sub(display_cell_width(&value));
+    format!("{}{value}", " ".repeat(padding))
 }
 
 fn format_model_name(model: &str) -> String {
     if let Some(rest) = model.strip_prefix("[pi] ") {
-        return format!("[pi] {}", format_model_name(rest));
+        return format_model_name(rest);
     }
 
     if let Some(rest) = model.strip_prefix("anthropic/") {
@@ -240,19 +317,14 @@ fn format_currency(amount: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pi::{PiUsageDay, PiUsageTotals};
+    use crate::pi::{PiUsageDay, PiUsageModelBreakdown, PiUsageTotals};
 
     #[test]
     fn formats_model_names_like_pi_usage() {
-        assert_eq!(format_model_name("[pi] claude-opus-4-5"), "[pi] opus-4-5");
-        assert_eq!(
-            format_model_name("[pi] claude-sonnet-4-20250514"),
-            "[pi] sonnet-4"
-        );
-        assert_eq!(
-            format_model_name("[pi] anthropic/claude-opus-4.5"),
-            "[pi] opus-4.5"
-        );
+        assert_eq!(format_model_name("claude-opus-4-5"), "opus-4-5");
+        assert_eq!(format_model_name("claude-sonnet-4-20250514"), "sonnet-4");
+        assert_eq!(format_model_name("anthropic/claude-opus-4.5"), "opus-4.5");
+        assert_eq!(format_model_name("[pi] claude-opus-4-5"), "opus-4-5");
     }
 
     #[test]
@@ -261,14 +333,35 @@ mod tests {
             days: vec![PiUsageDay {
                 date: "2026-01-02".into(),
                 totals: PiUsageTotals {
-                    input_tokens: 7,
-                    output_tokens: 8,
+                    input_tokens: 10,
+                    output_tokens: 12,
                     cache_creation_tokens: 1,
                     cache_read_tokens: 2,
-                    total_cost: 0.01,
+                    total_cost: 0.03,
                 },
-                models_used: vec!["[pi] claude-sonnet-4".into()],
-                model_breakdowns: Vec::new(),
+                models_used: vec!["claude-sonnet-4".into(), "claude-opus-4-5".into()],
+                model_breakdowns: vec![
+                    PiUsageModelBreakdown {
+                        model_name: "claude-sonnet-4".into(),
+                        totals: PiUsageTotals {
+                            input_tokens: 7,
+                            output_tokens: 8,
+                            cache_creation_tokens: 1,
+                            cache_read_tokens: 2,
+                            total_cost: 0.01,
+                        },
+                    },
+                    PiUsageModelBreakdown {
+                        model_name: "claude-opus-4-5".into(),
+                        totals: PiUsageTotals {
+                            input_tokens: 3,
+                            output_tokens: 4,
+                            cache_creation_tokens: 0,
+                            cache_read_tokens: 0,
+                            total_cost: 0.02,
+                        },
+                    },
+                ],
             }],
             totals: PiUsageTotals {
                 input_tokens: 1000,
@@ -283,17 +376,59 @@ mod tests {
         };
 
         let daily_rows = usage_overlay_lines(&report);
+        let header_row = usage_header_line();
+        let separator_row = usage_separator_line();
 
-        assert_eq!(daily_rows.len(), 1);
+        assert_eq!(
+            display_cell_width(&header_row),
+            display_cell_width(&separator_row)
+        );
+        assert!(header_row.contains("DATE / MODEL"));
+        assert!(header_row.contains('│'));
+        assert!(separator_row.contains('┼'));
+        assert_eq!(daily_rows.len(), 3);
         assert!(daily_rows[0].contains("2026-01-02"));
-        assert!(daily_rows[0].contains("[pi] sonnet-4"));
-        assert!(daily_rows[0].contains("18"));
-        assert!(daily_rows[0].contains("$0.01"));
+        assert!(daily_rows[0].contains('│'));
+        assert!(daily_rows[0].contains("25"));
+        assert!(daily_rows[0].contains("$0.03"));
+        assert!(daily_rows[1].contains("├─ opus-4-5"));
+        assert!(daily_rows[1].contains("$0.02"));
+        assert!(daily_rows[2].contains("└─ sonnet-4"));
+        assert!(daily_rows[2].contains("$0.01"));
 
         let total_row = usage_total_line(&report.totals);
 
         assert!(total_row.contains("TOTAL"));
         assert!(total_row.contains("1,080"));
         assert!(total_row.contains("$0.06"));
+    }
+    #[test]
+    fn usage_lines_separate_day_groups() {
+        let day = |date: &str| PiUsageDay {
+            date: date.into(),
+            totals: PiUsageTotals {
+                input_tokens: 1,
+                output_tokens: 2,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+                total_cost: 0.01,
+            },
+            models_used: Vec::new(),
+            model_breakdowns: Vec::new(),
+        };
+        let report = PiUsageReport {
+            days: vec![day("2026-01-02"), day("2026-01-01")],
+            totals: PiUsageTotals::default(),
+            files_scanned: 1,
+            entries: 2,
+            skipped_duplicates: 0,
+        };
+
+        let rows = usage_overlay_lines(&report);
+
+        assert_eq!(usage_overlay_line_count(&report), 3);
+        assert_eq!(rows.len(), 3);
+        assert!(rows[1].starts_with('─'));
+        assert!(rows[1].contains('┼'));
     }
 }

@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 
+use super::backend::ChromeView;
 use crate::pi::{PiSessionStage, PiSidecarSnapshot};
+use crate::render::Color;
 use crate::state::Session;
 
 use super::{
     cell_surface::CellSurface,
     layout::CellRect,
-    scene::{render_sidebar, ScenePalette},
+    scene::{render_sidebar, render_statusbar, HarnessMode, ScenePalette},
     sidebar::{self, SidebarRow, SidebarRowKind, SidebarStatusKind, SidebarViewportItem},
     sidecar_sync,
     theme::{self, DerivedTheme},
@@ -22,6 +24,7 @@ fn snapshot(stage: PiSessionStage, queued: bool) -> PiSidecarSnapshot {
         session_name: Some("Test session".into()),
         stage,
         queued,
+        interrupted: false,
         tool_name: None,
         ts_ms: 1,
     }
@@ -150,6 +153,14 @@ fn notification_status_uses_static_glyph() {
 }
 
 #[test]
+fn interrupted_status_uses_notification_glyph() {
+    assert_eq!(
+        sidebar::sidebar_status_glyph(sidebar::SidebarStatusKind::Interrupted, 0),
+        sidebar::SIDEBAR_NOTIFICATION_GLYPH
+    );
+}
+
+#[test]
 fn sidebar_status_prefers_queued_over_notification() {
     let mut session = Session::new_draft();
     session.runtime.queued = true;
@@ -201,6 +212,45 @@ fn notification_status_tints_session_title() {
 }
 
 #[test]
+fn interrupted_status_tints_session_title_sriracha() {
+    let palette = ScenePalette::themed(DerivedTheme::fallback());
+    let mut surface = CellSurface::new(24, 3, palette.fg, palette.bg);
+    let rows = [SidebarRow {
+        kind: SidebarRowKind::Session {
+            project_index: 0,
+            session_index: 0,
+        },
+        text: "Interrupted session".into(),
+        fg: theme::TEXT,
+        bg: None,
+        inverted: false,
+        selector: false,
+        current: false,
+        status: Some(SidebarStatusKind::Interrupted),
+    }];
+    let viewport = [SidebarViewportItem {
+        row_index: 0,
+        visible_row: 0,
+        sticky: false,
+    }];
+
+    render_sidebar(
+        &mut surface,
+        CellRect::new(0, 0, 24, 3),
+        CellRect::new(0, 0, 24, 1),
+        &rows,
+        &viewport,
+        None,
+        &palette,
+        0,
+    );
+
+    let title_cell = &surface.cells[2];
+    assert_eq!(title_cell.text, "I");
+    assert_eq!(title_cell.fg, palette.error);
+}
+
+#[test]
 fn project_title_uses_lifted_statusbar_purple_without_status() {
     let (palette, surface) = render_project_title(None);
     let idle_title_fg = theme::brighten(palette.statusbar_bg, 36);
@@ -238,12 +288,87 @@ fn completed_project_title_uses_success_green() {
 }
 
 #[test]
+fn interrupted_project_title_uses_sriracha() {
+    let (palette, surface) = render_project_title(Some(SidebarStatusKind::Interrupted));
+
+    let first_title_cell = &surface.cells[PROJECT_TITLE_FIRST_CELL];
+    let last_title_cell = &surface.cells[PROJECT_TITLE_LAST_CELL];
+    assert_eq!(first_title_cell.text, " ");
+    assert_eq!(first_title_cell.fg, palette.error);
+    assert_eq!(last_title_cell.text, " ");
+    assert_eq!(last_title_cell.fg, palette.error);
+}
+
+#[test]
 fn current_project_rule_uses_statusbar_white_without_status() {
     let (palette, surface) = render_project_title_with_current(None, true);
 
     let rule_cell = &surface.cells[0];
     assert_eq!(rule_cell.text, "━");
     assert_eq!(rule_cell.fg, palette.statusbar_fg);
+}
+
+#[test]
+fn sidebar_divider_uses_palette_color() {
+    let mut palette = ScenePalette::themed(DerivedTheme::fallback());
+    palette.sidebar_divider = Color::rgb(0x12, 0x34, 0x56);
+    let mut surface = CellSurface::new(6, 2, palette.fg, palette.bg);
+    let rows = [SidebarRow {
+        kind: SidebarRowKind::Label,
+        text: "sidebar".into(),
+        fg: theme::TEXT,
+        bg: None,
+        inverted: false,
+        selector: false,
+        current: false,
+        status: None,
+    }];
+    let viewport = [SidebarViewportItem {
+        row_index: 0,
+        visible_row: 0,
+        sticky: false,
+    }];
+
+    render_sidebar(
+        &mut surface,
+        CellRect::new(0, 0, 6, 2),
+        CellRect::new(0, 0, 6, 1),
+        &rows,
+        &viewport,
+        None,
+        &palette,
+        0,
+    );
+
+    let divider_cell = &surface.cells[5];
+    assert_eq!(divider_cell.text, "│");
+    assert_eq!(divider_cell.fg, palette.sidebar_divider);
+}
+
+#[test]
+fn statusbar_sidebar_separator_uses_palette_color() {
+    let mut palette = ScenePalette::themed(DerivedTheme::fallback());
+    palette.sidebar_divider = Color::rgb(0x12, 0x34, 0x56);
+    let mut surface = CellSurface::new(12, 1, palette.fg, palette.bg);
+    let chrome = ChromeView {
+        project: "project".into(),
+        status: String::new(),
+        status_kind: None,
+        session: String::new(),
+    };
+
+    render_statusbar(
+        &mut surface,
+        CellRect::new(0, 0, 12, 1),
+        Some(CellRect::new(0, 0, 4, 1)),
+        &chrome,
+        &palette,
+        HarnessMode::Normal,
+    );
+
+    let separator_cell = &surface.cells[3];
+    assert_eq!(separator_cell.text, "│");
+    assert_eq!(separator_cell.fg, palette.sidebar_divider);
 }
 
 #[test]

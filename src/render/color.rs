@@ -38,4 +38,15 @@ impl Color {
             (value & 0xff) as u8,
         )
     }
+
+    #[inline]
+    pub const fn negative(self) -> Self {
+        if self.0 >> 24 == Self::ANSI_INDEX_ALPHA {
+            return self;
+        }
+
+        let (r, g, b) = self.rgb_components();
+        let alpha = ((self.0 >> 24) & 0xff) as u8;
+        Self::rgba(u8::MAX - r, u8::MAX - g, u8::MAX - b, alpha)
+    }
 }

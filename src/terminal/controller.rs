@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::sync::mpsc::TryRecvError;
+use std::time::Duration;
 
 use anyhow::Context;
 use portable_pty::PtySize;
@@ -14,8 +15,8 @@ use crate::notify::Notify;
 const DEFAULT_TERMINAL_COLS: u16 = 100;
 const DEFAULT_TERMINAL_ROWS: u16 = 32;
 const TERMINAL_SCROLLBACK: usize = 5_000;
-const BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
-const BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
+const BRACKETED_PASTE_START: &[u8] = b"[200~";
+const BRACKETED_PASTE_END: &[u8] = b"[201~";
 
 #[derive(Clone, Debug)]
 pub enum TerminalStatus {
@@ -44,6 +45,7 @@ pub struct TerminalController {
     rows: u16,
     cols: u16,
     scrollback: usize,
+    max_scrollback: usize,
     selection: TerminalSelection,
 }
 
@@ -62,6 +64,7 @@ impl TerminalController {
             rows: DEFAULT_TERMINAL_ROWS,
             cols: DEFAULT_TERMINAL_COLS,
             scrollback: 0,
+            max_scrollback: 0,
             selection: TerminalSelection::default(),
         }
     }
@@ -79,8 +82,10 @@ impl TerminalController {
         self.stop();
         self.target = target;
         self.scrollback = 0;
+        self.max_scrollback = 0;
         self.selection.clear();
         self.parser = Parser::new(self.rows, self.cols, TERMINAL_SCROLLBACK);
+        self.refresh_max_scrollback();
 
         match self.target.clone() {
             Some(target) => {
@@ -120,6 +125,50 @@ impl TerminalController {
         self.status = TerminalStatus::Empty;
     }
 
+    pub fn stop_and_wait(
+        &mut self,
+        graceful_timeout: Duration,
+        force_timeout: Duration,
+    ) -> anyhow::Result<bool> {
+        self.selection.clear();
+        if self.process.is_none() {
+            self.status = TerminalStatus::Empty;
+            return Ok(false);
+        }
+
+        let exited = {
+            let process = self.process.as_mut().expect("process checked above");
+            process
+                .terminate()
+                .map_err(anyhow::Error::msg)
+                .context("signalling terminal process")?;
+            if process
+                .wait_for_exit(graceful_timeout)
+                .map_err(anyhow::Error::msg)
+                .context("waiting for terminal process to exit")?
+            {
+                true
+            } else {
+                process
+                    .force_kill()
+                    .map_err(anyhow::Error::msg)
+                    .context("force killing terminal process")?;
+                process
+                    .wait_for_exit(force_timeout)
+                    .map_err(anyhow::Error::msg)
+                    .context("waiting for terminal process to exit after force kill")?
+            }
+        };
+
+        if !exited {
+            anyhow::bail!("timed out waiting for terminal process to exit");
+        }
+
+        self.process = None;
+        self.status = TerminalStatus::Empty;
+        Ok(true)
+    }
+
     pub fn resize(&mut self, rows: u16, cols: u16) {
         let rows = rows.max(1);
         let cols = cols.max(1);
@@ -130,6 +179,7 @@ impl TerminalController {
         self.rows = rows;
         self.cols = cols;
         self.parser.screen_mut().set_size(rows, cols);
+        self.refresh_max_scrollback();
         self.clear_selection();
         self.set_scrollback(self.scrollback);
 
@@ -151,11 +201,13 @@ impl TerminalController {
             match process.rx.try_recv() {
                 Ok(HostEvent::Output(bytes)) => {
                     self.parser.process(&bytes);
+                    self.refresh_max_scrollback();
                     self.scrollback = self.parser.screen().scrollback();
                     if self.scrollback == 0 {
                         self.parser.screen_mut().set_scrollback(0);
                     }
                     self.status = TerminalStatus::Running;
+                    self.refresh_max_scrollback();
                     changed = true;
                 }
                 Ok(HostEvent::Exited(status)) => {
@@ -207,6 +259,10 @@ impl TerminalController {
 
     pub fn screen(&self) -> &vt100::Screen {
         self.parser.screen()
+    }
+
+    pub fn max_scrollback(&self) -> usize {
+        self.max_scrollback
     }
 
     pub fn begin_selection(&mut self, point: TerminalSelectionPoint) -> bool {
@@ -281,6 +337,12 @@ impl TerminalController {
             self.clear_selection();
         }
         changed
+    }
+
+    fn refresh_max_scrollback(&mut self) {
+        let mut snapshot = self.parser.screen().clone();
+        snapshot.set_scrollback(usize::MAX);
+        self.max_scrollback = snapshot.scrollback();
     }
 
     fn write_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
