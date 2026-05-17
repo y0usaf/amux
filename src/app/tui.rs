@@ -13,7 +13,7 @@ use super::scene::{
     harness_scene_layout, render_harness_scene, HarnessMode, ScenePalette, TerminalCursorMode,
 };
 use super::sidebar::SIDEBAR_ANIMATION_FRAME_MS;
-use super::theme::{DerivedTheme, TerminalPalette, TRANSPARENT};
+use super::theme::DerivedTheme;
 
 mod ansi;
 mod input;
@@ -29,12 +29,6 @@ const TUI_WHEEL_LINES: i32 = 3;
 const TUI_BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
 const TUI_BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
 
-const TUI_THEME_QUERY_INTERVAL: Duration = Duration::from_secs(1);
-
-fn terminal_palette_query_enabled() -> bool {
-    std::env::var_os("PI_HARNESS_DISABLE_TUI_THEME_QUERY").is_none()
-        && std::env::var_os("ZELLIJ").is_none()
-}
 #[derive(Debug)]
 enum TuiEvent {
     Input(Vec<u8>),
@@ -47,9 +41,6 @@ pub fn run(initial_project_paths: Vec<PathBuf>) -> anyhow::Result<()> {
     let notify = tui_notify(tx.clone(), wake_pending.clone());
     let mut app = TuiApp::new(notify, wake_pending, initial_project_paths)?;
     let _raw_terminal = RawTerminal::enter()?;
-    if app.terminal_palette_query_enabled {
-        app.inherit_terminal_theme();
-    }
     spawn_stdin_reader(tx);
     app.run(rx)
 }
@@ -71,15 +62,11 @@ mod mouse;
 mod overlay_controller;
 mod overlays;
 mod paste;
-mod theme_query;
 
 use command_line::{command_line_start_col, CommandLineState};
 use overlays::archive::{render_archive_viewer, ArchiveViewerState};
 use overlays::help::{render_help_overlay, HelpOverlayState};
 use overlays::usage::{render_usage_overlay, UsageOverlayState};
-use theme_query::{
-    apply_terminal_palette_response, is_terminal_palette_response, parse_terminal_palette_response,
-};
 
 struct TuiApp {
     core: HarnessCore,
@@ -92,9 +79,6 @@ struct TuiApp {
     help_overlay: Option<HelpOverlayState>,
     usage_overlay: Option<UsageOverlayState>,
     theme: DerivedTheme,
-    terminal_palette: TerminalPalette,
-    last_theme_query: Instant,
-    terminal_palette_query_enabled: bool,
     wake_pending: Arc<AtomicBool>,
     surface: CellSurface,
 }
@@ -117,9 +101,6 @@ impl TuiApp {
             help_overlay: None,
             usage_overlay: None,
             theme: DerivedTheme::fallback(),
-            terminal_palette: TerminalPalette::fallback(),
-            last_theme_query: Instant::now(),
-            terminal_palette_query_enabled: terminal_palette_query_enabled(),
             wake_pending,
             surface: CellSurface::new(
                 1,
@@ -130,47 +111,6 @@ impl TuiApp {
         };
         app.core.sync_terminals();
         Ok(app)
-    }
-
-    fn inherit_terminal_theme(&mut self) {
-        if !self.terminal_palette_query_enabled {
-            return;
-        }
-        if let Ok(response) = raw::query_terminal_palette_response(Duration::from_millis(120)) {
-            if let Some(palette) = parse_terminal_palette_response(&response) {
-                self.terminal_palette = palette;
-                self.theme = DerivedTheme::from_terminal_palette(palette);
-            }
-            self.last_theme_query = Instant::now();
-        }
-    }
-
-    fn request_terminal_theme_now(&mut self) {
-        if !self.terminal_palette_query_enabled {
-            return;
-        }
-        self.last_theme_query = Instant::now();
-        let _ = raw::request_terminal_palette_query();
-    }
-
-    fn maybe_query_terminal_theme(&mut self) {
-        if !self.terminal_palette_query_enabled {
-            return;
-        }
-        if self.last_theme_query.elapsed() >= TUI_THEME_QUERY_INTERVAL {
-            self.request_terminal_theme_now();
-        }
-    }
-
-    fn handle_terminal_palette_response(&mut self, bytes: &[u8]) -> bool {
-        if !self.terminal_palette_query_enabled || !is_terminal_palette_response(bytes) {
-            return false;
-        }
-        if apply_terminal_palette_response(bytes, &mut self.terminal_palette) {
-            self.theme = DerivedTheme::from_terminal_palette(self.terminal_palette);
-            self.needs_redraw = true;
-        }
-        true
     }
 }
 
@@ -188,7 +128,6 @@ impl TuiApp {
             }
 
             self.core.flush_pending_persist(false);
-            self.maybe_query_terminal_theme();
             let animation_active = self.visible_sidebar_animation_active();
             self.schedule_animation_redraw(animation_active);
 
@@ -312,12 +251,6 @@ impl TuiApp {
         palette.muted = theme.muted;
         palette.statusbar_bg = theme.status_bg;
         palette.statusbar_fg = theme.status_fg;
-        // Keep the sidebar divider readable by mirroring the host terminal's bg.
-        palette.sidebar_divider = if self.terminal_palette.bg == TRANSPARENT {
-            theme.separator
-        } else {
-            self.terminal_palette.bg.negative()
-        };
         let mut surface = std::mem::take(&mut self.surface);
         surface.reset(i32::from(cols), i32::from(rows), palette.fg, palette.bg);
 
@@ -390,10 +323,6 @@ impl TuiApp {
     }
 
     fn handle_input(&mut self, bytes: &[u8]) -> bool {
-        if self.handle_terminal_palette_response(bytes) {
-            return false;
-        }
-
         if is_ctrl_char(bytes, 'q') {
             return true;
         }
