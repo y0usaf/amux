@@ -30,6 +30,11 @@ const TUI_BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
 const TUI_BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
 
 const TUI_THEME_QUERY_INTERVAL: Duration = Duration::from_secs(1);
+
+fn terminal_palette_query_enabled() -> bool {
+    std::env::var_os("PI_HARNESS_DISABLE_TUI_THEME_QUERY").is_none()
+        && std::env::var_os("ZELLIJ").is_none()
+}
 #[derive(Debug)]
 enum TuiEvent {
     Input(Vec<u8>),
@@ -42,7 +47,9 @@ pub fn run(initial_project_paths: Vec<PathBuf>) -> anyhow::Result<()> {
     let notify = tui_notify(tx.clone(), wake_pending.clone());
     let mut app = TuiApp::new(notify, wake_pending, initial_project_paths)?;
     let _raw_terminal = RawTerminal::enter()?;
-    app.inherit_terminal_theme();
+    if app.terminal_palette_query_enabled {
+        app.inherit_terminal_theme();
+    }
     spawn_stdin_reader(tx);
     app.run(rx)
 }
@@ -87,6 +94,7 @@ struct TuiApp {
     theme: DerivedTheme,
     terminal_palette: TerminalPalette,
     last_theme_query: Instant,
+    terminal_palette_query_enabled: bool,
     wake_pending: Arc<AtomicBool>,
     surface: CellSurface,
 }
@@ -111,6 +119,7 @@ impl TuiApp {
             theme: DerivedTheme::fallback(),
             terminal_palette: TerminalPalette::fallback(),
             last_theme_query: Instant::now(),
+            terminal_palette_query_enabled: terminal_palette_query_enabled(),
             wake_pending,
             surface: CellSurface::new(
                 1,
@@ -124,6 +133,9 @@ impl TuiApp {
     }
 
     fn inherit_terminal_theme(&mut self) {
+        if !self.terminal_palette_query_enabled {
+            return;
+        }
         if let Ok(response) = raw::query_terminal_palette_response(Duration::from_millis(120)) {
             if let Some(palette) = parse_terminal_palette_response(&response) {
                 self.terminal_palette = palette;
@@ -134,18 +146,24 @@ impl TuiApp {
     }
 
     fn request_terminal_theme_now(&mut self) {
+        if !self.terminal_palette_query_enabled {
+            return;
+        }
         self.last_theme_query = Instant::now();
         let _ = raw::request_terminal_palette_query();
     }
 
     fn maybe_query_terminal_theme(&mut self) {
+        if !self.terminal_palette_query_enabled {
+            return;
+        }
         if self.last_theme_query.elapsed() >= TUI_THEME_QUERY_INTERVAL {
             self.request_terminal_theme_now();
         }
     }
 
     fn handle_terminal_palette_response(&mut self, bytes: &[u8]) -> bool {
-        if !is_terminal_palette_response(bytes) {
+        if !self.terminal_palette_query_enabled || !is_terminal_palette_response(bytes) {
             return false;
         }
         if apply_terminal_palette_response(bytes, &mut self.terminal_palette) {
