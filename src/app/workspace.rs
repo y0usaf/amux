@@ -454,7 +454,6 @@ impl Workspace {
                 sessions: project
                     .sessions
                     .iter()
-                    .filter(|session| session.should_render_in_sidebar())
                     .map(persisted_session_from_session)
                     .collect(),
             })
@@ -614,7 +613,7 @@ mod tests {
         assert_eq!(snapshot.selected_session.as_deref(), Some("pi-session-1"));
         assert_eq!(snapshot.project_cache.len(), 1);
         assert_eq!(snapshot.project_cache[0].path, "/tmp/current-project");
-        assert_eq!(snapshot.project_cache[0].sessions.len(), 1);
+        assert_eq!(snapshot.project_cache[0].sessions.len(), 2);
         assert_eq!(
             snapshot.project_cache[0].sessions[0]
                 .pi_session_id

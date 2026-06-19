@@ -127,16 +127,12 @@ pub fn extension_path() -> Option<PathBuf> {
 fn discover_inner(config_override: Option<&str>) -> Option<DiscoverResult> {
     if let Some(path) = config_override {
         let path = PathBuf::from(path);
-        if let Some(result) = try_binary(&path) {
-            return Some(result);
-        }
+        return try_binary(&path);
     }
 
     if let Ok(path) = std::env::var("PI_BINARY") {
         let path = PathBuf::from(path);
-        if let Some(result) = try_binary(&path) {
-            return Some(result);
-        }
+        return try_binary(&path);
     }
 
     if let Some(path) = which("pi") {
@@ -448,6 +444,52 @@ mod tests {
             PiLaunch::PackageRunner { .. } => panic!("expected binary launch"),
         }
         reset_discovery_cache();
+    }
+
+    #[test]
+    fn invalid_config_override_does_not_fall_back_to_env_or_path() {
+        let dir = TestDir::new();
+        let path_pi = dir.path().join("pi");
+        let missing = dir.path().join("missing-pi");
+        write_executable(
+            &path_pi,
+            "#!/bin/sh
+exit 0
+",
+        );
+        let path = std::env::join_paths([dir.path()]).unwrap();
+        let _lock = test_support::env_lock();
+
+        with_env_var_set("PATH", path.as_os_str(), || {
+            with_env_var_removed("PI_BINARY", || {
+                reset_discovery_cache();
+                assert!(discover(Some(missing.to_str().unwrap())).is_none());
+                reset_discovery_cache();
+            })
+        });
+    }
+
+    #[test]
+    fn invalid_pi_binary_env_does_not_fall_back_to_path() {
+        let dir = TestDir::new();
+        let path_pi = dir.path().join("pi");
+        let missing = dir.path().join("missing-pi");
+        write_executable(
+            &path_pi,
+            "#!/bin/sh
+exit 0
+",
+        );
+        let path = std::env::join_paths([dir.path()]).unwrap();
+        let _lock = test_support::env_lock();
+
+        with_env_var_set("PATH", path.as_os_str(), || {
+            with_env_var_set("PI_BINARY", missing.as_os_str(), || {
+                reset_discovery_cache();
+                assert!(discover(None).is_none());
+                reset_discovery_cache();
+            })
+        });
     }
 
     #[test]

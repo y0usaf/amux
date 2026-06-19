@@ -585,7 +585,9 @@ impl HarnessCore {
     pub(super) fn cleanup_archive(&mut self) {
         let evicted = pi::evict_old_archived_sessions(30);
         if evicted > 0 {
-            self.set_note_ok(format!("removed {evicted} archived sessions older than 30 days"));
+            self.set_note_ok(format!(
+                "removed {evicted} archived sessions older than 30 days"
+            ));
         } else {
             self.set_note_ok("no archived sessions older than 30 days");
         }
