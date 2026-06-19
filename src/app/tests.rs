@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use super::backend::ChromeView;
 use crate::pi::{PiSessionStage, PiSidecarSnapshot};
-use crate::render::Color;
 use crate::state::Session;
 
 use super::{
@@ -309,9 +308,8 @@ fn current_project_rule_uses_statusbar_white_without_status() {
 }
 
 #[test]
-fn sidebar_divider_uses_palette_color() {
-    let mut palette = ScenePalette::themed(DerivedTheme::fallback());
-    palette.sidebar_divider = Color::rgb(0x12, 0x34, 0x56);
+fn sidebar_divider_colors_only_the_glyph() {
+    let palette = ScenePalette::themed(DerivedTheme::fallback());
     let mut surface = CellSurface::new(6, 2, palette.fg, palette.bg);
     let rows = [SidebarRow {
         kind: SidebarRowKind::Label,
@@ -342,13 +340,14 @@ fn sidebar_divider_uses_palette_color() {
 
     let divider_cell = &surface.cells[5];
     assert_eq!(divider_cell.text, "│");
-    assert_eq!(divider_cell.fg, palette.sidebar_divider);
+    assert_eq!(divider_cell.fg, theme::TRANSPARENT);
+    assert_eq!(divider_cell.bg, palette.sidebar_bg);
+    assert!(!divider_cell.reverse);
 }
 
 #[test]
-fn statusbar_sidebar_separator_uses_palette_color() {
-    let mut palette = ScenePalette::themed(DerivedTheme::fallback());
-    palette.sidebar_divider = Color::rgb(0x12, 0x34, 0x56);
+fn statusbar_sidebar_separator_colors_only_the_glyph() {
+    let palette = ScenePalette::themed(DerivedTheme::fallback());
     let mut surface = CellSurface::new(12, 1, palette.fg, palette.bg);
     let chrome = ChromeView {
         project: "project".into(),
@@ -368,7 +367,34 @@ fn statusbar_sidebar_separator_uses_palette_color() {
 
     let separator_cell = &surface.cells[3];
     assert_eq!(separator_cell.text, "│");
-    assert_eq!(separator_cell.fg, palette.sidebar_divider);
+    assert_eq!(separator_cell.fg, theme::TRANSPARENT);
+    assert_eq!(separator_cell.bg, palette.statusbar_bg);
+    assert!(!separator_cell.reverse);
+}
+
+#[test]
+fn statusbar_sidebar_segment_drops_decorative_rule() {
+    let palette = ScenePalette::themed(DerivedTheme::fallback());
+    let mut surface = CellSurface::new(20, 1, palette.fg, palette.bg);
+    let chrome = ChromeView {
+        project: "project".into(),
+        status: String::new(),
+        status_kind: None,
+        session: String::new(),
+    };
+
+    render_statusbar(
+        &mut surface,
+        CellRect::new(0, 0, 20, 1),
+        Some(CellRect::new(0, 0, 14, 1)),
+        &chrome,
+        &palette,
+        HarnessMode::Normal,
+    );
+
+    assert!(surface.cells.iter().all(|cell| cell.text != "╱"));
+    assert_eq!(surface.cells[9].text, " ");
+    assert_eq!(surface.cells[10].text, " ");
 }
 
 #[test]

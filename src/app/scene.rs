@@ -16,7 +16,6 @@ const STATUSLINE_MODE_LABEL_WIDTH: i32 = 9;
 const SCROLLBAR_TRACK_GLYPH: &str = "│";
 const SCROLLBAR_THUMB_GLYPH: &str = "┃";
 const STATUS_SEPARATOR_GLYPH: &str = "│";
-const STATUS_RULE_GLYPH: &str = "╱";
 const STATUS_NOTE_OK_FG: Color = Color::rgb(0, 0, 0);
 const STATUS_NOTE_ERROR_FG: Color = Color::rgb(255, 255, 255);
 
@@ -29,7 +28,6 @@ pub(super) struct ScenePalette {
     pub(super) statusbar_bg: Color,
     pub(super) statusbar_fg: Color,
     pub(super) sidebar_bg: Color,
-    pub(super) sidebar_divider: Color,
     pub(super) border: Color,
     pub(super) muted: Color,
     pub(super) term_fg: Color,
@@ -55,7 +53,6 @@ impl ScenePalette {
             statusbar_fg: theme.status_fg,
             statusbar_bg: theme.status_bg,
             sidebar_bg: theme.sidebar_bg,
-            sidebar_divider: theme.separator,
             border: theme.border,
             muted: theme.muted,
             term_fg: theme.term_fg,
@@ -344,19 +341,6 @@ fn render_statusbar_sidebar_segment(
 
     let plus_rect = statusbar_new_project_rect(panel, Some(sidebar_panel));
     let separator_col = panel.col + sidebar_cols - 1;
-    let brand_start = panel.col + STATUSLINE_MODE_LABEL_WIDTH.min(sidebar_cols) + 1;
-    let brand_end = plus_rect
-        .map(|rect| rect.col.saturating_sub(1))
-        .unwrap_or(separator_col);
-    render_statusline_rule(
-        surface,
-        row,
-        brand_start,
-        brand_end.saturating_sub(brand_start),
-        palette,
-        state,
-        status_bg,
-    );
 
     if let Some(rect) = plus_rect {
         let plus_fg = if matches!(state, StatusbarState::Command) {
@@ -370,7 +354,7 @@ fn render_statusbar_sidebar_segment(
     surface.set_cell(
         separator_col,
         row,
-        palette.sidebar_divider,
+        theme::TRANSPARENT,
         status_bg,
         STATUS_SEPARATOR_GLYPH,
         false,
@@ -378,28 +362,44 @@ fn render_statusbar_sidebar_segment(
     panel.col + sidebar_cols
 }
 
-fn render_statusline_rule(
+fn render_sidebar_scrollbar(
     surface: &mut CellSurface,
-    row: i32,
     col: i32,
-    cols: i32,
-    palette: &ScenePalette,
-    state: StatusbarState,
-    bg: Color,
+    row: i32,
+    rows: i32,
+    visible_items: usize,
+    total_items: usize,
+    scroll_from_top: usize,
+    track_fg: Color,
+    track_bg: Color,
+    thumb_fg: Color,
 ) {
-    if cols <= 0 {
+    if rows <= 0 {
         return;
     }
-    let denom = cols.saturating_sub(1).max(1) as u16;
-    for offset in 0..cols {
-        let mix = ((offset as u16 * 255) / denom) as u8;
-        let fg = match state {
-            StatusbarState::Ok => STATUS_NOTE_OK_FG,
-            StatusbarState::Error => STATUS_NOTE_ERROR_FG,
-            StatusbarState::Command => statusbar_fg(state, palette),
-            StatusbarState::Normal => theme::fade_toward(palette.accent, palette.accent_2, mix),
-        };
-        surface.set_cell(col + offset, row, fg, bg, STATUS_RULE_GLYPH, false);
+
+    for offset in 0..rows {
+        surface.set_cell(col, row + offset, track_fg, track_bg, SCROLLBAR_TRACK_GLYPH, false);
+    }
+
+    if visible_items == 0 || total_items <= visible_items {
+        return;
+    }
+
+    let thumb_rows =
+        (((rows as i64 * visible_items as i64) / total_items as i64).max(1) as i32).min(rows);
+    let max_scroll = total_items.saturating_sub(visible_items).max(1);
+    let thumb_row = row
+        + (((rows - thumb_rows).max(0) as i64 * scroll_from_top as i64) / max_scroll as i64) as i32;
+    for offset in 0..thumb_rows {
+        surface.set_cell(
+            col,
+            thumb_row + offset,
+            thumb_fg,
+            track_bg,
+            SCROLLBAR_THUMB_GLYPH,
+            false,
+        );
     }
 }
 
@@ -514,34 +514,18 @@ pub(super) fn render_sidebar(
 
     if content.cols > 1 {
         let scrollbar_col = content.col + content.cols - 1;
-        // Always paint the track so the sidebar has a consistent right edge,
-        // even when there's nothing to scroll.
-        for offset in 0..content.rows {
-            surface.set_cell(
-                scrollbar_col,
-                content.row + offset,
-                palette.sidebar_divider,
-                palette.sidebar_bg,
-                SCROLLBAR_TRACK_GLYPH,
-                false,
-            );
-        }
-        if rows.len() > visible_rows {
-            render_cell_scrollbar(
-                surface,
-                scrollbar_col,
-                content.row,
-                content.rows,
-                visible_rows,
-                rows.len(),
-                viewport_scroll_from_rows(viewport),
-                palette.sidebar_divider,
-                palette.sidebar_bg,
-                SCROLLBAR_TRACK_GLYPH,
-                palette.accent_2,
-                SCROLLBAR_THUMB_GLYPH,
-            );
-        }
+        render_sidebar_scrollbar(
+            surface,
+            scrollbar_col,
+            content.row,
+            content.rows,
+            visible_rows,
+            rows.len(),
+            viewport_scroll_from_rows(viewport),
+            theme::TRANSPARENT,
+            palette.sidebar_bg,
+            palette.accent_2,
+        );
         content.cols -= 1;
     }
 

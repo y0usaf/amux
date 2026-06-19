@@ -77,7 +77,10 @@ pub fn scan_archived_sessions() -> Vec<ScannedSession> {
         .filter_map(|path| {
             let filename = path.file_name()?.to_str()?.to_owned();
             let entry = cache.entries.get(&filename)?.clone();
-            Some(scanned_session_from_meta(path.clone(), cached_to_meta(entry)))
+            Some(scanned_session_from_meta(
+                path.clone(),
+                cached_to_meta(entry),
+            ))
         })
         .collect();
 
@@ -90,8 +93,8 @@ pub fn evict_old_archived_sessions(max_age_days: u64) -> usize {
     let Some(dir) = archive_dir() else {
         return 0;
     };
-    let Some(threshold) = SystemTime::now()
-        .checked_sub(Duration::from_secs(max_age_days * 24 * 3600))
+    let Some(threshold) =
+        SystemTime::now().checked_sub(Duration::from_secs(max_age_days * 24 * 3600))
     else {
         return 0;
     };
