@@ -91,5 +91,6 @@ If no project path is passed, the app falls back to persisted projects, then cur
 - Uses Pi session discovery from `~/.pi/agent/sessions/...`
 - Launches Pi in a PTY
 - Injects the bundled sidecar extension with `-e`
+- Compact tool rendering lives in separate `pi-compact`; sidecar remains session/status bridge
 - Sidecar snapshots update session name/runtime state in the sidebar + statusline
 - Uses the host terminal grid/ANSI renderer, leaves harness chrome on the terminal's default theme, renders an unboxed main terminal with a Neo-tree style sidebar and dual bottom statusline/command row, uses inverse video for sidebar selection, renders sidebar/terminal scrollbars, supports mouse wheel + `Shift+PageUp/PageDown` scrolling, and exits with `Ctrl+Q`
