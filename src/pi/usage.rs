@@ -8,8 +8,7 @@ use std::time::SystemTime;
 use chrono::{DateTime, Local, TimeZone};
 use serde_json::Value;
 
-const PI_AGENT_DIR_ENV: &str = "PI_AGENT_DIR";
-const DEFAULT_PI_AGENT_SESSIONS_REL: &str = ".pi/agent/sessions";
+use super::files::sessions_root;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PiUsageTotals {
@@ -164,29 +163,7 @@ pub fn load_usage_report_from_path(path: &Path) -> PiUsageReport {
 }
 
 fn default_usage_path() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os(PI_AGENT_DIR_ENV) {
-        let value = path.to_string_lossy();
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            let resolved = resolve_path(Path::new(trimmed));
-            if resolved.is_dir() {
-                return Some(resolved);
-            }
-        }
-    }
-
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    let path = home.join(DEFAULT_PI_AGENT_SESSIONS_REL);
-    path.is_dir().then_some(path)
-}
-
-fn resolve_path(path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    std::env::current_dir()
-        .map(|cwd| cwd.join(path))
-        .unwrap_or_else(|_| path.to_path_buf())
+    sessions_root().filter(|path| path.is_dir())
 }
 
 fn collect_jsonl_files(dir: &Path, files: &mut Vec<PathBuf>) {

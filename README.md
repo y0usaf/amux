@@ -88,7 +88,8 @@ If no project path is passed, the app falls back to persisted projects, then cur
 
 ## Notes
 
-- Uses Pi session discovery from `~/.pi/agent/sessions/...`
+- Uses Pi session directory precedence: `PI_CODING_AGENT_SESSION_DIR`, then `${PI_CODING_AGENT_DIR:-~/.pi/agent}/sessions`
+- Stores harness archives in `ARCHIVE` under resolved Pi session directory
 - Launches Pi in a PTY
 - Injects the bundled sidecar extension with `-e`
 - Compact tool rendering lives in separate `pi-compact`; sidecar remains session/status bridge
