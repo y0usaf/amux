@@ -505,6 +505,7 @@ fn parse_rfc3339_ms(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pi::files::{PI_AGENT_DIR_ENV, PI_SESSION_DIR_ENV};
     use crate::test_support;
     use std::ffi::OsString;
     use std::fs;
@@ -514,23 +515,37 @@ mod tests {
 
     struct EnvGuard {
         _lock: MutexGuard<'static, ()>,
-        old: Option<OsString>,
+        old: Vec<(&'static str, Option<OsString>)>,
     }
 
     impl EnvGuard {
         fn set_home(value: &Path) -> Self {
             let lock = test_support::env_lock();
-            let old = std::env::var_os("HOME");
+            let keys = [
+                "HOME",
+                "XDG_STATE_HOME",
+                PI_AGENT_DIR_ENV,
+                PI_SESSION_DIR_ENV,
+            ];
+            let old = keys
+                .into_iter()
+                .map(|key| (key, std::env::var_os(key)))
+                .collect();
             std::env::set_var("HOME", value);
+            std::env::remove_var("XDG_STATE_HOME");
+            std::env::remove_var(PI_AGENT_DIR_ENV);
+            std::env::remove_var(PI_SESSION_DIR_ENV);
             Self { _lock: lock, old }
         }
     }
 
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            match &self.old {
-                Some(value) => std::env::set_var("HOME", value),
-                None => std::env::remove_var("HOME"),
+            for (key, old) in &self.old {
+                match old {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
             }
         }
     }
