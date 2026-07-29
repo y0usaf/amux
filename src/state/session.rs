@@ -20,6 +20,11 @@ impl SessionRuntime {
     pub fn is_active(&self) -> bool {
         self.running || self.queued
     }
+
+    /// True while a pi-interview questionnaire is blocking the agent turn.
+    pub fn awaiting_interview(&self) -> bool {
+        self.running && self.tool_name.as_deref() == Some("interview_user")
+    }
 }
 
 #[derive(Clone, Debug)]
