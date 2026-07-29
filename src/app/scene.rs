@@ -7,8 +7,8 @@ use super::cell_surface::{
 };
 use super::layout::{sidebar_content_rect, CellLayout, CellRect};
 use super::sidebar::{
-    sidebar_status_glyph, SidebarRow, SidebarRowKind, SidebarStatusKind, SidebarViewportItem,
-    SIDEBAR_ANIMATION_FRAME_MS,
+    crown_jewel_glyph, sidebar_status_glyph, SidebarRow, SidebarRowKind, SidebarStatusKind,
+    SidebarViewportItem, SIDEBAR_ANIMATION_FRAME_MS,
 };
 use super::terminal_view::for_each_terminal_screen_cell;
 use super::theme::{self, DerivedTheme};
@@ -379,7 +379,14 @@ fn render_sidebar_scrollbar(
     }
 
     for offset in 0..rows {
-        surface.set_cell(col, row + offset, track_fg, track_bg, SCROLLBAR_TRACK_GLYPH, false);
+        surface.set_cell(
+            col,
+            row + offset,
+            track_fg,
+            track_bg,
+            SCROLLBAR_TRACK_GLYPH,
+            false,
+        );
     }
 
     if visible_items == 0 || total_items <= visible_items {
@@ -556,17 +563,27 @@ pub(super) fn render_sidebar(
         match row.kind {
             SidebarRowKind::Label => {}
             SidebarRowKind::Project(_) => {
-                render_sidebar_project_rule(
+                render_sidebar_project_crown(
                     surface,
                     CellRect::new(content.col, row_y, content.cols, 1),
                     &row.text,
-                    row_fg,
                     row_bg,
                     row.status,
                     now_ms,
                     reverse,
-                    row.selector,
+                    selected,
+                    hovered,
+                    sticky,
                     row.current,
+                    palette,
+                );
+            }
+
+            SidebarRowKind::PanelBottom => {
+                render_sidebar_panel_bottom(
+                    surface,
+                    CellRect::new(content.col, row_y, content.cols, 1),
+                    row_bg,
                     palette,
                 );
             }
@@ -578,17 +595,37 @@ pub(super) fn render_sidebar(
                         animated_sidebar_status_color(status, palette, now_ms, item.visible_row),
                     )
                 });
+                let border_fg = if palette.monochrome {
+                    palette.fg
+                } else {
+                    palette.border
+                };
+                surface.set_cell(content.col, row_y, border_fg, row_bg, "│", false);
+                if content.cols > 1 {
+                    surface.set_cell(
+                        content.col + content.cols - 1,
+                        row_y,
+                        border_fg,
+                        row_bg,
+                        "│",
+                        false,
+                    );
+                }
+                let inner_col = content.col + 1;
+                let inner_cols = content.cols.saturating_sub(2);
+                if inner_cols <= 0 {
+                    continue;
+                }
                 let branch = if row.selector || hovered {
                     SIDEBAR_SELECTOR_GLYPH
                 } else {
                     "  "
                 };
-                let indent_cols = content.cols.min(display_cell_width(branch) as i32);
+                let indent_cols = inner_cols.min(display_cell_width(branch) as i32);
                 let reserved_cells = status
-                    .map(|(glyph, _)| display_cell_width(glyph) as i32 + 1)
+                    .map(|(glyph, _)| display_cell_width(glyph) as i32 + 2)
                     .unwrap_or(0);
-                let text_cols = content
-                    .cols
+                let text_cols = inner_cols
                     .saturating_sub(indent_cols)
                     .saturating_sub(reserved_cells);
                 let value = truncate_to_cells(&row.text, text_cols as usize);
@@ -600,7 +637,7 @@ pub(super) fn render_sidebar(
                     palette.border
                 };
                 surface.put_text_styled(
-                    content.col,
+                    inner_col,
                     row_y,
                     indent_cols,
                     branch_fg,
@@ -614,7 +651,7 @@ pub(super) fn render_sidebar(
                 ) {
                     render_sidebar_gradient_text(
                         surface,
-                        CellRect::new(content.col + indent_cols, row_y, text_cols, 1),
+                        CellRect::new(inner_col + indent_cols, row_y, text_cols, 1),
                         &value,
                         row_bg,
                         reverse,
@@ -628,14 +665,18 @@ pub(super) fn render_sidebar(
                 } else {
                     let title_fg = if matches!(
                         row.status,
-                        Some(SidebarStatusKind::Interrupted | SidebarStatusKind::Notification)
+                        Some(
+                            SidebarStatusKind::Interrupted
+                                | SidebarStatusKind::Notification
+                                | SidebarStatusKind::Input
+                        )
                     ) {
                         sidebar_status_color_for_palette(row.status.unwrap(), palette)
                     } else {
                         row_fg
                     };
                     surface.put_text_styled(
-                        content.col + indent_cols,
+                        inner_col + indent_cols,
                         row_y,
                         text_cols,
                         title_fg,
@@ -647,7 +688,7 @@ pub(super) fn render_sidebar(
 
                 if let Some((glyph, color)) = status {
                     let glyph_cols = display_cell_width(glyph) as i32;
-                    let glyph_col = content.col + content.cols.saturating_sub(glyph_cols);
+                    let glyph_col = inner_col + inner_cols.saturating_sub(glyph_cols + 1);
                     surface.put_text_styled(
                         glyph_col, row_y, glyph_cols, color, row_bg, glyph, reverse,
                     );
@@ -710,205 +751,112 @@ fn render_sidebar_gradient_text(
     }
 }
 
-fn render_sidebar_project_rule(
+#[allow(clippy::too_many_arguments)]
+fn render_sidebar_project_crown(
     surface: &mut CellSurface,
     rect: CellRect,
     label: &str,
-    label_fg: Color,
     bg: Color,
     status: Option<SidebarStatusKind>,
     now_ms: u64,
     reverse: bool,
-    show_selector: bool,
-    current_project: bool,
+    selected: bool,
+    hovered: bool,
+    sticky: bool,
+    current: bool,
     palette: &ScenePalette,
 ) {
     if rect.cols <= 0 {
         return;
     }
 
-    let selector_cols = if show_selector {
-        let selector_cols = rect
-            .cols
-            .min(display_cell_width(SIDEBAR_SELECTOR_GLYPH) as i32);
-        surface.put_text_styled(
-            rect.col,
-            rect.row,
-            selector_cols,
-            palette.accent,
-            bg,
-            SIDEBAR_SELECTOR_GLYPH,
-            reverse,
-        );
-        selector_cols
+    let status_color = status.map(|status| sidebar_status_color_for_palette(status, palette));
+    // Box rails (crown, sides, bottom) share one border gray so a project box
+    // reads as a single frame; state is signalled by the jewel + title instead.
+    let frame_fg = if palette.monochrome {
+        palette.fg
     } else {
-        0
+        palette.border
     };
-    let label_area = CellRect::new(
-        rect.col + selector_cols,
-        rect.row,
-        rect.cols.saturating_sub(selector_cols),
-        1,
-    );
-
-    let idle_project_fg = theme::brighten(palette.statusbar_bg, 36);
-    let label_fg = match status {
-        Some(SidebarStatusKind::Notification) if !palette.monochrome => {
-            sidebar_status_color_for_palette(SidebarStatusKind::Notification, palette)
+    let jewel_fg = if palette.monochrome {
+        palette.fg
+    } else if selected {
+        status_color.unwrap_or(palette.accent)
+    } else {
+        match status_color {
+            Some(status_color) => status_color,
+            None if current => palette.statusbar_fg,
+            None => palette.border,
         }
-        None if !palette.monochrome => idle_project_fg,
-        _ => label_fg,
     };
-    let value = truncate_to_cells(&format!(" {label} "), label_area.cols.max(0) as usize);
+    let title_fg = if palette.monochrome {
+        palette.fg
+    } else if selected {
+        palette.statusbar_fg
+    } else if let Some(status_color) = status_color {
+        status_color
+    } else if hovered || sticky {
+        palette.accent
+    } else {
+        theme::brighten(palette.statusbar_bg, 36)
+    };
+    let jewel = crown_jewel_glyph(status, now_ms);
+
+    // Crown layout: `╭─ {jewel} {title} {fill}╮` (7 fixed cells + fill >= 1).
+    if rect.cols < 9 {
+        let value = truncate_to_cells(&format!(" {label} "), rect.cols as usize);
+        surface.put_text_bold_styled(rect.col, rect.row, rect.cols, title_fg, bg, &value, reverse);
+        return;
+    }
+    let title_max = (rect.cols - 8).max(1) as usize;
+    let value = truncate_to_cells(label, title_max);
     let value_cols = display_cell_width(&value) as i32;
-    let label_rect = CellRect::new(
-        label_area.col + label_area.cols.saturating_sub(value_cols) / 2,
-        label_area.row,
-        value_cols.min(label_area.cols),
-        1,
-    );
+    let fill_cols = (rect.cols - 7 - value_cols).max(1);
 
-    let gradient_title = !palette.monochrome
-        && matches!(
-            status,
-            Some(SidebarStatusKind::Active | SidebarStatusKind::Queued)
-        );
-    if !reverse {
-        let left_rule = CellRect::new(
-            label_area.col,
-            label_area.row,
-            label_rect.col.saturating_sub(label_area.col),
-            1,
-        );
-        let right_rule_col = label_rect.col + label_rect.cols;
-        let right_rule = CellRect::new(
-            right_rule_col,
-            label_area.row,
-            (label_area.col + label_area.cols).saturating_sub(right_rule_col),
-            1,
-        );
-        if gradient_title {
-            render_sidebar_project_rule_gradient(
-                surface,
-                left_rule,
-                bg,
-                reverse,
-                status,
-                now_ms,
-                0,
-                idle_project_fg,
-                palette,
-            );
-            render_sidebar_project_rule_gradient(
-                surface,
-                right_rule,
-                bg,
-                reverse,
-                status,
-                now_ms,
-                left_rule.cols.max(0) as usize + value_cols.max(0) as usize,
-                idle_project_fg,
-                palette,
-            );
-        } else {
-            let rule_fg = sidebar_project_rule_fg(
-                label_fg,
-                idle_project_fg,
-                status,
-                current_project,
-                palette,
-            );
-            render_sidebar_project_rule_solid(surface, left_rule, rule_fg, bg);
-            render_sidebar_project_rule_solid(surface, right_rule, rule_fg, bg);
-        }
-    }
-    if gradient_title {
-        render_sidebar_gradient_text(
-            surface,
-            label_rect,
-            &value,
-            bg,
-            reverse,
-            palette.accent,
-            palette.accent_2,
-            status,
-            now_ms,
-            0,
-            palette,
-        );
-    } else {
-        surface.put_text_bold_styled(
-            label_rect.col,
-            label_rect.row,
-            label_rect.cols,
-            label_fg,
-            bg,
-            &value,
-            reverse,
-        );
-    }
-}
-
-fn render_sidebar_project_rule_solid(
-    surface: &mut CellSurface,
-    rect: CellRect,
-    fg: Color,
-    bg: Color,
-) {
-    if rect.cols <= 0 {
-        return;
-    }
-    for col in rect.col..(rect.col + rect.cols) {
-        surface.set_cell(col, rect.row, fg, bg, "━", false);
-    }
-}
-
-fn render_sidebar_project_rule_gradient(
-    surface: &mut CellSurface,
-    rect: CellRect,
-    bg: Color,
-    reverse: bool,
-    status: Option<SidebarStatusKind>,
-    now_ms: u64,
-    phase_slot: usize,
-    idle_project_fg: Color,
-    palette: &ScenePalette,
-) {
-    if rect.cols <= 0 {
-        return;
-    }
-    let value = "━".repeat(rect.cols as usize);
-    render_sidebar_gradient_text(
-        surface,
-        rect,
-        &value,
+    let mut cursor = rect.col;
+    surface.put_text_styled(cursor, rect.row, 3, frame_fg, bg, "╭─ ", reverse);
+    cursor += 3;
+    surface.put_text_styled(cursor, rect.row, 1, jewel_fg, bg, jewel, reverse);
+    cursor += 1;
+    surface.put_text_styled(cursor, rect.row, 1, frame_fg, bg, " ", reverse);
+    cursor += 1;
+    surface.put_text_bold_styled(cursor, rect.row, value_cols, title_fg, bg, &value, reverse);
+    cursor += value_cols;
+    let tail = format!(" {}╮", "─".repeat(fill_cols as usize));
+    surface.put_text_styled(
+        cursor,
+        rect.row,
+        rect.col + rect.cols - cursor,
+        frame_fg,
         bg,
+        &tail,
         reverse,
-        idle_project_fg,
-        palette.statusbar_bg,
-        status,
-        now_ms,
-        phase_slot,
-        palette,
     );
 }
 
-fn sidebar_project_rule_fg(
-    label_fg: Color,
-    idle_project_fg: Color,
-    status: Option<SidebarStatusKind>,
-    current_project: bool,
+fn render_sidebar_panel_bottom(
+    surface: &mut CellSurface,
+    rect: CellRect,
+    bg: Color,
     palette: &ScenePalette,
-) -> Color {
-    if palette.monochrome {
-        return label_fg;
+) {
+    if rect.cols <= 0 {
+        return;
     }
-    match status {
-        Some(SidebarStatusKind::Interrupted | SidebarStatusKind::Notification) => label_fg,
-        Some(SidebarStatusKind::Active | SidebarStatusKind::Queued) => idle_project_fg,
-        None if current_project => palette.statusbar_fg,
-        None => palette.border,
+    let fg = if palette.monochrome {
+        palette.fg
+    } else {
+        palette.border
+    };
+    if rect.cols == 1 {
+        surface.set_cell(rect.col, rect.row, fg, bg, "│", false);
+        return;
     }
+    surface.set_cell(rect.col, rect.row, fg, bg, "╰", false);
+    for col in (rect.col + 1)..(rect.col + rect.cols - 1) {
+        surface.set_cell(col, rect.row, fg, bg, "─", false);
+    }
+    surface.set_cell(rect.col + rect.cols - 1, rect.row, fg, bg, "╯", false);
 }
 
 fn animated_sidebar_status_color(
@@ -919,14 +867,18 @@ fn animated_sidebar_status_color(
 ) -> Color {
     let base = sidebar_status_color_for_palette(status, palette);
     match status {
-        SidebarStatusKind::Interrupted | SidebarStatusKind::Notification => base,
+        SidebarStatusKind::Interrupted
+        | SidebarStatusKind::Notification
+        | SidebarStatusKind::Input => base,
         SidebarStatusKind::Active | SidebarStatusKind::Queued => {
             let phase = ((now_ms / SIDEBAR_ANIMATION_FRAME_MS) as usize + slot) % 24;
             let intensity = if phase < 12 { phase } else { 24 - phase };
             let peak = match status {
                 SidebarStatusKind::Active => palette.accent_2,
                 SidebarStatusKind::Queued => palette.accent,
-                SidebarStatusKind::Interrupted | SidebarStatusKind::Notification => base,
+                SidebarStatusKind::Interrupted
+                | SidebarStatusKind::Notification
+                | SidebarStatusKind::Input => base,
             };
             theme::fade_toward(base, peak, (intensity * 10).min(180) as u8)
         }
@@ -939,6 +891,7 @@ fn sidebar_status_color_for_palette(status: SidebarStatusKind, palette: &ScenePa
         SidebarStatusKind::Queued => palette.warning,
         SidebarStatusKind::Interrupted => palette.error,
         SidebarStatusKind::Notification => palette.success,
+        SidebarStatusKind::Input => palette.accent_2,
     }
 }
 

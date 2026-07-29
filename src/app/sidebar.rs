@@ -1,7 +1,7 @@
 use crate::render::Color;
 use crate::state::{Project, Session};
 
-use super::theme::{ERROR, HEADING, MUTED, RUNNING, SUCCESS, TEXT, WARNING};
+use super::theme::{ACCENT_2, ERROR, HEADING, MUTED, RUNNING, SUCCESS, TEXT, WARNING};
 
 pub(super) const SIDEBAR_ANIMATION_FRAME_MS: u64 = 10;
 pub(super) const SIDEBAR_SPINNER_FRAME_TICKS: u64 = 6;
@@ -11,6 +11,9 @@ pub(super) const SIDEBAR_SPINNER_FRAMES: &[&str] = &[
     "⠋", "⠙", "⠹", "⠸", "⢸", "⢰", "⣰", "⣠", "⣤", "⣄", "⣆", "⡆", "⡇", "⠇", "⠏",
 ];
 pub(super) const SIDEBAR_NOTIFICATION_GLYPH: &str = "⣿";
+pub(super) const SIDEBAR_CROWN_BLINK_MS: u64 = 400;
+pub(super) const SIDEBAR_CROWN_JEWEL: &str = "✦";
+pub(super) const SIDEBAR_CROWN_JEWEL_OPEN: &str = "✧";
 
 #[derive(Clone, Debug)]
 pub(super) enum SidebarRowKind {
@@ -20,6 +23,7 @@ pub(super) enum SidebarRowKind {
         project_index: usize,
         session_index: usize,
     },
+    PanelBottom,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +32,7 @@ pub(super) enum SidebarStatusKind {
     Queued,
     Interrupted,
     Notification,
+    Input,
 }
 
 #[derive(Clone, Debug)]
@@ -189,7 +194,9 @@ pub(super) fn sidebar_viewport_items(
 }
 
 pub(super) fn session_sidebar_status(session: &Session) -> Option<SidebarStatusKind> {
-    if session.runtime.running {
+    if session.runtime.awaiting_interview() {
+        Some(SidebarStatusKind::Input)
+    } else if session.runtime.running {
         Some(SidebarStatusKind::Active)
     } else if session.runtime.queued {
         Some(SidebarStatusKind::Queued)
@@ -208,6 +215,7 @@ pub(super) fn sidebar_status_color(status: SidebarStatusKind) -> Color {
         SidebarStatusKind::Queued => WARNING,
         SidebarStatusKind::Interrupted => ERROR,
         SidebarStatusKind::Notification => SUCCESS,
+        SidebarStatusKind::Input => ACCENT_2,
     }
 }
 
@@ -219,9 +227,17 @@ pub(super) fn sidebar_status_glyph(status: SidebarStatusKind, now_ms: u64) -> &'
                 % SIDEBAR_SPINNER_FRAMES.len();
             SIDEBAR_SPINNER_FRAMES[frame]
         }
-        SidebarStatusKind::Interrupted | SidebarStatusKind::Notification => {
-            SIDEBAR_NOTIFICATION_GLYPH
+        SidebarStatusKind::Interrupted
+        | SidebarStatusKind::Notification
+        | SidebarStatusKind::Input => SIDEBAR_NOTIFICATION_GLYPH,
+    }
+}
+pub(super) fn crown_jewel_glyph(status: Option<SidebarStatusKind>, now_ms: u64) -> &'static str {
+    match status {
+        Some(SidebarStatusKind::Active) if (now_ms / SIDEBAR_CROWN_BLINK_MS) % 2 == 1 => {
+            SIDEBAR_CROWN_JEWEL_OPEN
         }
+        _ => SIDEBAR_CROWN_JEWEL,
     }
 }
 
@@ -229,7 +245,9 @@ fn spinner_phase_offset(status: SidebarStatusKind) -> usize {
     match status {
         SidebarStatusKind::Active => 0,
         SidebarStatusKind::Queued => SIDEBAR_SPINNER_FRAMES.len() / 2,
-        SidebarStatusKind::Interrupted | SidebarStatusKind::Notification => 0,
+        SidebarStatusKind::Interrupted
+        | SidebarStatusKind::Notification
+        | SidebarStatusKind::Input => 0,
     }
 }
 
@@ -239,6 +257,7 @@ fn project_sidebar_status(project: &Project) -> Option<SidebarStatusKind> {
 
     for session in &project.sessions {
         match session_sidebar_status(session) {
+            Some(SidebarStatusKind::Input) => return Some(SidebarStatusKind::Input),
             Some(SidebarStatusKind::Interrupted) => return Some(SidebarStatusKind::Interrupted),
             Some(SidebarStatusKind::Notification) => return Some(SidebarStatusKind::Notification),
             Some(SidebarStatusKind::Active) => active = true,
@@ -308,6 +327,27 @@ pub(super) fn build_sidebar_rows(
                 status,
             });
         }
+
+        rows.push(SidebarRow {
+            kind: SidebarRowKind::PanelBottom,
+            text: String::new(),
+            fg: MUTED,
+            bg: None,
+            inverted: false,
+            selector: false,
+            current: false,
+            status: None,
+        });
+        rows.push(SidebarRow {
+            kind: SidebarRowKind::Label,
+            text: String::new(),
+            fg: MUTED,
+            bg: None,
+            inverted: false,
+            selector: false,
+            current: false,
+            status: None,
+        });
     }
 
     rows
@@ -332,7 +372,7 @@ pub(super) fn selected_sidebar_row_index_for_state(
                 && project_index == selected_project
                 && Some(session_index) == selected_session
         }
-        SidebarRowKind::Label => false,
+        SidebarRowKind::Label | SidebarRowKind::PanelBottom => false,
     })
 }
 
@@ -426,12 +466,64 @@ mod tests {
             sidebar_status_color(SidebarStatusKind::Notification),
             SUCCESS
         );
+        assert_eq!(sidebar_status_color(SidebarStatusKind::Input), ACCENT_2);
     }
 
     #[test]
     fn session_sidebar_status_returns_none_without_flags() {
         let session = Session::new_draft();
         assert_eq!(session_sidebar_status(&session), None);
+    }
+
+    #[test]
+    fn interview_tool_session_reports_input_status() {
+        let mut session = Session::new_draft();
+        session.runtime.running = true;
+        session.runtime.status = Some("tool".into());
+        session.runtime.tool_name = Some("interview_user".into());
+        assert_eq!(
+            session_sidebar_status(&session),
+            Some(SidebarStatusKind::Input)
+        );
+    }
+
+    #[test]
+    fn other_tool_session_stays_active() {
+        let mut session = Session::new_draft();
+        session.runtime.running = true;
+        session.runtime.status = Some("tool".into());
+        session.runtime.tool_name = Some("grep".into());
+        assert_eq!(
+            session_sidebar_status(&session),
+            Some(SidebarStatusKind::Active)
+        );
+    }
+
+    #[test]
+    fn idle_session_with_stale_interview_tool_name_is_not_input() {
+        let mut session = Session::new_draft();
+        session.runtime.tool_name = Some("interview_user".into());
+        assert_ne!(
+            session_sidebar_status(&session),
+            Some(SidebarStatusKind::Input)
+        );
+    }
+
+    #[test]
+    fn project_sidebar_status_prioritizes_input() {
+        let mut project = Project::new("project".into());
+        let mut active = Session::new_draft();
+        active.runtime.running = true;
+        let mut waiting = Session::new_draft();
+        waiting.runtime.running = true;
+        waiting.runtime.tool_name = Some("interview_user".into());
+        project.sessions.push(active);
+        project.sessions.push(waiting);
+
+        assert_eq!(
+            project_sidebar_status(&project),
+            Some(SidebarStatusKind::Input)
+        );
     }
 
     #[test]
@@ -575,5 +667,40 @@ mod tests {
         assert!(items[0].sticky);
         assert_eq!(items[1].row_index, 12);
         assert_eq!(items[1].visible_row, 1);
+    }
+
+    #[test]
+    fn projects_are_wrapped_in_panel_chrome_rows() {
+        let mut project = Project::new("project".into());
+        let mut session = Session::new_draft();
+        session.draft = false;
+        project.sessions.push(session);
+        let rows = build_sidebar_rows(&[project], 0, None, false);
+
+        assert!(matches!(rows[0].kind, SidebarRowKind::Project(0)));
+        assert!(matches!(rows[1].kind, SidebarRowKind::Session { .. }));
+        assert!(matches!(rows[2].kind, SidebarRowKind::PanelBottom));
+        assert!(matches!(rows[3].kind, SidebarRowKind::Label));
+    }
+
+    #[test]
+    fn crown_jewel_blinks_only_while_active() {
+        assert_eq!(crown_jewel_glyph(None, 0), SIDEBAR_CROWN_JEWEL);
+        assert_eq!(
+            crown_jewel_glyph(Some(SidebarStatusKind::Active), 0),
+            SIDEBAR_CROWN_JEWEL
+        );
+        assert_eq!(
+            crown_jewel_glyph(Some(SidebarStatusKind::Active), SIDEBAR_CROWN_BLINK_MS),
+            SIDEBAR_CROWN_JEWEL_OPEN
+        );
+        assert_eq!(
+            crown_jewel_glyph(Some(SidebarStatusKind::Queued), SIDEBAR_CROWN_BLINK_MS),
+            SIDEBAR_CROWN_JEWEL
+        );
+        assert_eq!(
+            crown_jewel_glyph(Some(SidebarStatusKind::Active), SIDEBAR_CROWN_BLINK_MS * 2),
+            SIDEBAR_CROWN_JEWEL
+        );
     }
 }
