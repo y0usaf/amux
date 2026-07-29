@@ -77,7 +77,8 @@ export function registerRail(pi, store) {
 					attach(tui)
 					return {
 						render(width) {
-							return renderRail(store.state, Math.max(1, width), Date.now())
+							const rows = tuiRef?.terminal?.rows ?? 0
+							return renderRail(store.state, Math.max(1, width), Date.now(), rows)
 						},
 					}
 				},

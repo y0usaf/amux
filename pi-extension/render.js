@@ -195,12 +195,13 @@ function sessionsLines(state, width, paint, nowMs) {
 	return lines
 }
 
-// Left-edge divider: a reverse-video space renders as a solid bar in the
-// inverse of whatever background sits underneath, so it adapts to any
-// terminal theme without knowing its colors.
-const DIVIDER = "\u001b[7m \u001b[27m"
+// Left-edge divider: a `│` glyph in the terminal's default foreground, the
+// same treatment as the harness sidebar rail. Default fg is the terminal's
+// own high-contrast complement to its background, so the thin line adapts
+// to any theme without knowing its colors.
+const DIVIDER = "│"
 
-export function renderRail(state, width, nowMs) {
+export function renderRail(state, width, nowMs, rows = 0) {
 	const paint = createPainter(state.harness?.palette)
 	const inner = Math.max(1, width - 1)
 	const running = state.run.phase === "running"
@@ -220,5 +221,7 @@ export function renderRail(state, width, nowMs) {
 		lines.push(panelHeader(panel.title, panel.role, paint, inner, panel.active, nowMs))
 		lines.push(...panel.lines)
 	}
+	// Run the divider the full terminal height, not just the content height.
+	while (lines.length < rows) lines.push("")
 	return lines.map((line) => DIVIDER + pad(line, inner))
 }
