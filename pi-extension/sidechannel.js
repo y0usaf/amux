@@ -1,3 +1,10 @@
+// Harness sidechannel bridge.
+//
+// Upstream (extension → harness): JSON-line session snapshots over the unix
+// socket, unchanged wire format from the original harness-sidechannel.js.
+// Downstream (harness → extension): `hello` (rail width + palette) and
+// `digest` (cross-session summary) lines consumed into the shared store.
+
 import { readFileSync } from "node:fs"
 import net from "node:net"
 
@@ -27,7 +34,7 @@ function promptSessionName(text, images) {
 	return truncateTitle(firstLine)
 }
 
-function registerSidechannel(pi) {
+export function registerSidechannel(pi, store) {
 	if (!SOCKET_PATH) return
 
 	let socket = undefined
@@ -41,6 +48,7 @@ function registerSidechannel(pi) {
 	let toolName = undefined
 	let interrupted = false
 	let lastSnapshotKey = undefined
+	let downstreamBuffer = ""
 	const activeTools = new Map()
 
 	function currentName() {
@@ -113,6 +121,56 @@ function registerSidechannel(pi) {
 		queued = ctx.hasPendingMessages()
 	}
 
+	function mirrorToStore() {
+		const state = store.state
+		if (
+			state.stage === stage &&
+			state.queued === queued &&
+			state.interrupted === interrupted &&
+			state.sessionName === currentName()
+		) {
+			return
+		}
+		store.update((next) => {
+			next.stage = stage
+			next.queued = queued
+			next.interrupted = interrupted
+			next.sessionName = currentName()
+		})
+	}
+
+	function handleDownstreamLine(line) {
+		let message
+		try {
+			message = JSON.parse(line)
+		} catch {
+			return
+		}
+		if (!message || typeof message !== "object") return
+		if (message.type === "hello") {
+			store.update((state) => {
+				state.harness = {
+					railWidth: Number.isFinite(message.railWidth) ? message.railWidth : undefined,
+					palette: typeof message.palette === "object" && message.palette ? message.palette : undefined,
+				}
+			})
+		} else if (message.type === "digest" && Array.isArray(message.sessions)) {
+			store.update((state) => {
+				state.digest = message.sessions
+			})
+		}
+	}
+
+	function handleDownstreamData(chunk) {
+		downstreamBuffer += chunk.toString("utf8")
+		let index
+		while ((index = downstreamBuffer.indexOf("\n")) !== -1) {
+			const line = downstreamBuffer.slice(0, index).trim()
+			downstreamBuffer = downstreamBuffer.slice(index + 1)
+			if (line) handleDownstreamLine(line)
+		}
+	}
+
 	function scheduleReconnect() {
 		if (destroyed || reconnectTimer) return
 		reconnectTimer = setTimeout(() => {
@@ -130,11 +188,13 @@ function registerSidechannel(pi) {
 			socket.on("connect", () => {
 				emitSnapshot(undefined, true)
 			})
+			socket.on("data", handleDownstreamData)
 			socket.on("error", () => {
 				socket?.destroy()
 			})
 			socket.on("close", () => {
 				socket = undefined
+				downstreamBuffer = ""
 				scheduleReconnect()
 			})
 		} catch {
@@ -145,6 +205,7 @@ function registerSidechannel(pi) {
 
 	function emitSnapshot(ctx, force = false) {
 		rememberSessionContext(ctx)
+		mirrorToStore()
 		if (!sessionId) return
 
 		const snapshot = {
@@ -296,8 +357,4 @@ function registerSidechannel(pi) {
 		}, 50)
 		refreshTimer.unref?.()
 	})
-}
-
-export default function (pi) {
-	registerSidechannel(pi)
 }

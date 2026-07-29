@@ -68,6 +68,7 @@ If no project path is passed, the app falls back to persisted projects, then cur
 ```json
 {
   "sidebar_width": 36,
+  "right_rail_width": 44,
   "keybinds": {
     "project_prev": "ctrl+h",
     "project_next": "ctrl+l",
@@ -78,6 +79,7 @@ If no project path is passed, the app falls back to persisted projects, then cur
 ```
 
 - `sidebar_width` sets the left sidebar width in terminal cells (`8..=120`); on narrow terminals it is reduced to preserve the main Pi area
+- `right_rail_width` sets the in-Pi right rail width in PTY cells (`24..=80`, default `44`, `0` disables); sent to the companion extension over the sidecar socket
 - legacy `sidebar_width_percent` is still accepted as a fallback when `sidebar_width` is unset
 - `terminal_width_percent` is accepted for config compatibility but ignored; the Pi terminal fills the remaining main area
 - legacy `tui_sidebar_width_percent` is still accepted as a fallback
@@ -91,7 +93,9 @@ If no project path is passed, the app falls back to persisted projects, then cur
 - Uses Pi session directory precedence: `PI_CODING_AGENT_SESSION_DIR`, then `${PI_CODING_AGENT_DIR:-~/.pi/agent}/sessions`
 - Stores harness archives in `ARCHIVE` under resolved Pi session directory
 - Launches Pi in a PTY
-- Injects the bundled sidecar extension with `-e`
+- Injects the bundled companion extension (`pi-extension/index.js`) with `-e`: sidechannel session bridge + in-Pi right rail
+- Right rail renders inside each Pi PTY (agent state, run activity, usage, context, workspace, cross-session digest) as a non-capturing top-right overlay; Pi reflows into the remaining columns; toggle inside Pi with `/rail`, `/rail on`, `/rail off`; auto-hides when the PTY is narrower than rail width + 64 cols
+- Harness owns rail policy: width + palette travel in a sticky `hello` line, cross-session summary in `digest` lines (harness → extension over the same socket); snapshots flow extension → harness unchanged
 - Compact tool rendering lives in separate `pi-compact`; sidecar remains session/status bridge
 - Sidecar snapshots update session name/runtime state in the sidebar + statusline
 - Uses the host terminal grid/ANSI renderer, leaves harness chrome on the terminal's default theme, renders an unboxed main terminal with a Neo-tree style sidebar and dual bottom statusline/command row, uses inverse video for sidebar selection, renders sidebar/terminal scrollbars, supports mouse wheel + `Shift+PageUp/PageDown` scrolling, and exits with `Ctrl+Q`
