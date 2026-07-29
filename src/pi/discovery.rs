@@ -5,8 +5,8 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::pi::PI_EXTENSION_PATH_ENV;
 
-pub const PACKAGED_EXTENSION_REL: &str = "share/pi-harness/pi-extension/harness-sidechannel.js";
-pub const DEV_EXTENSION_REL: &str = "pi-extension/harness-sidechannel.js";
+pub const PACKAGED_EXTENSION_REL: &str = "share/pi-harness/pi-extension/index.js";
+pub const DEV_EXTENSION_REL: &str = "pi-extension/index.js";
 
 #[derive(Clone, Debug)]
 pub enum PiLaunch {

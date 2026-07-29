@@ -21,6 +21,7 @@ pub use keys::{KeyModifiers, KeyStroke, KeyToken, NamedKeyToken};
 pub const LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT: u8 = 100;
 pub const LAYOUT_SIDEBAR_WIDTH_DEFAULT: u16 = 36;
 pub const LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT: u8 = 22;
+pub const RIGHT_RAIL_WIDTH_DEFAULT: u16 = 44;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LayoutSidebarWidth {
@@ -38,6 +39,7 @@ pub struct AppConfig {
     pub terminal_width_percent: Option<u8>,
     pub sidebar_width: Option<u16>,
     pub sidebar_width_percent: Option<u8>,
+    pub right_rail_width: Option<u16>,
     pub tui_terminal_width_percent: Option<u8>,
     pub tui_sidebar_width_percent: Option<u8>,
     #[serde(default)]
@@ -133,6 +135,22 @@ impl AppConfig {
         }
     }
 
+    /// Rail width in PTY cells sent to the sidechannel extension.
+    /// `0` disables the rail; invalid values fall back to the default.
+    pub fn right_rail_width(&self) -> u16 {
+        match self.right_rail_width {
+            Some(width) if validate_right_rail_width(width) => width,
+            Some(width) => {
+                log::warn!(
+                    "invalid right_rail_width={} (need 0 or 24..=80); using default",
+                    width,
+                );
+                RIGHT_RAIL_WIDTH_DEFAULT
+            }
+            None => RIGHT_RAIL_WIDTH_DEFAULT,
+        }
+    }
+
     fn layout_sidebar_width(&self) -> LayoutSidebarWidth {
         if let Some(width) = self.sidebar_width {
             if validate_layout_sidebar_width(width) {
@@ -170,6 +188,10 @@ impl AppConfig {
 
 pub fn validate_layout_sidebar_width(width: u16) -> bool {
     (8..=120).contains(&width)
+}
+
+pub fn validate_right_rail_width(width: u16) -> bool {
+    width == 0 || (24..=80).contains(&width)
 }
 
 pub fn validate_layout_sidebar_width_percent(percent: u8) -> bool {

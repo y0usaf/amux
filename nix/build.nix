@@ -19,7 +19,7 @@
     fileset = lib.fileset.unions [
       ../src
       ../crates
-      ../pi-extension/harness-sidechannel.js
+      ../pi-extension
       ../Cargo.toml
       ../Cargo.lock
     ];
@@ -54,8 +54,9 @@ in
     inherit cargoArtifacts;
 
     postInstall = ''
-      install -Dm644 ${../pi-extension/harness-sidechannel.js} \
-        $out/share/pi-harness/pi-extension/harness-sidechannel.js
+      mkdir -p $out/share/pi-harness
+      cp -r ${../pi-extension} $out/share/pi-harness/pi-extension
+      chmod -R u+w $out/share/pi-harness/pi-extension
     '';
 
     meta.mainProgram = binaryName;

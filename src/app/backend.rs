@@ -22,6 +22,7 @@ use crate::util::{normalize_project_path, now_millis};
 
 use super::clipboard_image::{clipboard_image_path, clipboard_image_path_from_arboard};
 use super::layout::CellRect;
+use super::rail_bridge;
 use super::sidebar::{
     build_sidebar_rows, clamp_sidebar_scroll_value, ensure_sidebar_selection_visible_for_state,
     scroll_sidebar_by_rows_value, selected_sidebar_selection_span_for_state,
@@ -172,6 +173,7 @@ pub(super) struct HarnessCore {
     terminals_dirty: bool,
     clipboard: Option<Clipboard>,
     note: Option<StatusNote>,
+    rail_digest: Option<String>,
 }
 
 impl HarnessCore {
@@ -198,8 +200,11 @@ impl HarnessCore {
             terminals_dirty: true,
             clipboard: None,
             note: None,
+            rail_digest: None,
         };
         core.workspace.reload_projects_from_disk();
+        core.sidecar
+            .set_hello(rail_bridge::rail_hello_line(core.config.right_rail_width()));
         if !core.terminal_manager.has_sidecar_extension() {
             core.set_note_error("sidecar extension not found");
         }
@@ -817,7 +822,22 @@ impl HarnessCore {
             Some(note_text) => Some(StatusNote::new(note_text, StatusNoteKind::Error)),
             None => None,
         };
+        self.sync_rail_digest();
         changed
+    }
+
+    /// Broadcast the cross-session digest whenever its JSON changes; runs
+    /// every event-loop wake, so selection moves are also captured.
+    fn sync_rail_digest(&mut self) {
+        let digest = rail_bridge::rail_digest_line(
+            self.workspace.projects(),
+            self.workspace.selected_project_index(),
+            self.workspace.selected_session_index(),
+        );
+        if self.rail_digest.as_deref() != Some(digest.as_str()) {
+            self.sidecar.broadcast(&digest);
+            self.rail_digest = Some(digest);
+        }
     }
 
     pub(super) fn run_action(&mut self, action: AppAction) {
@@ -847,7 +867,7 @@ impl HarnessCore {
                 project_index,
                 session_index,
             } => self.select_session_in_project(project_index, session_index),
-            SidebarRowKind::Label => {}
+            SidebarRowKind::Label | SidebarRowKind::PanelBottom => {}
         }
     }
 

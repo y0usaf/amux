@@ -2,6 +2,7 @@ mod backend;
 mod cell_surface;
 mod clipboard_image;
 mod layout;
+mod rail_bridge;
 mod scene;
 mod selection;
 mod sidebar;
