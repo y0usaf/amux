@@ -563,7 +563,7 @@ pub(super) fn render_sidebar(
         match row.kind {
             SidebarRowKind::Label => {}
             SidebarRowKind::Project(_) => {
-                render_sidebar_project_crown(
+                render_sidebar_project_header(
                     surface,
                     CellRect::new(content.col, row_y, content.cols, 1),
                     &row.text,
@@ -579,15 +579,6 @@ pub(super) fn render_sidebar(
                 );
             }
 
-            SidebarRowKind::PanelBottom => {
-                render_sidebar_panel_bottom(
-                    surface,
-                    CellRect::new(content.col, row_y, content.cols, 1),
-                    row_bg,
-                    palette,
-                );
-            }
-
             SidebarRowKind::Session { .. } => {
                 let status = row.status.map(|status| {
                     (
@@ -595,22 +586,6 @@ pub(super) fn render_sidebar(
                         animated_sidebar_status_color(status, palette, now_ms, item.visible_row),
                     )
                 });
-                let border_fg = if palette.monochrome {
-                    palette.fg
-                } else {
-                    palette.border
-                };
-                surface.set_cell(content.col, row_y, border_fg, row_bg, "│", false);
-                if content.cols > 1 {
-                    surface.set_cell(
-                        content.col + content.cols - 1,
-                        row_y,
-                        border_fg,
-                        row_bg,
-                        "│",
-                        false,
-                    );
-                }
                 let inner_col = content.col + 1;
                 let inner_cols = content.cols.saturating_sub(2);
                 if inner_cols <= 0 {
@@ -752,7 +727,7 @@ fn render_sidebar_gradient_text(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_sidebar_project_crown(
+fn render_sidebar_project_header(
     surface: &mut CellSurface,
     rect: CellRect,
     label: &str,
@@ -771,9 +746,9 @@ fn render_sidebar_project_crown(
     }
 
     let status_color = status.map(|status| sidebar_status_color_for_palette(status, palette));
-    // Box rails (crown, sides, bottom) share one border gray so a project box
-    // reads as a single frame; state is signalled by the jewel + title instead.
-    let frame_fg = if palette.monochrome {
+    // Flat rail-style header shared with the in-Pi right rail: state lives in
+    // the jewel + title, the trailing rule stays border gray.
+    let rule_fg = if palette.monochrome {
         palette.fg
     } else {
         palette.border
@@ -802,61 +777,37 @@ fn render_sidebar_project_crown(
     };
     let jewel = crown_jewel_glyph(status, now_ms);
 
-    // Crown layout: `╭─ {jewel} {title} {fill}╮` (7 fixed cells + fill >= 1).
-    if rect.cols < 9 {
+    // Header layout: ` {jewel} {title} {rule}` (4 fixed cells + rule >= 1),
+    // matching the rail's panelHeader in pi-extension/render.js.
+    if rect.cols < 7 {
         let value = truncate_to_cells(&format!(" {label} "), rect.cols as usize);
         surface.put_text_bold_styled(rect.col, rect.row, rect.cols, title_fg, bg, &value, reverse);
         return;
     }
-    let title_max = (rect.cols - 8).max(1) as usize;
+    let title_max = (rect.cols - 6).max(1) as usize;
     let value = truncate_to_cells(label, title_max);
     let value_cols = display_cell_width(&value) as i32;
-    let fill_cols = (rect.cols - 7 - value_cols).max(1);
 
     let mut cursor = rect.col;
-    surface.put_text_styled(cursor, rect.row, 3, frame_fg, bg, "╭─ ", reverse);
-    cursor += 3;
+    surface.put_text_styled(cursor, rect.row, 1, rule_fg, bg, " ", reverse);
+    cursor += 1;
     surface.put_text_styled(cursor, rect.row, 1, jewel_fg, bg, jewel, reverse);
     cursor += 1;
-    surface.put_text_styled(cursor, rect.row, 1, frame_fg, bg, " ", reverse);
+    surface.put_text_styled(cursor, rect.row, 1, rule_fg, bg, " ", reverse);
     cursor += 1;
     surface.put_text_bold_styled(cursor, rect.row, value_cols, title_fg, bg, &value, reverse);
     cursor += value_cols;
-    let tail = format!(" {}╮", "─".repeat(fill_cols as usize));
+    let fill_cols = (rect.col + rect.cols - cursor - 1).max(0);
+    let tail = format!(" {}", "─".repeat(fill_cols as usize));
     surface.put_text_styled(
         cursor,
         rect.row,
         rect.col + rect.cols - cursor,
-        frame_fg,
+        rule_fg,
         bg,
         &tail,
         reverse,
     );
-}
-
-fn render_sidebar_panel_bottom(
-    surface: &mut CellSurface,
-    rect: CellRect,
-    bg: Color,
-    palette: &ScenePalette,
-) {
-    if rect.cols <= 0 {
-        return;
-    }
-    let fg = if palette.monochrome {
-        palette.fg
-    } else {
-        palette.border
-    };
-    if rect.cols == 1 {
-        surface.set_cell(rect.col, rect.row, fg, bg, "│", false);
-        return;
-    }
-    surface.set_cell(rect.col, rect.row, fg, bg, "╰", false);
-    for col in (rect.col + 1)..(rect.col + rect.cols - 1) {
-        surface.set_cell(col, rect.row, fg, bg, "─", false);
-    }
-    surface.set_cell(rect.col + rect.cols - 1, rect.row, fg, bg, "╯", false);
 }
 
 fn animated_sidebar_status_color(
