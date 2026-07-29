@@ -195,24 +195,30 @@ function sessionsLines(state, width, paint, nowMs) {
 	return lines
 }
 
+// Left-edge divider: a reverse-video space renders as a solid bar in the
+// inverse of whatever background sits underneath, so it adapts to any
+// terminal theme without knowing its colors.
+const DIVIDER = "\u001b[7m \u001b[27m"
+
 export function renderRail(state, width, nowMs) {
 	const paint = createPainter(state.harness?.palette)
+	const inner = Math.max(1, width - 1)
 	const running = state.run.phase === "running"
 	const panels = [
-		{ title: "AGENT", role: stageWord(state).role, active: running, lines: agentLines(state, width, paint, nowMs) },
-		{ title: "ACTIVITY", role: "accent", active: running, lines: activityLines(state, width, paint, nowMs) },
-		{ title: "USAGE", role: "accent", active: false, lines: usageLines(state, width, paint) },
-		{ title: "CONTEXT", role: "accent2", active: false, lines: contextLines(state, width, paint) },
-		{ title: "WORKSPACE", role: "accent", active: false, lines: workspaceLines(state, width, paint) },
-		{ title: "SESSIONS", role: "accent2", active: false, lines: sessionsLines(state, width, paint, nowMs) },
+		{ title: "AGENT", role: stageWord(state).role, active: running, lines: agentLines(state, inner, paint, nowMs) },
+		{ title: "ACTIVITY", role: "accent", active: running, lines: activityLines(state, inner, paint, nowMs) },
+		{ title: "USAGE", role: "accent", active: false, lines: usageLines(state, inner, paint) },
+		{ title: "CONTEXT", role: "accent2", active: false, lines: contextLines(state, inner, paint) },
+		{ title: "WORKSPACE", role: "accent", active: false, lines: workspaceLines(state, inner, paint) },
+		{ title: "SESSIONS", role: "accent2", active: false, lines: sessionsLines(state, inner, paint, nowMs) },
 	]
 
 	const lines = []
 	for (const panel of panels) {
 		if (panel.lines.length === 0) continue
 		if (lines.length > 0) lines.push("")
-		lines.push(panelHeader(panel.title, panel.role, paint, width, panel.active, nowMs))
+		lines.push(panelHeader(panel.title, panel.role, paint, inner, panel.active, nowMs))
 		lines.push(...panel.lines)
 	}
-	return lines.map((line) => pad(line, width))
+	return lines.map((line) => DIVIDER + pad(line, inner))
 }

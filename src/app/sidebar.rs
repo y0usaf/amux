@@ -23,7 +23,6 @@ pub(super) enum SidebarRowKind {
         project_index: usize,
         session_index: usize,
     },
-    PanelBottom,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -329,16 +328,6 @@ pub(super) fn build_sidebar_rows(
         }
 
         rows.push(SidebarRow {
-            kind: SidebarRowKind::PanelBottom,
-            text: String::new(),
-            fg: MUTED,
-            bg: None,
-            inverted: false,
-            selector: false,
-            current: false,
-            status: None,
-        });
-        rows.push(SidebarRow {
             kind: SidebarRowKind::Label,
             text: String::new(),
             fg: MUTED,
@@ -372,7 +361,7 @@ pub(super) fn selected_sidebar_row_index_for_state(
                 && project_index == selected_project
                 && Some(session_index) == selected_session
         }
-        SidebarRowKind::Label | SidebarRowKind::PanelBottom => false,
+        SidebarRowKind::Label => false,
     })
 }
 
@@ -670,7 +659,7 @@ mod tests {
     }
 
     #[test]
-    fn projects_are_wrapped_in_panel_chrome_rows() {
+    fn projects_are_followed_by_a_spacer_row() {
         let mut project = Project::new("project".into());
         let mut session = Session::new_draft();
         session.draft = false;
@@ -679,8 +668,8 @@ mod tests {
 
         assert!(matches!(rows[0].kind, SidebarRowKind::Project(0)));
         assert!(matches!(rows[1].kind, SidebarRowKind::Session { .. }));
-        assert!(matches!(rows[2].kind, SidebarRowKind::PanelBottom));
-        assert!(matches!(rows[3].kind, SidebarRowKind::Label));
+        assert!(matches!(rows[2].kind, SidebarRowKind::Label));
+        assert_eq!(rows.len(), 3);
     }
 
     #[test]

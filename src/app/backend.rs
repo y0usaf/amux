@@ -867,7 +867,7 @@ impl HarnessCore {
                 project_index,
                 session_index,
             } => self.select_session_in_project(project_index, session_index),
-            SidebarRowKind::Label | SidebarRowKind::PanelBottom => {}
+            SidebarRowKind::Label => {}
         }
     }
 
