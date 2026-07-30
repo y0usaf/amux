@@ -165,6 +165,14 @@ export function registerRail(pi, store) {
 			const model = ctx.model
 			const context = ctx.getContextUsage?.()
 			let usage
+			// Roster, not history: getAllTools() is every configured tool,
+			// getActiveTools() the subset the LLM may call right now. Both are
+			// optional on older Pi, which leaves the TOOLS panel absent.
+			const activeTools = new Set(pi.getActiveTools?.() ?? [])
+			const tools = (pi.getAllTools?.() ?? [])
+				.map((tool) => ({ name: String(tool?.name ?? ""), active: activeTools.has(tool?.name) }))
+				.filter((tool) => tool.name)
+				.sort((a, b) => a.name.localeCompare(b.name))
 			const messages = ctx.sessionManager?.getEntries?.() ?? []
 			let input = 0
 			let output = 0
@@ -195,6 +203,7 @@ export function registerRail(pi, store) {
 				state.subscription = Boolean(model && ctx.modelRegistry?.isUsingOAuth?.(model))
 				state.usage = usage
 				state.context = context ?? undefined
+				state.tools = tools
 				state.cwd = ctx.cwd ?? state.cwd
 			})
 		} catch {

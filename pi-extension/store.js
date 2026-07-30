@@ -29,6 +29,7 @@ export function createStore() {
 		subscription: false,
 		usage: undefined, // { input, output, cacheRead, cacheWrite, cost, costAvailable }
 		context: undefined, // { tokens, contextWindow, percent }
+		tools: [], // [{ name, active }] registered roster, sorted by name
 
 		// workspace
 		cwd: process.cwd(),
