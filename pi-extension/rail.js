@@ -7,7 +7,12 @@
 
 import { renderRail } from "./render.js"
 
-const DEFAULT_RAIL_WIDTH = 44
+// Fallback only: the harness sends the authoritative width in `hello`, sized
+// as the same share of its terminal that the left sidebar takes. These values
+// mirror PANEL_WIDTH_* in src/config/mod.rs for the pre-hello frames.
+const RAIL_WIDTH_PERCENT = 22
+const MIN_RAIL_WIDTH = 24
+const MAX_RAIL_WIDTH = 80
 const MIN_MAIN_WIDTH = 64
 const ANIMATION_MS = 250
 
@@ -18,13 +23,18 @@ export function registerRail(pi, store) {
 	let tuiRef
 	let animationTimer
 
-	const railWidth = () => {
+	const fallbackWidth = (terminalWidth) => {
+		const share = Math.round(((Number.isFinite(terminalWidth) ? terminalWidth : 0) * RAIL_WIDTH_PERCENT) / 100)
+		return Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, share))
+	}
+
+	const railWidth = (terminalWidth) => {
 		const width = store.state.harness?.railWidth
-		return Number.isFinite(width) ? width : DEFAULT_RAIL_WIDTH
+		return Number.isFinite(width) ? width : fallbackWidth(terminalWidth)
 	}
 
 	const visibleAt = (terminalWidth) => {
-		const width = railWidth()
+		const width = railWidth(terminalWidth)
 		return (
 			enabled &&
 			!wrapBroken &&
@@ -36,7 +46,7 @@ export function registerRail(pi, store) {
 
 	const overlayOptions = {
 		anchor: "top-right",
-		width: DEFAULT_RAIL_WIDTH,
+		width: MIN_RAIL_WIDTH,
 		maxHeight: "100%",
 		margin: 0,
 		nonCapturing: true,
@@ -50,8 +60,8 @@ export function registerRail(pi, store) {
 		tuiRef = tui
 		const previousRender = tui.render
 		tui.render = function wrappedRender(terminalWidth) {
-			const reserved = visibleAt(terminalWidth) ? railWidth() : 0
-			overlayOptions.width = reserved > 0 ? reserved : railWidth() || DEFAULT_RAIL_WIDTH
+			const reserved = visibleAt(terminalWidth) ? railWidth(terminalWidth) : 0
+			overlayOptions.width = reserved > 0 ? reserved : railWidth(terminalWidth) || MIN_RAIL_WIDTH
 			try {
 				return previousRender.call(tui, terminalWidth - reserved)
 			} catch (error) {

@@ -238,6 +238,7 @@ impl TuiApp {
         let (cols, rows) = terminal_size();
         let layout = compute_cell_layout(cols, rows, self.core.config.layout_widths());
         let visible_sidebar_rows = sidebar_content_rect(layout.sidebar).rows.max(0) as usize;
+        self.core.sync_rail_width(cols);
         let mode = self.current_mode();
         let frame_model = self.core.prepare_frame(
             layout.terminal.rows.max(1) as u16,

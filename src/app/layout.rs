@@ -1,4 +1,4 @@
-use crate::config::{LayoutSidebarWidth, LayoutWidths};
+use crate::config::{panel_columns, LayoutSidebarWidth, LayoutWidths};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct CellRect {
@@ -37,8 +37,7 @@ impl CellRect {
 
 const STATUSBAR_ROWS: i32 = 1;
 const SIDEBAR_SHOW_MIN_COLS: i32 = 72;
-const SIDEBAR_LEGACY_PERCENT_MIN_COLS: i32 = 18;
-const SIDEBAR_LEGACY_PERCENT_MAX_COLS: i32 = 38;
+
 const MIN_TERMINAL_COLS_WITH_SIDEBAR: i32 = 32;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -109,18 +108,12 @@ fn sidebar_columns(total_cols: i32, width: LayoutSidebarWidth) -> i32 {
     let max_for_main = (total_cols - MIN_TERMINAL_COLS_WITH_SIDEBAR).max(0);
     let requested = match width {
         LayoutSidebarWidth::Columns(cols) => i32::from(cols),
-        LayoutSidebarWidth::Percent(percent) => percent_cells(total_cols, percent).clamp(
-            SIDEBAR_LEGACY_PERCENT_MIN_COLS,
-            SIDEBAR_LEGACY_PERCENT_MAX_COLS,
-        ),
+        LayoutSidebarWidth::Percent(percent) => {
+            let total = total_cols.clamp(0, i32::from(u16::MAX)) as u16;
+            i32::from(panel_columns(total, percent))
+        }
     };
     requested.min(max_for_main).max(0)
-}
-
-fn percent_cells(total_cells: i32, percent: u8) -> i32 {
-    (((total_cells.max(1) as i64 * i64::from(percent)) + 50) / 100)
-        .max(1)
-        .min(i64::from(total_cells.max(1))) as i32
 }
 
 #[cfg(test)]
@@ -129,7 +122,7 @@ mod tests {
 
     fn widths() -> LayoutWidths {
         LayoutWidths {
-            sidebar: LayoutSidebarWidth::Columns(crate::config::LAYOUT_SIDEBAR_WIDTH_DEFAULT),
+            sidebar: LayoutSidebarWidth::Percent(crate::config::PANEL_WIDTH_PERCENT_DEFAULT),
         }
     }
 
@@ -148,7 +141,10 @@ mod tests {
         let layout = compute_cell_layout(120, 40, widths());
         assert_eq!(
             layout.sidebar.cols,
-            crate::config::LAYOUT_SIDEBAR_WIDTH_DEFAULT as i32
+            i32::from(panel_columns(
+                120,
+                crate::config::PANEL_WIDTH_PERCENT_DEFAULT
+            ))
         );
         assert_eq!(layout.sidebar.col, 0);
         assert_eq!(layout.sidebar.row, 0);

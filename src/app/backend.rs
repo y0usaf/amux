@@ -174,6 +174,7 @@ pub(super) struct HarnessCore {
     clipboard: Option<Clipboard>,
     note: Option<StatusNote>,
     rail_digest: Option<String>,
+    rail_width_cells: Option<u16>,
 }
 
 impl HarnessCore {
@@ -201,10 +202,10 @@ impl HarnessCore {
             clipboard: None,
             note: None,
             rail_digest: None,
+            rail_width_cells: None,
         };
         core.workspace.reload_projects_from_disk();
-        core.sidecar
-            .set_hello(rail_bridge::rail_hello_line(core.config.right_rail_width()));
+
         if !core.terminal_manager.has_sidecar_extension() {
             core.set_note_error("sidecar extension not found");
         }
@@ -838,6 +839,19 @@ impl HarnessCore {
             self.sidecar.broadcast(&digest);
             self.rail_digest = Some(digest);
         }
+    }
+
+    /// Re-send the sticky hello whenever the rail's column count changes, so
+    /// the in-Pi rail tracks the harness terminal width the same way the
+    /// sidebar does. Called once per render; the cached width keeps it from
+    /// re-serializing the palette every frame.
+    pub(super) fn sync_rail_width(&mut self, total_cols: u16) {
+        let width = self.config.right_rail_columns(total_cols);
+        if self.rail_width_cells == Some(width) {
+            return;
+        }
+        self.rail_width_cells = Some(width);
+        self.sidecar.set_hello(rail_bridge::rail_hello_line(width));
     }
 
     pub(super) fn run_action(&mut self, action: AppAction) {
