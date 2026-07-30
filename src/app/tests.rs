@@ -29,9 +29,14 @@ fn snapshot(stage: PiSessionStage, queued: bool) -> PiSidecarSnapshot {
     }
 }
 
-// Flat header ` ✦ Project ───`: title "Project" occupies cells 3..=9.
-const PROJECT_TITLE_FIRST_CELL: usize = 3;
-const PROJECT_TITLE_LAST_CELL: usize = 9;
+// Mirrored header `──────────── Project ✦ ` on a 24-cell sidebar whose last
+// column is the scrollbar: 23 content cells - 7 title cells - 4 fixed cells
+// leaves a 12-cell rule, so "Project" occupies cells 13..=19 and the jewel
+// lands on cell 21, two cells from the Pi window.
+const PROJECT_TITLE_FIRST_CELL: usize = 13;
+const PROJECT_TITLE_LAST_CELL: usize = 19;
+const PROJECT_JEWEL_CELL: usize = 21;
+const PROJECT_RULE_CELL: usize = 0;
 
 fn render_project_title(status: Option<SidebarStatusKind>) -> (ScenePalette, CellSurface) {
     render_project_title_with_current(status, false)
@@ -303,13 +308,12 @@ fn interrupted_project_title_uses_sriracha() {
 fn current_project_header_jewel_uses_statusbar_white_without_status() {
     let (palette, surface) = render_project_title_with_current(None, true);
 
-    // Flat header: ` ✦ title ───`; the rule stays border gray and the jewel
-    // carries the "current" state.
-    let jewel_cell = &surface.cells[1];
+    // Mirrored header `─── title ✦ `: the leading rule stays border gray and
+    // the jewel, pinned to the Pi-facing edge, carries the "current" state.
+    let jewel_cell = &surface.cells[PROJECT_JEWEL_CELL];
     assert_eq!(jewel_cell.text, "✦");
     assert_eq!(jewel_cell.fg, palette.statusbar_fg);
-    // "Project" = 7 cells, so the trailing rule starts after column 10.
-    let rule_cell = &surface.cells[12];
+    let rule_cell = &surface.cells[PROJECT_RULE_CELL];
     assert_eq!(rule_cell.text, "─");
     assert_eq!(rule_cell.fg, palette.border);
 }
@@ -409,11 +413,11 @@ fn active_project_header_jewel_uses_running_color_not_focus_white() {
     let (palette, surface) =
         render_project_title_with_current(Some(SidebarStatusKind::Active), true);
 
-    // The rule stays border gray; the jewel signals the running state.
-    let jewel_cell = &surface.cells[1];
+    // The leading rule stays border gray; the jewel signals the running state.
+    let jewel_cell = &surface.cells[PROJECT_JEWEL_CELL];
     assert_eq!(jewel_cell.fg, palette.running);
     assert_ne!(jewel_cell.fg, palette.statusbar_fg);
-    let rule_cell = &surface.cells[12];
+    let rule_cell = &surface.cells[PROJECT_RULE_CELL];
     assert_eq!(rule_cell.text, "─");
     assert_eq!(rule_cell.fg, palette.border);
 }
@@ -449,8 +453,8 @@ fn selected_empty_project_draws_accent_crown_jewel() {
         0,
     );
 
-    assert_eq!(surface.cells[1].text, "✦");
-    assert_eq!(surface.cells[1].fg, palette.accent);
+    assert_eq!(surface.cells[PROJECT_JEWEL_CELL].text, "✦");
+    assert_eq!(surface.cells[PROJECT_JEWEL_CELL].fg, palette.accent);
 }
 
 #[test]

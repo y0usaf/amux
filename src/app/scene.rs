@@ -777,8 +777,9 @@ fn render_sidebar_project_header(
     };
     let jewel = crown_jewel_glyph(status, now_ms);
 
-    // Header layout: ` {jewel} {title} {rule}` (4 fixed cells + rule >= 1),
-    // matching the rail's panelHeader in pi-extension/render.js.
+    // Header layout: `{rule} {title} {jewel} ` (4 fixed cells + rule >= 1) --
+    // the mirror of the rail's `| {jewel} {title} {rule}` panelHeader in
+    // pi-extension/render.js, so both jewels sit against the Pi window.
     if rect.cols < 7 {
         let value = truncate_to_cells(&format!(" {label} "), rect.cols as usize);
         surface.put_text_bold_styled(rect.col, rect.row, rect.cols, title_fg, bg, &value, reverse);
@@ -789,23 +790,24 @@ fn render_sidebar_project_header(
     let value_cols = display_cell_width(&value) as i32;
 
     let mut cursor = rect.col;
+    let lead_cols = (rect.cols - value_cols - 4).max(0);
+    let lead = format!("{} ", "─".repeat(lead_cols as usize));
+    surface.put_text_styled(cursor, rect.row, lead_cols + 1, rule_fg, bg, &lead, reverse);
+    cursor += lead_cols + 1;
+    surface.put_text_bold_styled(cursor, rect.row, value_cols, title_fg, bg, &value, reverse);
+    cursor += value_cols;
     surface.put_text_styled(cursor, rect.row, 1, rule_fg, bg, " ", reverse);
     cursor += 1;
     surface.put_text_styled(cursor, rect.row, 1, jewel_fg, bg, jewel, reverse);
     cursor += 1;
-    surface.put_text_styled(cursor, rect.row, 1, rule_fg, bg, " ", reverse);
-    cursor += 1;
-    surface.put_text_bold_styled(cursor, rect.row, value_cols, title_fg, bg, &value, reverse);
-    cursor += value_cols;
-    let fill_cols = (rect.col + rect.cols - cursor - 1).max(0);
-    let tail = format!(" {}", "─".repeat(fill_cols as usize));
+    let trailing_cols = (rect.col + rect.cols - cursor).max(0);
     surface.put_text_styled(
         cursor,
         rect.row,
-        rect.col + rect.cols - cursor,
+        trailing_cols,
         rule_fg,
         bg,
-        &tail,
+        &" ".repeat(trailing_cols as usize),
         reverse,
     );
 }
