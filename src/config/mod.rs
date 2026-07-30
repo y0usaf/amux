@@ -19,9 +19,11 @@ pub use keymap::{KeyChordState, Keymap, KeymapMatch};
 pub use keys::{KeyModifiers, KeyStroke, KeyToken, NamedKeyToken};
 
 pub const LAYOUT_TERMINAL_WIDTH_PERCENT_DEFAULT: u8 = 100;
-pub const LAYOUT_SIDEBAR_WIDTH_DEFAULT: u16 = 36;
-pub const LAYOUT_SIDEBAR_WIDTH_PERCENT_DEFAULT: u8 = 22;
-pub const RIGHT_RAIL_WIDTH_DEFAULT: u16 = 44;
+/// Both bars take the same share of the terminal, so the left sidebar and the
+/// in-Pi right rail read as a matched pair at any terminal size.
+pub const PANEL_WIDTH_PERCENT_DEFAULT: u8 = 22;
+pub const PANEL_WIDTH_MIN_COLS: u16 = 24;
+pub const PANEL_WIDTH_MAX_COLS: u16 = 80;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LayoutSidebarWidth {
@@ -39,6 +41,7 @@ pub struct AppConfig {
     pub terminal_width_percent: Option<u8>,
     pub sidebar_width: Option<u16>,
     pub sidebar_width_percent: Option<u8>,
+    pub panel_width_percent: Option<u8>,
     pub right_rail_width: Option<u16>,
     pub tui_terminal_width_percent: Option<u8>,
     pub tui_sidebar_width_percent: Option<u8>,
@@ -135,19 +138,31 @@ impl AppConfig {
         }
     }
 
-    /// Rail width in PTY cells sent to the sidechannel extension.
-    /// `0` disables the rail; invalid values fall back to the default.
-    pub fn right_rail_width(&self) -> u16 {
+    /// Shared width share for both bars. Per-bar keys override it.
+    pub fn panel_width_percent(&self) -> u8 {
+        match self.panel_width_percent {
+            Some(percent) if validate_panel_width_percent(percent) => percent,
+            Some(percent) => {
+                log::warn!("invalid panel_width_percent={percent} (need 5..=40); using default");
+                PANEL_WIDTH_PERCENT_DEFAULT
+            }
+            None => PANEL_WIDTH_PERCENT_DEFAULT,
+        }
+    }
+
+    /// Rail width in PTY cells sent to the sidechannel extension, derived from
+    /// the harness terminal width so both bars land on the same column count.
+    /// `0` disables the rail; invalid values fall back to the shared share.
+    pub fn right_rail_columns(&self, total_cols: u16) -> u16 {
         match self.right_rail_width {
             Some(width) if validate_right_rail_width(width) => width,
             Some(width) => {
                 log::warn!(
-                    "invalid right_rail_width={} (need 0 or 24..=80); using default",
-                    width,
+                    "invalid right_rail_width={width} (need 0 or 24..=80); using the shared panel width"
                 );
-                RIGHT_RAIL_WIDTH_DEFAULT
+                panel_columns(total_cols, self.panel_width_percent())
             }
-            None => RIGHT_RAIL_WIDTH_DEFAULT,
+            None => panel_columns(total_cols, self.panel_width_percent()),
         }
     }
 
@@ -157,26 +172,21 @@ impl AppConfig {
                 return LayoutSidebarWidth::Columns(width);
             }
             log::warn!(
-                "invalid sidebar_width={} (need 8..=120); using default",
-                width,
+                "invalid sidebar_width={width} (need 8..=120); using the shared panel width"
             );
-            return LayoutSidebarWidth::Columns(LAYOUT_SIDEBAR_WIDTH_DEFAULT);
-        }
-
-        if let Some(percent) = self
+        } else if let Some(percent) = self
             .sidebar_width_percent
             .or(self.tui_sidebar_width_percent)
         {
-            if validate_layout_sidebar_width_percent(percent) {
+            if validate_panel_width_percent(percent) {
                 return LayoutSidebarWidth::Percent(percent);
             }
             log::warn!(
-                "invalid sidebar_width_percent={} (need 1..=50); using default",
-                percent,
+                "invalid sidebar_width_percent={percent} (need 5..=40); using the shared panel width"
             );
         }
 
-        LayoutSidebarWidth::Columns(LAYOUT_SIDEBAR_WIDTH_DEFAULT)
+        LayoutSidebarWidth::Percent(self.panel_width_percent())
     }
 
     fn normalize(&mut self) {
@@ -194,8 +204,16 @@ pub fn validate_right_rail_width(width: u16) -> bool {
     width == 0 || (24..=80).contains(&width)
 }
 
-pub fn validate_layout_sidebar_width_percent(percent: u8) -> bool {
-    (1..=50).contains(&percent)
+/// Shared by `panel_width_percent` and the legacy per-bar percent keys.
+pub fn validate_panel_width_percent(percent: u8) -> bool {
+    (5..=40).contains(&percent)
+}
+
+/// Percent to cells for either bar. One function, so the sidebar and the rail
+/// can never round or clamp differently.
+pub fn panel_columns(total_cols: u16, percent: u8) -> u16 {
+    let cells = (u32::from(total_cols) * u32::from(percent) + 50) / 100;
+    (cells as u16).clamp(PANEL_WIDTH_MIN_COLS, PANEL_WIDTH_MAX_COLS)
 }
 
 fn resolved_sequences(config: &AppConfig, spec: &ActionSpec) -> Vec<Vec<KeyStroke>> {

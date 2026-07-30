@@ -67,8 +67,7 @@ If no project path is passed, the app falls back to persisted projects, then cur
 
 ```json
 {
-  "sidebar_width": 36,
-  "right_rail_width": 44,
+  "panel_width_percent": 22,
   "keybinds": {
     "project_prev": "ctrl+h",
     "project_next": "ctrl+l",
@@ -78,11 +77,11 @@ If no project path is passed, the app falls back to persisted projects, then cur
 }
 ```
 
-- `sidebar_width` sets the left sidebar width in terminal cells (`8..=120`); on narrow terminals it is reduced to preserve the main Pi area
-- `right_rail_width` sets the in-Pi right rail width in PTY cells (`24..=80`, default `44`, `0` disables); sent to the companion extension over the sidecar socket
-- legacy `sidebar_width_percent` is still accepted as a fallback when `sidebar_width` is unset
+- `panel_width_percent` sets **both** bars to the same share of the terminal (`5..=40`, default `22`), clamped to `24..=80` cells each, so the left sidebar and the in-Pi right rail always match
+- `sidebar_width` overrides the left sidebar with a fixed cell count (`8..=120`); on narrow terminals it is reduced to preserve the main Pi area
+- `right_rail_width` overrides the in-Pi right rail with a fixed PTY cell count (`24..=80`, `0` disables); the resolved width is sent to the companion extension over the sidecar socket and re-sent on resize
+- legacy `sidebar_width_percent` / `tui_sidebar_width_percent` still override `panel_width_percent` for the sidebar alone
 - `terminal_width_percent` is accepted for config compatibility but ignored; the Pi terminal fills the remaining main area
-- legacy `tui_sidebar_width_percent` is still accepted as a fallback
 - missing `keybinds.*` → built-in defaults
 - value shape = string or string array
 - multi-stroke chords are space-separated, e.g. `"ctrl+p n"`

@@ -190,17 +190,49 @@ fn whitespace_in_keybinds_is_normalized() {
 }
 
 #[test]
-fn layout_widths_default_to_fixed_sidebar_columns() {
+fn layout_widths_default_to_the_shared_panel_percent() {
     assert_eq!(
         AppConfig::default().layout_widths(),
         LayoutWidths {
-            sidebar: LayoutSidebarWidth::Columns(LAYOUT_SIDEBAR_WIDTH_DEFAULT),
+            sidebar: LayoutSidebarWidth::Percent(PANEL_WIDTH_PERCENT_DEFAULT),
         }
     );
     assert!(validate_layout_sidebar_width(8));
     assert!(validate_layout_sidebar_width(120));
     assert!(!validate_layout_sidebar_width(7));
     assert!(!validate_layout_sidebar_width(121));
+}
+
+#[test]
+fn both_bars_default_to_the_same_column_count() {
+    let config = AppConfig::default();
+    let sidebar = match config.layout_widths().sidebar {
+        LayoutSidebarWidth::Percent(percent) => panel_columns(160, percent),
+        LayoutSidebarWidth::Columns(cols) => cols,
+    };
+
+    assert_eq!(sidebar, config.right_rail_columns(160));
+    // Clamped at both ends: 24 cells minimum, 80 maximum.
+    assert_eq!(panel_columns(40, PANEL_WIDTH_PERCENT_DEFAULT), 24);
+    assert_eq!(panel_columns(1000, PANEL_WIDTH_PERCENT_DEFAULT), 80);
+}
+
+#[test]
+fn explicit_rail_width_still_overrides_the_shared_percent() {
+    let config = AppConfig {
+        right_rail_width: Some(30),
+        ..AppConfig::default()
+    };
+
+    assert_eq!(config.right_rail_columns(200), 30);
+    assert_eq!(
+        AppConfig {
+            right_rail_width: Some(0),
+            ..AppConfig::default()
+        }
+        .right_rail_columns(200),
+        0
+    );
 }
 
 #[test]
@@ -231,14 +263,14 @@ fn legacy_sidebar_width_percent_is_still_accepted() {
             sidebar: LayoutSidebarWidth::Percent(22),
         }
     );
-    assert!(validate_layout_sidebar_width_percent(1));
-    assert!(validate_layout_sidebar_width_percent(50));
-    assert!(!validate_layout_sidebar_width_percent(0));
-    assert!(!validate_layout_sidebar_width_percent(60));
+    assert!(validate_panel_width_percent(5));
+    assert!(validate_panel_width_percent(40));
+    assert!(!validate_panel_width_percent(4));
+    assert!(!validate_panel_width_percent(60));
 }
 
 #[test]
-fn invalid_sidebar_width_falls_back_to_default_columns() {
+fn invalid_sidebar_width_falls_back_to_the_shared_panel_percent() {
     let config = AppConfig {
         sidebar_width: Some(121),
         ..AppConfig::default()
@@ -247,7 +279,7 @@ fn invalid_sidebar_width_falls_back_to_default_columns() {
     assert_eq!(
         config.layout_widths(),
         LayoutWidths {
-            sidebar: LayoutSidebarWidth::Columns(LAYOUT_SIDEBAR_WIDTH_DEFAULT),
+            sidebar: LayoutSidebarWidth::Percent(PANEL_WIDTH_PERCENT_DEFAULT),
         }
     );
 }
