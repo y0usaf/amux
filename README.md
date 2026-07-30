@@ -93,9 +93,10 @@ If no project path is passed, the app falls back to persisted projects, then cur
 - Stores harness archives in `ARCHIVE` under resolved Pi session directory
 - Launches Pi in a PTY
 - Injects the bundled companion extension (`pi-extension/index.js`) with `-e`: sidechannel session bridge + in-Pi right rail
-- Right rail renders inside each Pi PTY (agent state, run activity, usage, context, workspace, cross-session digest) as a non-capturing top-right overlay; Pi reflows into the remaining columns; toggle inside Pi with `/rail`, `/rail on`, `/rail off`; auto-hides when the PTY is narrower than rail width + 64 cols
+- Right rail renders inside each Pi PTY (agent state, run activity, usage, context, workspace, tool roster, cross-session digest) as a non-capturing top-right overlay; Pi reflows into the remaining columns; toggle inside Pi with `/rail`, `/rail on`, `/rail off`; auto-hides when the PTY is narrower than rail width + 64 cols
 - While the rail is visible it takes over Pi's footer: the footer renders zero lines and other extensions' `ctx.ui.setStatus` text moves into the rail's `EXT` panel; when the rail hides (narrow PTY, `/rail off`, broken wrap) Pi's own footer comes back
 - Harness owns rail policy: width + palette travel in a sticky `hello` line, cross-session summary in `digest` lines (harness → extension over the same socket); snapshots flow extension → harness unchanged
 - Compact tool rendering lives in separate `pi-compact`; sidecar remains session/status bridge
+- `TOOLS` panel lists the registered roster (`pi.getAllTools()`), `✓` for tools active in the prompt (`pi.getActiveTools()`), `·` for configured-but-inactive; packed into `ls`-style columns read top-to-bottom, capped at 8 rows plus `+n more`
 - Sidecar snapshots update session name/runtime state in the sidebar + statusline
 - Uses the host terminal grid/ANSI renderer, leaves harness chrome on the terminal's default theme, renders an unboxed main terminal with a Neo-tree style sidebar and dual bottom statusline/command row, uses inverse video for sidebar selection, renders sidebar/terminal scrollbars, supports mouse wheel + `Shift+PageUp/PageDown` scrolling, and exits with `Ctrl+Q`

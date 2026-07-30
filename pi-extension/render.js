@@ -169,6 +169,50 @@ function workspaceLines(state, width, paint) {
 	return lines
 }
 
+// Tool roster packed into ls-style columns: names read down each column, so a
+// 30-tool roster costs a handful of rows instead of 30. Cell width follows the
+// longest name; when that would run past MAX_TOOL_ROWS rows, cells shrink
+// (names truncate) down to MIN_TOOL_CELL, and anything still over the row
+// budget is dropped into a `+n more` row like SESSIONS does.
+const TOOL_GUTTER = 1
+const MAX_TOOL_ROWS = 8
+const MIN_TOOL_CELL = 10
+
+function toolsLines(state, width, paint) {
+	const tools = state.tools
+	if (!Array.isArray(tools) || tools.length === 0) return []
+	const natural = Math.max(...tools.map((tool) => visibleWidth(tool.name))) + 2 // "✓ " prefix
+	const wanted = Math.max(1, Math.ceil(tools.length / MAX_TOOL_ROWS))
+	const budget = Math.floor((width - 1 + TOOL_GUTTER) / wanted) - TOOL_GUTTER
+	const cellWidth = Math.max(1, Math.min(natural, width - 1, Math.max(MIN_TOOL_CELL, budget)))
+	const columns = Math.max(1, Math.floor((width - 1 + TOOL_GUTTER) / (cellWidth + TOOL_GUTTER)))
+
+	// Trim the tail of the list before packing, never the tail of each column:
+	// column-major order stays alphabetically readable top-to-bottom.
+	const capacity = MAX_TOOL_ROWS * columns
+	const hidden = Math.max(0, tools.length - capacity)
+	const shown = hidden > 0 ? tools.slice(0, capacity) : tools
+	const rows = Math.ceil(shown.length / columns)
+
+	const cells = shown.map((tool) => {
+		const marker = tool.active ? paint("success", "✓") : paint("border", "·")
+		return `${marker} ${paint(tool.active ? "text" : "muted", clip(tool.name, Math.max(1, cellWidth - 2)))}`
+	})
+
+	const lines = []
+	for (let row = 0; row < rows; row++) {
+		let line = ""
+		for (let column = 0; column < columns; column++) {
+			const cell = cells[column * rows + row]
+			if (cell === undefined) continue
+			line += pad(cell, cellWidth) + " ".repeat(TOOL_GUTTER)
+		}
+		lines.push(clip(` ${line.trimEnd()}`, width))
+	}
+	if (hidden > 0) lines.push(clip(` ${paint("muted", `+${hidden} more`)}`, width))
+	return lines
+}
+
 // Extension statuses (ctx.ui.setStatus) rendered verbatim: the owning
 // extension already styled them, so the rail only clips them to width.
 function statusLines(state, width, paint) {
@@ -219,6 +263,7 @@ export function renderRail(state, width, nowMs, rows = 0) {
 		{ title: "USAGE", role: "accent", active: false, lines: usageLines(state, inner, paint) },
 		{ title: "CONTEXT", role: "accent2", active: false, lines: contextLines(state, inner, paint) },
 		{ title: "WORKSPACE", role: "accent", active: false, lines: workspaceLines(state, inner, paint) },
+		{ title: "TOOLS", role: "accent", active: false, lines: toolsLines(state, inner, paint) },
 		{ title: "EXT", role: "accent", active: false, lines: statusLines(state, inner, paint) },
 		{ title: "SESSIONS", role: "accent2", active: false, lines: sessionsLines(state, inner, paint, nowMs) },
 	]
