@@ -169,6 +169,14 @@ function workspaceLines(state, width, paint) {
 	return lines
 }
 
+// Extension statuses (ctx.ui.setStatus) rendered verbatim: the owning
+// extension already styled them, so the rail only clips them to width.
+function statusLines(state, width, paint) {
+	const statuses = state.statuses
+	if (!Array.isArray(statuses) || statuses.length === 0) return []
+	return statuses.slice(0, 4).map((status) => clip(` ${paint("text", status)}`, width))
+}
+
 function digestGlyph(entry, paint, nowMs) {
 	if (entry.stage && entry.stage !== "idle") return paint("running", spinnerGlyph(nowMs))
 	if (entry.queued) return paint("warning", spinnerGlyph(nowMs))
@@ -211,6 +219,7 @@ export function renderRail(state, width, nowMs, rows = 0) {
 		{ title: "USAGE", role: "accent", active: false, lines: usageLines(state, inner, paint) },
 		{ title: "CONTEXT", role: "accent2", active: false, lines: contextLines(state, inner, paint) },
 		{ title: "WORKSPACE", role: "accent", active: false, lines: workspaceLines(state, inner, paint) },
+		{ title: "EXT", role: "accent", active: false, lines: statusLines(state, inner, paint) },
 		{ title: "SESSIONS", role: "accent2", active: false, lines: sessionsLines(state, inner, paint, nowMs) },
 	]
 

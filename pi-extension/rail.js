@@ -55,17 +55,68 @@ export function registerRail(pi, store) {
 
 	const requestRender = () => tuiRef?.requestRender()
 
+	// Footer takeover: the rail already draws cwd, git, model, usage and context,
+	// so while it is visible Pi's footer is replaced with a zero-line component.
+	// The factory keeps the footer data provider, which is the only route to
+	// `ctx.ui.setStatus` text from other extensions; those land in the EXT panel.
+	// When the rail hides (narrow PTY, `/rail off`, broken wrap) the built-in
+	// footer comes back, so no state is ever invisible.
+	let uiRef
+	let footerData
+	let footerHidden = false
+	let footerWanted = false
+	let footerSyncQueued = false
+
+	const hiddenFooter = (_tui, _theme, data) => {
+		footerData = data
+		return { invalidate() {}, render: () => [] }
+	}
+
+	const syncFooter = (hide) => {
+		if (hide === footerHidden) return
+		try {
+			uiRef?.setFooter?.(hide ? hiddenFooter : undefined)
+			footerHidden = hide
+		} catch {
+			// No setFooter (older Pi): keep its footer, the rail still renders.
+		}
+	}
+
+	// setFooter swaps TUI children, so it must never run inside a render pass.
+	const scheduleFooterSync = (hide) => {
+		footerWanted = hide
+		if (hide === footerHidden || footerSyncQueued) return
+		footerSyncQueued = true
+		queueMicrotask(() => {
+			footerSyncQueued = false
+			syncFooter(footerWanted)
+		})
+	}
+
+	const statusLines = () => {
+		if (!footerHidden) return []
+		const entries = footerData?.getExtensionStatuses?.()
+		if (!entries || entries.size === 0) return []
+		return Array.from(entries.entries())
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([, text]) => String(text ?? "").replace(/[\r\n\t]+/g, " ").trim())
+			.filter(Boolean)
+	}
+
 	function attach(tui) {
 		if (tuiRef) return
 		tuiRef = tui
 		const previousRender = tui.render
 		tui.render = function wrappedRender(terminalWidth) {
-			const reserved = visibleAt(terminalWidth) ? railWidth(terminalWidth) : 0
+			const visible = visibleAt(terminalWidth)
+			const reserved = visible ? railWidth(terminalWidth) : 0
+			scheduleFooterSync(visible)
 			overlayOptions.width = reserved > 0 ? reserved : railWidth(terminalWidth) || MIN_RAIL_WIDTH
 			try {
 				return previousRender.call(tui, terminalWidth - reserved)
 			} catch (error) {
 				wrapBroken = true
+				scheduleFooterSync(false)
 				return previousRender.call(tui, terminalWidth)
 			}
 		}
@@ -80,6 +131,7 @@ export function registerRail(pi, store) {
 	function launch(ctx) {
 		if (started || ctx.mode !== "tui" || !ctx.hasUI) return
 		started = true
+		uiRef = ctx.ui
 
 		void ctx.ui
 			.custom(
@@ -88,6 +140,9 @@ export function registerRail(pi, store) {
 					return {
 						render(width) {
 							const rows = tuiRef?.terminal?.rows ?? 0
+							// Harvested during render, stored without notifying listeners:
+							// a notify here would schedule another render pass.
+							store.state.statuses = statusLines()
 							return renderRail(store.state, Math.max(1, width), Date.now(), rows)
 						},
 					}
@@ -197,5 +252,6 @@ export function registerRail(pi, store) {
 
 	pi.on("session_shutdown", async () => {
 		if (animationTimer) clearInterval(animationTimer)
+		syncFooter(false)
 	})
 }

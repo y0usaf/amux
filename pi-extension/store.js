@@ -34,6 +34,10 @@ export function createStore() {
 		cwd: process.cwd(),
 		git: undefined, // { branch, dirty }
 
+		// other extensions' ctx.ui.setStatus text, harvested from Pi's footer data
+		// provider while the rail owns the footer (written by the rail renderer)
+		statuses: [], // string[]
+
 		// harness downstream (written by sidechannel socket reader)
 		harness: undefined, // { railWidth, palette }
 		digest: undefined, // [{ key, name, project, stage, queued, interrupted, unread, selected }]
