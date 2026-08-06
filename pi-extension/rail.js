@@ -1,9 +1,9 @@
-// Right rail: persistent non-capturing overlay anchored top-right, with a
-// clean-room render wrap so Pi reflows into the remaining columns.
-//
-// The wrap is the only version-sensitive integration: TUI.render(width) is
-// called with the terminal width minus the reserved rail columns. On any
-// wrap failure the rail disables itself and Pi renders full width again.
+// Right rail: non-capturing overlay anchored top-right, rendered through Pi's
+// supported `ctx.ui.custom` overlay seam. No `tui.render` wrap: Pi 0.84
+// exposes `tui` as a stable Proxy, and capture-and-replace of the proxied
+// `tui.render` recurses (startup hang, sustained CPU). The rail therefore
+// overlays Pi instead of reflowing it; column width and footer handoff are
+// driven from the overlay `visible`/`render` callbacks.
 
 import { renderRail } from "./render.js"
 
@@ -50,7 +50,12 @@ export function registerRail(pi, store) {
 		maxHeight: "100%",
 		margin: 0,
 		nonCapturing: true,
-		visible: (terminalWidth) => visibleAt(terminalWidth),
+		visible: (terminalWidth) => {
+			overlayOptions.width = railWidth(terminalWidth)
+			const visible = visibleAt(terminalWidth)
+			scheduleFooterSync(visible)
+			return visible
+		},
 	}
 
 	const requestRender = () => tuiRef?.requestRender()
@@ -103,25 +108,6 @@ export function registerRail(pi, store) {
 			.filter(Boolean)
 	}
 
-	function attach(tui) {
-		if (tuiRef) return
-		tuiRef = tui
-		const previousRender = tui.render
-		tui.render = function wrappedRender(terminalWidth) {
-			const visible = visibleAt(terminalWidth)
-			const reserved = visible ? railWidth(terminalWidth) : 0
-			scheduleFooterSync(visible)
-			overlayOptions.width = reserved > 0 ? reserved : railWidth(terminalWidth) || MIN_RAIL_WIDTH
-			try {
-				return previousRender.call(tui, terminalWidth - reserved)
-			} catch (error) {
-				wrapBroken = true
-				scheduleFooterSync(false)
-				return previousRender.call(tui, terminalWidth)
-			}
-		}
-	}
-
 	function animationNeeded() {
 		if (store.state.run.phase === "running") return true
 		const digest = store.state.digest
@@ -136,7 +122,7 @@ export function registerRail(pi, store) {
 		void ctx.ui
 			.custom(
 				(tui) => {
-					attach(tui)
+					tuiRef = tui
 					return {
 						render(width) {
 							const rows = tuiRef?.terminal?.rows ?? 0
