@@ -181,10 +181,14 @@ impl HarnessCore {
     pub(super) fn new(notify: Notify, initial_project_paths: Vec<PathBuf>) -> anyhow::Result<Self> {
         let sidecar_socket_path = pi::socket_path();
         let sidecar = SidecarListener::start(notify.clone(), sidecar_socket_path.clone())?;
-        let terminal_manager =
-            TerminalManager::new(notify, pi::extension_path(), sidecar_socket_path.clone());
-        let persisted = PersistedState::load_default().unwrap_or_default();
         let config = AppConfig::load_default().unwrap_or_default();
+        let terminal_manager = TerminalManager::new(
+            notify,
+            pi::extension_path(),
+            config.pi_tui_mode().map(ToOwned::to_owned),
+            sidecar_socket_path.clone(),
+        );
+        let persisted = PersistedState::load_default().unwrap_or_default();
         let keymap = config.keymap();
         let workspace = Workspace::new(initial_project_paths, persisted);
 

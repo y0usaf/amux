@@ -80,6 +80,7 @@ If no project path is passed, the app falls back to persisted projects, then cur
 - `panel_width_percent` sets **both** bars to the same share of the terminal (`5..=40`, default `22`), clamped to `24..=80` cells each, so the left sidebar and the in-Pi right rail always match
 - `sidebar_width` overrides the left sidebar with a fixed cell count (`8..=120`); on narrow terminals it is reduced to preserve the main Pi area
 - `right_rail_width` overrides the in-Pi right rail with a fixed PTY cell count (`24..=80`, `0` disables); the resolved width is sent to the companion extension over the sidecar socket and re-sent on resize
+- `tui_mode` – Pi TUI mode forwarded to pi as `--tui-mode` on launch (`"regular"`/missing = default and flag omitted, `"fullscreen"` = pi's experimental fullscreen viewport; unknown values ignored with a warning)
 - legacy `sidebar_width_percent` / `tui_sidebar_width_percent` still override `panel_width_percent` for the sidebar alone
 - `terminal_width_percent` is accepted for config compatibility but ignored; the Pi terminal fills the remaining main area
 - missing `keybinds.*` → built-in defaults

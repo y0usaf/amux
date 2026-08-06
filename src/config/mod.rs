@@ -43,6 +43,7 @@ pub struct AppConfig {
     pub sidebar_width_percent: Option<u8>,
     pub panel_width_percent: Option<u8>,
     pub right_rail_width: Option<u16>,
+    pub tui_mode: Option<String>,
     pub tui_terminal_width_percent: Option<u8>,
     pub tui_sidebar_width_percent: Option<u8>,
     #[serde(default)]
@@ -163,6 +164,21 @@ impl AppConfig {
                 panel_columns(total_cols, self.panel_width_percent())
             }
             None => panel_columns(total_cols, self.panel_width_percent()),
+        }
+    }
+
+    /// Pi TUI mode forwarded as `--tui-mode <mode>` on launch. `None`/`regular`
+    /// are the default (flag omitted); `fullscreen` is pi's experimental mode.
+    pub fn pi_tui_mode(&self) -> Option<&str> {
+        match self.tui_mode.as_deref() {
+            Some("fullscreen") => Some("fullscreen"),
+            Some("regular") | None => None,
+            Some(other) => {
+                log::warn!(
+                    "invalid tui_mode={other:?} (need \"regular\" or \"fullscreen\"); ignoring"
+                );
+                None
+            }
         }
     }
 
