@@ -51,7 +51,7 @@ fn render_project_title_with_current(
     let rows = [SidebarRow {
         kind: SidebarRowKind::Project(0),
         text: "Project".into(),
-        fg: theme::HEADING,
+        fg: theme::Role::Heading,
         bg: None,
         inverted: false,
         selector: false,
@@ -187,7 +187,7 @@ fn notification_status_tints_session_title() {
             session_index: 0,
         },
         text: "Unread session".into(),
-        fg: theme::TEXT,
+        fg: theme::Role::Text,
         bg: None,
         inverted: false,
         selector: false,
@@ -226,7 +226,7 @@ fn interrupted_status_tints_session_title_sriracha() {
             session_index: 0,
         },
         text: "Interrupted session".into(),
-        fg: theme::TEXT,
+        fg: theme::Role::Text,
         bg: None,
         inverted: false,
         selector: false,
@@ -256,9 +256,9 @@ fn interrupted_status_tints_session_title_sriracha() {
 }
 
 #[test]
-fn project_title_uses_lifted_statusbar_purple_without_status() {
+fn project_title_uses_accent_text_without_status() {
     let (palette, surface) = render_project_title(None);
-    let idle_title_fg = theme::brighten(palette.statusbar_bg, 36);
+    let idle_title_fg = palette.accent;
 
     let first_title_cell = &surface.cells[PROJECT_TITLE_FIRST_CELL];
     let last_title_cell = &surface.cells[PROJECT_TITLE_LAST_CELL];
@@ -325,7 +325,7 @@ fn sidebar_divider_colors_only_the_glyph() {
     let rows = [SidebarRow {
         kind: SidebarRowKind::Label,
         text: "sidebar".into(),
-        fg: theme::TEXT,
+        fg: theme::Role::Text,
         bg: None,
         inverted: false,
         selector: false,
@@ -429,7 +429,7 @@ fn selected_empty_project_draws_accent_crown_jewel() {
     let rows = [SidebarRow {
         kind: SidebarRowKind::Project(0),
         text: "PROJECT".into(),
-        fg: theme::TEXT,
+        fg: theme::Role::Text,
         bg: None,
         inverted: true,
         selector: true,

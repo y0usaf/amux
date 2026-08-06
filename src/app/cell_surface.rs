@@ -178,7 +178,28 @@ impl CellSurface {
         bg: Color,
         underline: bool,
     ) {
-        self.put_cell_span_styled(col, row, span, text, fg, bg, underline, false);
+        self.put_cell_span_terminal(col, row, span, text, fg, bg, false, underline, false);
+    }
+
+    pub(super) fn put_cell_span_terminal(
+        &mut self,
+        col: i32,
+        row: i32,
+        span: i32,
+        text: &str,
+        fg: Color,
+        bg: Color,
+        bold: bool,
+        underline: bool,
+        reverse: bool,
+    ) {
+        let span = span.max(1);
+        for offset in 0..span {
+            if let Some(cell) = self.cell_mut(col + offset, row) {
+                let value = if offset == 0 { text } else { " " };
+                cell.update(value, fg, bg, bold, underline, reverse, offset > 0);
+            }
+        }
     }
 
     pub(super) fn put_cell_span_styled(
@@ -192,13 +213,7 @@ impl CellSurface {
         underline: bool,
         reverse: bool,
     ) {
-        let span = span.max(1);
-        for offset in 0..span {
-            if let Some(cell) = self.cell_mut(col + offset, row) {
-                let value = if offset == 0 { text } else { " " };
-                cell.update(value, fg, bg, false, underline, reverse, offset > 0);
-            }
-        }
+        self.put_cell_span_terminal(col, row, span, text, fg, bg, false, underline, reverse);
     }
 
     pub(super) fn put_text(

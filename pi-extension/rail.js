@@ -129,7 +129,7 @@ export function registerRail(pi, store) {
 							// Harvested during render, stored without notifying listeners:
 							// a notify here would schedule another render pass.
 							store.state.statuses = statusLines()
-							return renderRail(store.state, Math.max(1, width), Date.now(), rows)
+							return renderRail(store.state, Math.max(1, width), Date.now(), rows, uiRef.theme)
 						},
 					}
 				},

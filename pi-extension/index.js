@@ -6,7 +6,7 @@
 //
 // Outside the harness (no AGENT_HARNESS_PI_SIDECAR_SOCKET) the sidechannel
 // stays dormant and the rail still renders per-session panels with the
-// fallback palette; the SESSIONS digest panel simply never appears.
+// fallback state; the SESSIONS digest panel simply never appears.
 
 import { registerActivity } from "./activity.js"
 import { registerRail } from "./rail.js"

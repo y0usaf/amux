@@ -1,7 +1,7 @@
 use crate::render::Color;
 use crate::state::{Project, Session};
 
-use super::theme::{ACCENT_2, ERROR, HEADING, MUTED, RUNNING, SUCCESS, TEXT, WARNING};
+use super::theme::Role;
 
 pub(super) const SIDEBAR_ANIMATION_FRAME_MS: u64 = 10;
 pub(super) const SIDEBAR_SPINNER_FRAME_TICKS: u64 = 6;
@@ -38,7 +38,7 @@ pub(super) enum SidebarStatusKind {
 pub(super) struct SidebarRow {
     pub(super) kind: SidebarRowKind,
     pub(super) text: String,
-    pub(super) fg: Color,
+    pub(super) fg: Role,
     pub(super) bg: Option<Color>,
     pub(super) inverted: bool,
     pub(super) selector: bool,
@@ -208,13 +208,13 @@ pub(super) fn session_sidebar_status(session: &Session) -> Option<SidebarStatusK
     }
 }
 
-pub(super) fn sidebar_status_color(status: SidebarStatusKind) -> Color {
+pub(super) fn sidebar_status_color(status: SidebarStatusKind) -> Role {
     match status {
-        SidebarStatusKind::Active => RUNNING,
-        SidebarStatusKind::Queued => WARNING,
-        SidebarStatusKind::Interrupted => ERROR,
-        SidebarStatusKind::Notification => SUCCESS,
-        SidebarStatusKind::Input => ACCENT_2,
+        SidebarStatusKind::Active => Role::Running,
+        SidebarStatusKind::Queued => Role::Warning,
+        SidebarStatusKind::Interrupted => Role::Error,
+        SidebarStatusKind::Notification => Role::Success,
+        SidebarStatusKind::Input => Role::Accent2,
     }
 }
 
@@ -296,7 +296,11 @@ pub(super) fn build_sidebar_rows(
         rows.push(SidebarRow {
             kind: SidebarRowKind::Project(project_index),
             text: project.name.clone(),
-            fg: if project_focused { TEXT } else { HEADING },
+            fg: if project_focused {
+                Role::Text
+            } else {
+                Role::Heading
+            },
             bg: None,
             inverted: project_focused,
             selector: project_focused,
@@ -318,7 +322,7 @@ pub(super) fn build_sidebar_rows(
                     session_index,
                 },
                 text: session.name.clone(),
-                fg: if selected { TEXT } else { MUTED },
+                fg: if selected { Role::Text } else { Role::Muted },
                 bg: None,
                 inverted: selected,
                 selector: selected,
@@ -330,7 +334,7 @@ pub(super) fn build_sidebar_rows(
         rows.push(SidebarRow {
             kind: SidebarRowKind::Label,
             text: String::new(),
-            fg: MUTED,
+            fg: Role::Muted,
             bg: None,
             inverted: false,
             selector: false,
@@ -448,14 +452,26 @@ mod tests {
 
     #[test]
     fn status_color_maps_each_kind() {
-        assert_eq!(sidebar_status_color(SidebarStatusKind::Active), RUNNING);
-        assert_eq!(sidebar_status_color(SidebarStatusKind::Queued), WARNING);
-        assert_eq!(sidebar_status_color(SidebarStatusKind::Interrupted), ERROR);
+        assert_eq!(
+            sidebar_status_color(SidebarStatusKind::Active),
+            Role::Running
+        );
+        assert_eq!(
+            sidebar_status_color(SidebarStatusKind::Queued),
+            Role::Warning
+        );
+        assert_eq!(
+            sidebar_status_color(SidebarStatusKind::Interrupted),
+            Role::Error
+        );
         assert_eq!(
             sidebar_status_color(SidebarStatusKind::Notification),
-            SUCCESS
+            Role::Success
         );
-        assert_eq!(sidebar_status_color(SidebarStatusKind::Input), ACCENT_2);
+        assert_eq!(
+            sidebar_status_color(SidebarStatusKind::Input),
+            Role::Accent2
+        );
     }
 
     #[test]
@@ -640,7 +656,7 @@ mod tests {
             .map(|index| SidebarRow {
                 kind: SidebarRowKind::Label,
                 text: index.to_string(),
-                fg: TEXT,
+                fg: Role::Text,
                 bg: None,
                 inverted: false,
                 selector: false,

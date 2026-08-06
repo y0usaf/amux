@@ -1,6 +1,6 @@
 // Rail panel rendering: pure functions from store state to styled lines.
 // Visual language mirrors the harness left sidebar: caps panel headers with a
-// crown jewel, braille spinner/notification glyphs, harness palette colours.
+// crown jewel and braille spinner/notification glyphs.
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui"
 
@@ -14,38 +14,21 @@ const JEWEL = "✦"
 const JEWEL_OPEN = "✧"
 const JEWEL_BLINK_MS = 400
 
-const FALLBACK_PALETTE = {
-	text: "#d0d0d0",
-	muted: "#808080",
-	heading: "#c0c0c0",
-	accent: "#8888ff",
-	accent2: "#88ccff",
-	running: "#c8e64c",
-	warning: "#e6c84c",
-	error: "#e6604c",
-	success: "#4ce688",
-	border: "#404040",
-}
+const TOKEN = Object.freeze({
+	text: "text",
+	muted: "muted",
+	heading: "mdHeading",
+	accent: "accent",
+	accent2: "borderAccent",
+	running: "mdLink",
+	warning: "warning",
+	error: "error",
+	success: "success",
+	border: "borderMuted",
+})
 
-function sgr(hex) {
-	const value = /^#([0-9a-f]{6})$/i.exec(hex ?? "")?.[1]
-	if (!value) return ""
-	const r = Number.parseInt(value.slice(0, 2), 16)
-	const g = Number.parseInt(value.slice(2, 4), 16)
-	const b = Number.parseInt(value.slice(4, 6), 16)
-	return `\u001b[38;2;${r};${g};${b}m`
-}
-
-const RESET = "\u001b[0m"
-
-export function createPainter(palette) {
-	const roles = { ...FALLBACK_PALETTE, ...(palette ?? {}) }
-	const noColor = Boolean(process.env.NO_COLOR)
-	return (role, text) => {
-		if (noColor || !text) return text
-		const open = sgr(roles[role] ?? roles.text)
-		return open ? `${open}${text}${RESET}` : text
-	}
+export function createPainter(theme) {
+	return (role, text) => theme.fg(TOKEN[role] ?? "text", text)
 }
 
 function spinnerGlyph(nowMs) {
@@ -253,8 +236,8 @@ function sessionsLines(state, width, paint, nowMs) {
 // to any theme without knowing its colors.
 const DIVIDER = "│"
 
-export function renderRail(state, width, nowMs, rows = 0) {
-	const paint = createPainter(state.harness?.palette)
+export function renderRail(state, width, nowMs, rows = 0, theme) {
+	const paint = createPainter(theme)
 	const inner = Math.max(1, width - 1)
 	const running = state.run.phase === "running"
 	const panels = [

@@ -14,6 +14,7 @@ use crate::config::{
 use crate::notify::Notify;
 use crate::pi::{self, PiSidecarSnapshot};
 use crate::sidecar::SidecarListener;
+use crate::sidecar::SidecarMessage;
 use crate::state::{PersistedState, Project, ScannedSession, Session};
 use crate::terminal::{
     TerminalController, TerminalSelectionPoint, TerminalSelectionRange, TerminalStatus,
@@ -175,6 +176,7 @@ pub(super) struct HarnessCore {
     note: Option<StatusNote>,
     rail_digest: Option<String>,
     rail_width_cells: Option<u16>,
+    pending_theme: Option<[crate::render::Color; 15]>,
 }
 
 impl HarnessCore {
@@ -207,6 +209,7 @@ impl HarnessCore {
             note: None,
             rail_digest: None,
             rail_width_cells: None,
+            pending_theme: None,
         };
         core.workspace.reload_projects_from_disk();
 
@@ -796,8 +799,11 @@ impl HarnessCore {
     pub(super) fn process_background_events(&mut self) -> bool {
         let mut changed = self.drain_terminal_events();
         let mut snapshots = Vec::new();
-        while let Some(snapshot) = { self.sidecar.try_recv() } {
-            snapshots.push(snapshot);
+        while let Some(message) = { self.sidecar.try_recv() } {
+            match message {
+                SidecarMessage::Snapshot(snapshot) => snapshots.push(snapshot),
+                SidecarMessage::Theme(theme) => self.pending_theme = Some(theme),
+            }
         }
         if !snapshots.is_empty() {
             let mut locator = SessionLocator::rebuild(self.workspace.projects());
@@ -828,7 +834,11 @@ impl HarnessCore {
             None => None,
         };
         self.sync_rail_digest();
-        changed
+        changed || self.pending_theme.is_some()
+    }
+
+    pub(super) fn take_theme(&mut self) -> Option<[crate::render::Color; 15]> {
+        self.pending_theme.take()
     }
 
     /// Broadcast the cross-session digest whenever its JSON changes; runs
