@@ -22,7 +22,7 @@ mod raw;
 
 use ansi::AnsiRenderer;
 use input::mouse_event_for_bytes;
-use keyboard::{decode_key_input, is_ctrl_char};
+use keyboard::{decode_key_input, is_ctrl_char, is_ctrl_question};
 use raw::{spawn_stdin_reader, terminal_size, RawTerminal};
 
 const TUI_WHEEL_LINES: i32 = 3;
@@ -328,7 +328,7 @@ impl TuiApp {
             return true;
         }
 
-        if is_ctrl_char(bytes, 'g') {
+        if is_ctrl_question(bytes) {
             self.toggle_help_overlay();
             return false;
         }
