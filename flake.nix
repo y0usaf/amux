@@ -45,6 +45,21 @@
       default = pkgs.callPackage ./nix/shell.nix {};
     });
 
+    checks = forAllSystems (pkgs: {
+      pi-extension-tests = pkgs.runCommand "pi-extension-tests" {
+        nativeBuildInputs = [pkgs.nodejs];
+        src = builtins.path {path = ./pi-extension; name = "pi-extension-tests-src";};
+      } ''
+        tests=("$src"/*.test.js)
+        if [ ! -e "''${tests[0]}" ]; then
+          echo "pi-extension-tests: no test files matched $src/*.test.js" >&2
+          exit 1
+        fi
+        node --test "''${tests[@]}"
+        touch $out
+      '';
+    });
+
     overlays.default = final: prev: {
       pi-harness = self.packages.${final.system}.default;
     };

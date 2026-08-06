@@ -12,6 +12,12 @@ use crate::notify::Notify;
 use crate::pi::PiSidecarSnapshot;
 use stream::read_sidecar_stream;
 
+#[derive(Debug)]
+pub enum SidecarMessage {
+    Snapshot(PiSidecarSnapshot),
+    Theme([crate::render::Color; 15]),
+}
+
 /// Write half of every connected sidechannel extension plus the sticky
 /// hello line replayed to each new connection.
 #[derive(Default)]
@@ -53,7 +59,7 @@ impl Downstream {
 
 pub struct SidecarListener {
     socket_path: PathBuf,
-    rx: Receiver<PiSidecarSnapshot>,
+    rx: Receiver<SidecarMessage>,
     downstream: Arc<Mutex<Downstream>>,
 }
 
@@ -102,7 +108,7 @@ impl SidecarListener {
         })
     }
 
-    pub fn try_recv(&self) -> Option<PiSidecarSnapshot> {
+    pub fn try_recv(&self) -> Option<SidecarMessage> {
         self.rx.try_recv().ok()
     }
 

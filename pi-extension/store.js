@@ -40,7 +40,7 @@ export function createStore() {
 		statuses: [], // string[]
 
 		// harness downstream (written by sidechannel socket reader)
-		harness: undefined, // { railWidth, palette }
+		harness: undefined, // { railWidth }
 		digest: undefined, // [{ key, name, project, stage, queued, interrupted, unread, selected }]
 	}
 

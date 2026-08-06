@@ -11,7 +11,7 @@ use super::sidebar::{
     SidebarViewportItem, SIDEBAR_ANIMATION_FRAME_MS,
 };
 use super::terminal_view::for_each_terminal_screen_cell;
-use super::theme::{self, DerivedTheme};
+use super::theme::{self, DerivedTheme, Role};
 const STATUSLINE_MODE_LABEL_WIDTH: i32 = 9;
 const SCROLLBAR_TRACK_GLYPH: &str = "│";
 const SCROLLBAR_THUMB_GLYPH: &str = "┃";
@@ -30,8 +30,11 @@ pub(super) struct ScenePalette {
     pub(super) sidebar_bg: Color,
     pub(super) border: Color,
     pub(super) muted: Color,
+    pub(super) heading: Color,
     pub(super) term_fg: Color,
     pub(super) term_bg: Color,
+    pub(super) term_selection_fg: Color,
+    pub(super) term_selection_bg: Color,
     pub(super) accent: Color,
     pub(super) accent_2: Color,
 
@@ -55,8 +58,11 @@ impl ScenePalette {
             sidebar_bg: theme.sidebar_bg,
             border: theme.border,
             muted: theme.muted,
+            heading: theme.heading,
             term_fg: theme.term_fg,
             term_bg: theme.term_bg,
+            term_selection_fg: theme.term_selection_fg,
+            term_selection_bg: theme.term_selection_bg,
             accent: theme.accent,
             accent_2: theme.accent_2,
 
@@ -64,7 +70,7 @@ impl ScenePalette {
 
             running: theme.running,
             success: theme.success,
-            success_subtle: theme.success_subtle,
+            success_subtle: theme.success,
             warning: theme.warning,
             error: theme.error,
             monochrome: false,
@@ -767,13 +773,13 @@ fn render_sidebar_project_header(
     let title_fg = if palette.monochrome {
         palette.fg
     } else if selected {
-        palette.statusbar_fg
+        palette.heading
     } else if let Some(status_color) = status_color {
         status_color
     } else if hovered || sticky {
-        palette.accent
+        palette.fg
     } else {
-        theme::brighten(palette.statusbar_bg, 36)
+        palette.accent
     };
     let jewel = crown_jewel_glyph(status, now_ms);
 
@@ -885,23 +891,23 @@ fn sidebar_row_style(
     (fg, base_bg, false)
 }
 
-fn palette_color(color: Color, palette: &ScenePalette) -> Color {
-    if color == theme::TEXT {
-        palette.fg
-    } else if color == theme::HEADING {
-        theme::HEADING
-    } else if color == theme::MUTED {
-        palette.muted
-    } else if color == theme::ACCENT {
-        palette.accent
-    } else if color == theme::RUNNING {
-        palette.running
-    } else if color == theme::WARNING {
-        palette.warning
-    } else if color == theme::ERROR {
-        palette.error
-    } else {
-        color
+fn palette_color(role: Role, palette: &ScenePalette) -> Color {
+    match role {
+        Role::Text => palette.fg,
+        Role::Muted => palette.muted,
+        Role::Heading => palette.heading,
+        Role::Accent => palette.accent,
+        Role::Accent2 => palette.accent_2,
+        Role::Border => palette.border,
+        Role::Surface => palette.bg,
+        Role::SurfaceRaised => palette.bg,
+        Role::SidebarBg => palette.sidebar_bg,
+        Role::StatusbarFg => palette.statusbar_fg,
+        Role::StatusbarBg => palette.statusbar_bg,
+        Role::Running => palette.running,
+        Role::Success => palette.success,
+        Role::Warning => palette.warning,
+        Role::Error => palette.error,
     }
 }
 pub(super) fn render_terminal(
@@ -952,17 +958,21 @@ fn blit_terminal_screen(
         selection,
         palette.term_fg,
         palette.term_bg,
+        palette.term_selection_fg,
+        palette.term_selection_bg,
         &palette.ansi,
         draw_cursor,
         |cell| {
-            surface.put_cell_span(
+            surface.put_cell_span_terminal(
                 rect.col + i32::from(cell.col),
                 rect.row + i32::from(cell.row),
                 i32::from(cell.span),
                 cell.text,
                 cell.fg,
                 cell.bg,
+                cell.bold,
                 cell.underline,
+                false,
             );
         },
     );

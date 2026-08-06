@@ -386,5 +386,9 @@ impl TuiApp {
         if self.core.process_background_events() {
             self.needs_redraw = true;
         }
+        if let Some(roles) = self.core.take_theme() {
+            self.theme = DerivedTheme::from_roles(roles);
+            self.needs_redraw = true;
+        }
     }
 }

@@ -2,7 +2,7 @@
 //
 // Upstream (extension → harness): JSON-line session snapshots over the unix
 // socket, unchanged wire format from the original harness-sidechannel.js.
-// Downstream (harness → extension): `hello` (rail width + palette) and
+// Downstream (harness → extension): `hello` (rail width) and
 // `digest` (cross-session summary) lines consumed into the shared store.
 
 import { readFileSync } from "node:fs"
@@ -13,6 +13,31 @@ const HARNESS_SESSION_ID = process.env.AGENT_HARNESS_PI_SESSION_KEY
 const SNAPSHOT_TYPE = "snapshot"
 const TITLE_POLL_MS = 250
 const SESSION_TITLE_MAX_CHARS = 42
+const THEME_FG_TOKENS = ["text", "muted", "mdHeading", "accent", "borderAccent", "borderMuted", null, null, null, "toolTitle", null, "mdLink", "success", "warning", "error"]
+const THEME_BG_TOKENS = [null, null, null, null, null, null, "toolPendingBg", "selectedBg", null, null, "toolSuccessBg", null, null, null, null]
+
+export function parseThemeAnsi(value, background = false) {
+	const prefix = background ? "48" : "38"
+	if (value === `\x1b[${background ? "49" : "39"}m`) return { kind: "default" }
+	const rgb = new RegExp(`^\\x1b\\[${prefix};2;(\\d+);(\\d+);(\\d+)m$`).exec(value)
+	if (rgb && rgb.slice(1).every((n) => Number(n) >= 0 && Number(n) <= 255)) return { kind: "rgb", r: Number(rgb[1]), g: Number(rgb[2]), b: Number(rgb[3]) }
+	const ansi = new RegExp(`^\\x1b\\[${prefix};5;(\\d+)m$`).exec(value)
+	if (ansi && Number(ansi[1]) <= 255) return { kind: "ansi", index: Number(ansi[1]) }
+	return undefined
+}
+
+export function resolveTheme(ctx) {
+	const theme = ctx.ui.theme
+	return THEME_FG_TOKENS.map((token, i) => {
+		const bgToken = THEME_BG_TOKENS[i]
+		const parsed = token
+			? parseThemeAnsi(theme.getFgAnsi(token), false)
+			: bgToken
+				? parseThemeAnsi(theme.getBgAnsi(bgToken), true)
+				: { kind: "default" }
+		return parsed || { kind: "default" }
+	})
+}
 
 function firstNonEmptyLine(text) {
 	for (const line of `${text || ""}`.split("\n")) {
@@ -43,6 +68,7 @@ export function registerSidechannel(pi, store) {
 	let destroyed = false
 	let sessionId = undefined
 	let sessionFile = undefined
+	let lastCtx
 	let stage = "idle"
 	let queued = false
 	let toolName = undefined
@@ -50,6 +76,14 @@ export function registerSidechannel(pi, store) {
 	let lastSnapshotKey = undefined
 	let downstreamBuffer = ""
 	const activeTools = new Map()
+	let lastThemeKey
+	const emitTheme = (ctx) => {
+		if (!socket || socket.destroyed || !ctx?.ui?.theme) return
+		const roles = resolveTheme(ctx), key = JSON.stringify(roles)
+		if (key === lastThemeKey) return
+		lastThemeKey = key
+		socket.write(`${JSON.stringify({ type: "theme", roles })}\n`)
+	}
 
 	function currentName() {
 		const name = pi.getSessionName?.()
@@ -116,6 +150,7 @@ export function registerSidechannel(pi, store) {
 
 	function rememberSessionContext(ctx) {
 		if (!ctx) return
+		lastCtx = ctx
 		sessionId = ctx.sessionManager.getSessionId()
 		sessionFile = ctx.sessionManager.getSessionFile()
 		queued = ctx.hasPendingMessages()
@@ -151,7 +186,6 @@ export function registerSidechannel(pi, store) {
 			store.update((state) => {
 				state.harness = {
 					railWidth: Number.isFinite(message.railWidth) ? message.railWidth : undefined,
-					palette: typeof message.palette === "object" && message.palette ? message.palette : undefined,
 				}
 			})
 		} else if (message.type === "digest" && Array.isArray(message.sessions)) {
@@ -187,6 +221,7 @@ export function registerSidechannel(pi, store) {
 			socket.setNoDelay(true)
 			socket.on("connect", () => {
 				emitSnapshot(undefined, true)
+				if (lastCtx) emitTheme(lastCtx)
 			})
 			socket.on("data", handleDownstreamData)
 			socket.on("error", () => {
@@ -230,6 +265,7 @@ export function registerSidechannel(pi, store) {
 		ensureSocket()
 		if (socket && !socket.destroyed && socket.writable) {
 			socket.write(`${payload}\n`)
+			emitTheme(ctx || lastCtx)
 		}
 	}
 

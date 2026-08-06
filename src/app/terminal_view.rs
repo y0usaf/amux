@@ -12,6 +12,7 @@ pub(super) struct TerminalCellView<'a> {
     pub(super) fg: Color,
     pub(super) bg: Color,
     pub(super) underline: bool,
+    pub(super) bold: bool,
 }
 
 pub(super) fn for_each_terminal_screen_cell<F>(
@@ -21,6 +22,8 @@ pub(super) fn for_each_terminal_screen_cell<F>(
     selection: Option<TerminalSelectionRange>,
     default_fg: Color,
     default_bg: Color,
+    selection_fg: Color,
+    selection_bg: Color,
     ansi_palette: &[Color; 16],
     draw_cursor: bool,
     mut visit: F,
@@ -62,6 +65,8 @@ pub(super) fn for_each_terminal_screen_cell<F>(
                 selected,
                 default_fg,
                 default_bg,
+                selection_fg,
+                selection_bg,
                 ansi_palette,
             );
 
@@ -77,6 +82,7 @@ pub(super) fn for_each_terminal_screen_cell<F>(
                 fg,
                 bg,
                 underline: cell.underline(),
+                bold: cell.bold(),
             });
         }
     }
