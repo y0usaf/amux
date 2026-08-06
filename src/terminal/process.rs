@@ -16,6 +16,7 @@ pub struct TerminalTarget {
     pub pi_binary: Option<String>,
     pub sidecar_extension_path: Option<PathBuf>,
     pub sidecar_socket_path: PathBuf,
+    pub tui_mode: Option<String>,
     pub harness_session_id: String,
     pub cwd: PathBuf,
     pub session_file: Option<PathBuf>,
@@ -111,6 +112,10 @@ pub(crate) fn spawn_process(
     if let Some(ref session_file) = target.session_file {
         args.push("--session".to_string());
         args.push(session_file.display().to_string());
+    }
+    if let Some(tui_mode) = &target.tui_mode {
+        args.push("--tui-mode".to_string());
+        args.push(tui_mode.clone());
     }
     let argv = pi::launch_argv(target.pi_binary.as_deref(), &args)?;
 

@@ -24,6 +24,7 @@ mod tests {
             pi_binary: Some("pi".into()),
             sidecar_extension_path: Some(PathBuf::from("/tmp/sidecar.js")),
             sidecar_socket_path: PathBuf::from("/tmp/pi.sock"),
+            tui_mode: None,
             harness_session_id: "local-session-1".into(),
             cwd: PathBuf::from("/tmp/project"),
             session_file: session_file.map(PathBuf::from),
