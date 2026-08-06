@@ -338,3 +338,16 @@ fn non_matching_second_stroke_falls_back_to_fresh_lookup() {
     );
     assert!(state.pending().is_empty());
 }
+
+#[test]
+fn ascii_flag_selects_ascii_glyphs() {
+    let config: AppConfig = serde_json::from_str(r#"{"ascii":true}"#).unwrap();
+    assert_eq!(config.glyph_style(), GlyphStyle::Ascii);
+}
+
+#[test]
+fn default_config_uses_unicode_glyphs() {
+    let config: AppConfig = serde_json::from_str(r#"{}"#).unwrap();
+    assert_eq!(config.glyph_style(), GlyphStyle::Unicode);
+    assert_eq!(AppConfig::default().glyph_style(), GlyphStyle::Unicode);
+}

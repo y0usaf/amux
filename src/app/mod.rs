@@ -1,6 +1,7 @@
 mod backend;
 mod cell_surface;
 mod clipboard_image;
+pub mod glyphs;
 mod layout;
 mod rail_bridge;
 mod scene;

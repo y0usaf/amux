@@ -2,6 +2,7 @@
 
 use crate::render::Color;
 
+use super::glyphs::GlyphSet;
 use super::layout::CellRect;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -326,6 +327,7 @@ pub(super) fn draw_box(
     fill_fg: Color,
     bg: Color,
     border: Color,
+    glyphs: &GlyphSet,
 ) {
     surface.fill_rect(rect, fill_fg, bg);
     if rect.cols <= 0 || rect.rows <= 0 {
@@ -338,29 +340,29 @@ pub(super) fn draw_box(
 
     if rect.rows == 1 {
         for col in left..=right {
-            surface.set_cell(col, top, border, bg, "─", false);
+            surface.set_cell(col, top, border, bg, glyphs.box_.h, false);
         }
         return;
     }
     if rect.cols == 1 {
         for row in top..=bottom {
-            surface.set_cell(left, row, border, bg, "│", false);
+            surface.set_cell(left, row, border, bg, glyphs.box_.v, false);
         }
         return;
     }
 
     for col in (left + 1)..right {
-        surface.set_cell(col, top, border, bg, "─", false);
-        surface.set_cell(col, bottom, border, bg, "─", false);
+        surface.set_cell(col, top, border, bg, glyphs.box_.h, false);
+        surface.set_cell(col, bottom, border, bg, glyphs.box_.h, false);
     }
     for row in (top + 1)..bottom {
-        surface.set_cell(left, row, border, bg, "│", false);
-        surface.set_cell(right, row, border, bg, "│", false);
+        surface.set_cell(left, row, border, bg, glyphs.box_.v, false);
+        surface.set_cell(right, row, border, bg, glyphs.box_.v, false);
     }
-    surface.set_cell(left, top, border, bg, "┌", false);
-    surface.set_cell(right, top, border, bg, "┐", false);
-    surface.set_cell(left, bottom, border, bg, "└", false);
-    surface.set_cell(right, bottom, border, bg, "┘", false);
+    surface.set_cell(left, top, border, bg, glyphs.box_.tl, false);
+    surface.set_cell(right, top, border, bg, glyphs.box_.tr, false);
+    surface.set_cell(left, bottom, border, bg, glyphs.box_.bl, false);
+    surface.set_cell(right, bottom, border, bg, glyphs.box_.br, false);
 }
 
 pub(super) fn render_cell_scrollbar(
