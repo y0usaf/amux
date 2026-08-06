@@ -8,6 +8,7 @@ use crate::notify::Notify;
 
 use super::backend::{HarnessCore, ShortcutOutcome};
 use super::cell_surface::CellSurface;
+use super::glyphs::GlyphSet;
 use super::layout::{compute_cell_layout, sidebar_content_rect, CellLayout, CellRect as Rect};
 use super::scene::{
     harness_scene_layout, render_harness_scene, HarnessMode, ScenePalette, TerminalCursorMode,
@@ -240,6 +241,9 @@ impl TuiApp {
         let visible_sidebar_rows = sidebar_content_rect(layout.sidebar).rows.max(0) as usize;
         self.core.sync_rail_width(cols);
         let mode = self.current_mode();
+        // Capture the style as a Copy value before prepare_frame borrows core
+        // mutably, so the config borrow does not outlive the frame model.
+        let glyph_style = self.core.config.glyph_style();
         let frame_model = self.core.prepare_frame(
             layout.terminal.rows.max(1) as u16,
             layout.terminal.cols.max(1) as u16,
@@ -247,7 +251,9 @@ impl TuiApp {
         );
 
         let theme = self.theme;
+        let glyphs = GlyphSet::for_style(glyph_style);
         let mut palette = ScenePalette::themed(theme);
+        palette.glyphs = glyphs;
         palette.border = theme.border;
         palette.muted = theme.muted;
         palette.statusbar_bg = theme.status_bg;
@@ -269,7 +275,7 @@ impl TuiApp {
             hardware_cursor = Some(command_cursor);
         }
         if let Some(viewer) = &mut self.archive_viewer {
-            render_archive_viewer(&mut surface, viewer, &self.theme);
+            render_archive_viewer(&mut surface, viewer, &self.theme, &glyphs);
             hardware_cursor = None;
         }
         if let Some(help) = &mut self.help_overlay {
@@ -277,7 +283,7 @@ impl TuiApp {
             hardware_cursor = None;
         }
         if let Some(usage) = &mut self.usage_overlay {
-            render_usage_overlay(&mut surface, usage, &self.theme);
+            render_usage_overlay(&mut surface, usage, &self.theme, &glyphs);
             hardware_cursor = None;
         }
         self.surface = renderer.render(stdout, surface, hardware_cursor)?;

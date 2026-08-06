@@ -1,4 +1,5 @@
 use crate::app::cell_surface::{draw_box, render_cell_scrollbar, truncate_to_cells, CellSurface};
+use crate::app::glyphs::GlyphSet;
 use crate::app::layout::CellRect as Rect;
 use crate::app::theme::{self, DerivedTheme};
 use crate::config::{AppAction, AppConfig};
@@ -105,12 +106,14 @@ pub(in crate::app::tui) fn render_help_overlay(
     theme: &DerivedTheme,
 ) {
     let rect = help_overlay_rect(surface.cols, surface.rows);
+    let glyphs = GlyphSet::for_style(config.glyph_style());
     draw_box(
         surface,
         rect,
         theme.text,
         theme.surface_raised,
         theme.status_bg,
+        &glyphs,
     );
     if rect.cols <= 2 || rect.rows <= 2 {
         return;
@@ -126,6 +129,7 @@ pub(in crate::app::tui) fn render_help_overlay(
         " HELP ",
         " ctrl+?/Esc/q close ",
         theme,
+        &glyphs,
     );
 
     let lines = help_overlay_lines(config);
@@ -146,7 +150,9 @@ pub(in crate::app::tui) fn render_help_overlay(
             && !line.contains('/')
             && !line.contains(':');
         if is_heading {
-            render_dialog_title_line(surface, row, inner.col, text_width, line, "", theme);
+            render_dialog_title_line(
+                surface, row, inner.col, text_width, line, "", theme, &glyphs,
+            );
         } else {
             let split_at = line.len().min(24);
             let (keys, description) = line.split_at(split_at);
@@ -182,6 +188,6 @@ pub(in crate::app::tui) fn render_help_overlay(
         theme.surface,
         "╎",
         theme.accent_2,
-        "┃",
+        glyphs.scrollbar_thumb,
     );
 }

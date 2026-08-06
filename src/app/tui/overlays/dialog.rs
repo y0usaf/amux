@@ -1,7 +1,9 @@
 use crate::app::cell_surface::{display_cell_width, CellSurface};
+use crate::app::glyphs::GlyphSet;
 use crate::app::theme::DerivedTheme;
 use crate::render::Color;
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::app::tui) fn render_dialog_title_line(
     surface: &mut CellSurface,
     row: i32,
@@ -10,6 +12,7 @@ pub(in crate::app::tui) fn render_dialog_title_line(
     title: &str,
     info: &str,
     theme: &DerivedTheme,
+    glyphs: &GlyphSet,
 ) {
     if width <= 0 {
         return;
@@ -28,7 +31,7 @@ pub(in crate::app::tui) fn render_dialog_title_line(
             row,
             fg,
             theme.surface,
-            "╱",
+            glyphs.dialog_slash,
             false,
         );
     }

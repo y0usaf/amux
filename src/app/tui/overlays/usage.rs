@@ -1,6 +1,7 @@
 use crate::app::cell_surface::{
     display_cell_width, draw_box, render_cell_scrollbar, truncate_to_cells, CellSurface,
 };
+use crate::app::glyphs::GlyphSet;
 use crate::app::layout::CellRect as Rect;
 use crate::app::theme::{self, DerivedTheme};
 use crate::pi::{self, PiUsageDay, PiUsageModelBreakdown, PiUsageReport, PiUsageTotals};
@@ -64,16 +65,23 @@ pub(in crate::app::tui) fn usage_overlay_line_count(report: &PiUsageReport) -> u
 }
 
 /// Scrollable day/model rows; the total row stays fixed in the overlay.
-pub(in crate::app::tui) fn usage_overlay_lines(report: &PiUsageReport) -> Vec<String> {
+pub(in crate::app::tui) fn usage_overlay_lines(
+    report: &PiUsageReport,
+    glyphs: &GlyphSet,
+) -> Vec<String> {
     let mut lines = Vec::with_capacity(usage_overlay_line_count(report));
     for (day_index, day) in report.days.iter().enumerate() {
-        lines.push(usage_day_line(day));
+        lines.push(usage_day_line(day, glyphs));
         let models = sorted_model_breakdowns(day);
         for (index, breakdown) in models.iter().enumerate() {
-            lines.push(usage_model_line(breakdown, index + 1 == models.len()));
+            lines.push(usage_model_line(
+                breakdown,
+                index + 1 == models.len(),
+                glyphs,
+            ));
         }
         if day_index + 1 < report.days.len() {
-            lines.push(usage_separator_line());
+            lines.push(usage_separator_line(glyphs));
         }
     }
     lines
@@ -83,6 +91,7 @@ pub(in crate::app::tui) fn render_usage_overlay(
     surface: &mut CellSurface,
     usage: &mut UsageOverlayState,
     theme: &DerivedTheme,
+    glyphs: &GlyphSet,
 ) {
     let rect = usage_overlay_rect(surface.cols, surface.rows);
     draw_box(
@@ -91,6 +100,7 @@ pub(in crate::app::tui) fn render_usage_overlay(
         theme.text,
         theme.surface_raised,
         theme.status_bg,
+        glyphs,
     );
     if rect.cols <= 2 || rect.rows <= 2 {
         return;
@@ -101,7 +111,7 @@ pub(in crate::app::tui) fn render_usage_overlay(
 
     let count = format!(" {} ", usage.report.entries);
     render_dialog_title_line(
-        surface, inner.row, inner.col, inner.cols, " USAGE ", &count, theme,
+        surface, inner.row, inner.col, inner.cols, " USAGE ", &count, theme, glyphs,
     );
 
     let header_row = inner.row + 1;
@@ -113,7 +123,7 @@ pub(in crate::app::tui) fn render_usage_overlay(
     let list_rows = (footer_row - list_row).max(0) as usize;
     let list_width = (inner.cols - 1).max(0);
 
-    let header_line = usage_header_line();
+    let header_line = usage_header_line(glyphs);
     surface.put_text(
         inner.col,
         header_row,
@@ -123,7 +133,7 @@ pub(in crate::app::tui) fn render_usage_overlay(
         &header_line,
     );
 
-    let separator_line = usage_separator_line();
+    let separator_line = usage_separator_line(glyphs);
     surface.put_text(
         inner.col,
         header_separator_row,
@@ -133,7 +143,7 @@ pub(in crate::app::tui) fn render_usage_overlay(
         &separator_line,
     );
 
-    let total_line = usage_total_line(&usage.report.totals);
+    let total_line = usage_total_line(&usage.report.totals, glyphs);
     surface.put_text_bold(
         inner.col,
         total_row,
@@ -152,12 +162,12 @@ pub(in crate::app::tui) fn render_usage_overlay(
     );
 
     usage.clamp_scroll(list_rows);
-    let lines = usage_overlay_lines(&usage.report);
+    let lines = usage_overlay_lines(&usage.report, glyphs);
 
     for (row_offset, line) in lines.iter().skip(usage.scroll).take(list_rows).enumerate() {
         let row = list_row + row_offset as i32;
-        let is_separator = is_usage_separator_line(line);
-        let is_total = is_usage_total_line(line);
+        let is_separator = is_usage_separator_line(line, glyphs);
+        let is_total = is_usage_total_line(line, glyphs);
         let fg = if is_separator {
             theme.border
         } else if is_total {
@@ -184,7 +194,7 @@ pub(in crate::app::tui) fn render_usage_overlay(
         theme.surface,
         "╎",
         theme.accent_2,
-        "┃",
+        glyphs.scrollbar_thumb,
     );
 
     surface.put_text(
@@ -197,42 +207,49 @@ pub(in crate::app::tui) fn render_usage_overlay(
     );
 }
 
-fn usage_header_line() -> String {
+fn usage_header_line(glyphs: &GlyphSet) -> String {
     usage_table_line(
         "DATE / MODEL",
         ["INPUT", "OUTPUT", "CACHE+", "CACHE↺", "TOTAL", "COST"],
+        glyphs,
     )
 }
 
-fn usage_separator_line() -> String {
-    let mut line = "─".repeat(USAGE_TREE_COLS);
+fn usage_separator_line(glyphs: &GlyphSet) -> String {
+    let mut line = glyphs.usage_separator.repeat(USAGE_TREE_COLS);
     for width in USAGE_VALUE_COLS {
-        line.push('┼');
-        line.push_str(&"─".repeat(width));
+        line.push_str(glyphs.usage_cross);
+        line.push_str(&glyphs.usage_separator.repeat(width));
     }
     line
 }
 
-fn is_usage_separator_line(line: &str) -> bool {
-    line.starts_with('─')
+fn is_usage_separator_line(line: &str, glyphs: &GlyphSet) -> bool {
+    line.starts_with(glyphs.usage_separator)
 }
 
-fn is_usage_total_line(line: &str) -> bool {
-    !is_usage_separator_line(line) && !line.starts_with("  ├─ ") && !line.starts_with("  └─ ")
+fn is_usage_total_line(line: &str, glyphs: &GlyphSet) -> bool {
+    !is_usage_separator_line(line, glyphs)
+        && !line.starts_with(glyphs.tree_branch)
+        && !line.starts_with(glyphs.tree_branch_last)
 }
 
-fn usage_total_line(totals: &PiUsageTotals) -> String {
-    usage_row_line("TOTAL", totals)
+fn usage_total_line(totals: &PiUsageTotals, glyphs: &GlyphSet) -> String {
+    usage_row_line("TOTAL", totals, glyphs)
 }
 
-fn usage_day_line(day: &PiUsageDay) -> String {
-    usage_row_line(&day.date, &day.totals)
+fn usage_day_line(day: &PiUsageDay, glyphs: &GlyphSet) -> String {
+    usage_row_line(&day.date, &day.totals, glyphs)
 }
 
-fn usage_model_line(breakdown: &PiUsageModelBreakdown, is_last: bool) -> String {
-    let branch = if is_last { "  └─ " } else { "  ├─ " };
+fn usage_model_line(breakdown: &PiUsageModelBreakdown, is_last: bool, glyphs: &GlyphSet) -> String {
+    let branch = if is_last {
+        glyphs.tree_branch_last
+    } else {
+        glyphs.tree_branch
+    };
     let label = format!("{branch}{}", format_model_name(&breakdown.model_name));
-    usage_row_line(&label, &breakdown.totals)
+    usage_row_line(&label, &breakdown.totals, glyphs)
 }
 
 fn sorted_model_breakdowns(day: &PiUsageDay) -> Vec<PiUsageModelBreakdown> {
@@ -241,7 +258,7 @@ fn sorted_model_breakdowns(day: &PiUsageDay) -> Vec<PiUsageModelBreakdown> {
     models
 }
 
-fn usage_row_line(label: &str, totals: &PiUsageTotals) -> String {
+fn usage_row_line(label: &str, totals: &PiUsageTotals, glyphs: &GlyphSet) -> String {
     let input = format_u64(totals.input_tokens);
     let output = format_u64(totals.output_tokens);
     let cache_creation = format_u64(totals.cache_creation_tokens);
@@ -251,13 +268,14 @@ fn usage_row_line(label: &str, totals: &PiUsageTotals) -> String {
     usage_table_line(
         label,
         [&input, &output, &cache_creation, &cache_read, &total, &cost],
+        glyphs,
     )
 }
 
-fn usage_table_line(label: &str, values: [&str; 6]) -> String {
+fn usage_table_line(label: &str, values: [&str; 6], glyphs: &GlyphSet) -> String {
     let mut line = format_cell_left(label, USAGE_TREE_COLS);
     for (value, width) in values.iter().zip(USAGE_VALUE_COLS.iter()) {
-        line.push('│');
+        line.push_str(glyphs.usage_vertical);
         line.push_str(&format_cell_right(value, *width));
     }
     line
@@ -375,9 +393,10 @@ mod tests {
             skipped_duplicates: 0,
         };
 
-        let daily_rows = usage_overlay_lines(&report);
-        let header_row = usage_header_line();
-        let separator_row = usage_separator_line();
+        let glyphs = GlyphSet::unicode();
+        let daily_rows = usage_overlay_lines(&report, &glyphs);
+        let header_row = usage_header_line(&glyphs);
+        let separator_row = usage_separator_line(&glyphs);
 
         assert_eq!(
             display_cell_width(&header_row),
@@ -396,7 +415,7 @@ mod tests {
         assert!(daily_rows[2].contains("└─ sonnet-4"));
         assert!(daily_rows[2].contains("$0.01"));
 
-        let total_row = usage_total_line(&report.totals);
+        let total_row = usage_total_line(&report.totals, &glyphs);
 
         assert!(total_row.contains("TOTAL"));
         assert!(total_row.contains("1,080"));
@@ -424,7 +443,8 @@ mod tests {
             skipped_duplicates: 0,
         };
 
-        let rows = usage_overlay_lines(&report);
+        let glyphs = GlyphSet::unicode();
+        let rows = usage_overlay_lines(&report, &glyphs);
 
         assert_eq!(usage_overlay_line_count(&report), 3);
         assert_eq!(rows.len(), 3);

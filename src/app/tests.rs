@@ -6,6 +6,7 @@ use crate::state::Session;
 
 use super::{
     cell_surface::CellSurface,
+    glyphs::GlyphSet,
     layout::CellRect,
     scene::{render_sidebar, render_statusbar, HarnessMode, ScenePalette},
     sidebar::{self, SidebarRow, SidebarRowKind, SidebarStatusKind, SidebarViewportItem},
@@ -151,16 +152,18 @@ fn sidebar_status_prefers_active_over_notification() {
 
 #[test]
 fn notification_status_uses_static_glyph() {
+    let glyphs = GlyphSet::unicode();
     assert_eq!(
-        sidebar::sidebar_status_glyph(sidebar::SidebarStatusKind::Notification, 0),
+        sidebar::sidebar_status_glyph(&glyphs, sidebar::SidebarStatusKind::Notification, 0),
         sidebar::SIDEBAR_NOTIFICATION_GLYPH
     );
 }
 
 #[test]
 fn interrupted_status_uses_notification_glyph() {
+    let glyphs = GlyphSet::unicode();
     assert_eq!(
-        sidebar::sidebar_status_glyph(sidebar::SidebarStatusKind::Interrupted, 0),
+        sidebar::sidebar_status_glyph(&glyphs, sidebar::SidebarStatusKind::Interrupted, 0),
         sidebar::SIDEBAR_NOTIFICATION_GLYPH
     );
 }
@@ -459,8 +462,10 @@ fn selected_empty_project_draws_accent_crown_jewel() {
 
 #[test]
 fn spinner_glyph_advances_with_frame_interval() {
-    let first = sidebar::sidebar_status_glyph(sidebar::SidebarStatusKind::Active, 0);
+    let glyphs = GlyphSet::unicode();
+    let first = sidebar::sidebar_status_glyph(&glyphs, sidebar::SidebarStatusKind::Active, 0);
     let second = sidebar::sidebar_status_glyph(
+        &glyphs,
         sidebar::SidebarStatusKind::Active,
         sidebar::SIDEBAR_SPINNER_FRAME_MS,
     );
@@ -507,4 +512,18 @@ fn project_path_normalization_preserves_order() {
             PathBuf::from("/tmp/project-a")
         ]
     );
+}
+
+#[test]
+fn ascii_glyph_set_uses_plain_box_and_spinner() {
+    let glyphs = GlyphSet::ascii();
+    assert_eq!(glyphs.spinner, &["-", "\\", "|", "/"]);
+    assert_eq!(glyphs.box_.h, "-");
+    assert_eq!(glyphs.box_.v, "|");
+    assert_eq!(glyphs.box_.tl, "+");
+    assert_eq!(glyphs.box_.tr, "+");
+    assert_eq!(glyphs.box_.bl, "+");
+    assert_eq!(glyphs.box_.br, "+");
+    assert_eq!(glyphs.scrollbar_track, "|");
+    assert_eq!(glyphs.scrollbar_thumb, "#");
 }

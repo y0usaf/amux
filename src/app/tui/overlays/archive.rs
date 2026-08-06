@@ -4,6 +4,7 @@ use crate::state::ScannedSession;
 use super::super::raw::terminal_size;
 use super::dialog::render_dialog_title_line;
 use crate::app::cell_surface::{draw_box, render_cell_scrollbar, truncate_to_cells, CellSurface};
+use crate::app::glyphs::GlyphSet;
 use crate::app::layout::CellRect as Rect;
 use crate::app::theme::{self, DerivedTheme};
 
@@ -114,6 +115,7 @@ pub(in crate::app::tui) fn render_archive_viewer(
     surface: &mut CellSurface,
     viewer: &mut ArchiveViewerState,
     theme: &DerivedTheme,
+    glyphs: &GlyphSet,
 ) {
     let rect = archive_viewer_rect(surface.cols, surface.rows);
     draw_box(
@@ -122,6 +124,7 @@ pub(in crate::app::tui) fn render_archive_viewer(
         theme.text,
         theme.surface_raised,
         theme.status_bg,
+        glyphs,
     );
     if rect.cols <= 2 || rect.rows <= 2 {
         return;
@@ -138,6 +141,7 @@ pub(in crate::app::tui) fn render_archive_viewer(
         " ARCHIVE ",
         &count,
         theme,
+        glyphs,
     );
 
     let hint = "↑/↓/j/k select  Enter restore  r reload  q/Esc close";
@@ -214,7 +218,7 @@ pub(in crate::app::tui) fn render_archive_viewer(
             theme.surface,
             "╎",
             theme.accent_2,
-            "┃",
+            glyphs.scrollbar_thumb,
         );
     }
 

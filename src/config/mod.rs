@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::app::glyphs::GlyphStyle;
 use crate::util::app_config_dir;
 
 pub use actions::{action_spec, ActionSpec, AppAction, ACTION_SPECS};
@@ -46,6 +47,7 @@ pub struct AppConfig {
     pub tui_mode: Option<String>,
     pub tui_terminal_width_percent: Option<u8>,
     pub tui_sidebar_width_percent: Option<u8>,
+    pub ascii: Option<bool>,
     #[serde(default)]
     pub keybinds: BTreeMap<String, ConfigKeybind>,
 }
@@ -148,6 +150,16 @@ impl AppConfig {
                 PANEL_WIDTH_PERCENT_DEFAULT
             }
             None => PANEL_WIDTH_PERCENT_DEFAULT,
+        }
+    }
+
+    /// Glyph rendering style: Unicode by default, plain ASCII when the config
+    /// flag `ascii` is explicitly enabled.
+    pub fn glyph_style(&self) -> GlyphStyle {
+        if self.ascii == Some(true) {
+            GlyphStyle::Ascii
+        } else {
+            GlyphStyle::Unicode
         }
     }
 

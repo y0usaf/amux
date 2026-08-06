@@ -1,6 +1,7 @@
 use crate::render::Color;
 use crate::state::{Project, Session};
 
+use super::glyphs::GlyphSet;
 use super::theme::Role;
 
 pub(super) const SIDEBAR_ANIMATION_FRAME_MS: u64 = 10;
@@ -218,32 +219,40 @@ pub(super) fn sidebar_status_color(status: SidebarStatusKind) -> Role {
     }
 }
 
-pub(super) fn sidebar_status_glyph(status: SidebarStatusKind, now_ms: u64) -> &'static str {
+pub(super) fn sidebar_status_glyph(
+    glyphs: &GlyphSet,
+    status: SidebarStatusKind,
+    now_ms: u64,
+) -> &str {
     match status {
         SidebarStatusKind::Active | SidebarStatusKind::Queued => {
             let frame = ((now_ms / SIDEBAR_SPINNER_FRAME_MS) as usize
-                + spinner_phase_offset(status))
-                % SIDEBAR_SPINNER_FRAMES.len();
-            SIDEBAR_SPINNER_FRAMES[frame]
+                + spinner_phase_offset(status, glyphs))
+                % glyphs.spinner.len();
+            glyphs.spinner[frame]
         }
         SidebarStatusKind::Interrupted
         | SidebarStatusKind::Notification
-        | SidebarStatusKind::Input => SIDEBAR_NOTIFICATION_GLYPH,
+        | SidebarStatusKind::Input => glyphs.notification,
     }
 }
-pub(super) fn crown_jewel_glyph(status: Option<SidebarStatusKind>, now_ms: u64) -> &'static str {
+pub(super) fn crown_jewel_glyph(
+    glyphs: &GlyphSet,
+    status: Option<SidebarStatusKind>,
+    now_ms: u64,
+) -> &str {
     match status {
         Some(SidebarStatusKind::Active) if (now_ms / SIDEBAR_CROWN_BLINK_MS) % 2 == 1 => {
-            SIDEBAR_CROWN_JEWEL_OPEN
+            glyphs.crown_open
         }
-        _ => SIDEBAR_CROWN_JEWEL,
+        _ => glyphs.crown_closed,
     }
 }
 
-fn spinner_phase_offset(status: SidebarStatusKind) -> usize {
+fn spinner_phase_offset(status: SidebarStatusKind, glyphs: &GlyphSet) -> usize {
     match status {
         SidebarStatusKind::Active => 0,
-        SidebarStatusKind::Queued => SIDEBAR_SPINNER_FRAMES.len() / 2,
+        SidebarStatusKind::Queued => glyphs.spinner.len() / 2,
         SidebarStatusKind::Interrupted
         | SidebarStatusKind::Notification
         | SidebarStatusKind::Input => 0,
@@ -533,18 +542,24 @@ mod tests {
 
     #[test]
     fn spinner_glyph_wraps_after_last_frame() {
+        let glyphs = GlyphSet::unicode();
         let now_ms = SIDEBAR_SPINNER_FRAME_MS * SIDEBAR_SPINNER_FRAMES.len() as u64;
         assert_eq!(
-            sidebar_status_glyph(SidebarStatusKind::Active, now_ms),
+            sidebar_status_glyph(&glyphs, SidebarStatusKind::Active, now_ms),
             SIDEBAR_SPINNER_FRAMES[0]
         );
         assert_eq!(
-            sidebar_status_glyph(SidebarStatusKind::Queued, now_ms + SIDEBAR_SPINNER_FRAME_MS),
+            sidebar_status_glyph(
+                &glyphs,
+                SidebarStatusKind::Queued,
+                now_ms + SIDEBAR_SPINNER_FRAME_MS
+            ),
             SIDEBAR_SPINNER_FRAMES
                 [(SIDEBAR_SPINNER_FRAMES.len() / 2 + 1) % SIDEBAR_SPINNER_FRAMES.len()]
         );
         assert_eq!(
             sidebar_status_glyph(
+                &glyphs,
                 SidebarStatusKind::Notification,
                 now_ms + SIDEBAR_SPINNER_FRAME_MS * 2
             ),
@@ -690,21 +705,34 @@ mod tests {
 
     #[test]
     fn crown_jewel_blinks_only_while_active() {
-        assert_eq!(crown_jewel_glyph(None, 0), SIDEBAR_CROWN_JEWEL);
+        let glyphs = GlyphSet::unicode();
+        assert_eq!(crown_jewel_glyph(&glyphs, None, 0), SIDEBAR_CROWN_JEWEL);
         assert_eq!(
-            crown_jewel_glyph(Some(SidebarStatusKind::Active), 0),
+            crown_jewel_glyph(&glyphs, Some(SidebarStatusKind::Active), 0),
             SIDEBAR_CROWN_JEWEL
         );
         assert_eq!(
-            crown_jewel_glyph(Some(SidebarStatusKind::Active), SIDEBAR_CROWN_BLINK_MS),
+            crown_jewel_glyph(
+                &glyphs,
+                Some(SidebarStatusKind::Active),
+                SIDEBAR_CROWN_BLINK_MS
+            ),
             SIDEBAR_CROWN_JEWEL_OPEN
         );
         assert_eq!(
-            crown_jewel_glyph(Some(SidebarStatusKind::Queued), SIDEBAR_CROWN_BLINK_MS),
+            crown_jewel_glyph(
+                &glyphs,
+                Some(SidebarStatusKind::Queued),
+                SIDEBAR_CROWN_BLINK_MS
+            ),
             SIDEBAR_CROWN_JEWEL
         );
         assert_eq!(
-            crown_jewel_glyph(Some(SidebarStatusKind::Active), SIDEBAR_CROWN_BLINK_MS * 2),
+            crown_jewel_glyph(
+                &glyphs,
+                Some(SidebarStatusKind::Active),
+                SIDEBAR_CROWN_BLINK_MS * 2
+            ),
             SIDEBAR_CROWN_JEWEL
         );
     }

@@ -5,6 +5,7 @@ use super::backend::{ChromeView, FrameModel, StatusNoteKind};
 use super::cell_surface::{
     display_cell_width, render_cell_scrollbar, truncate_to_cells, CellSurface,
 };
+use super::glyphs::GlyphSet;
 use super::layout::{sidebar_content_rect, CellLayout, CellRect};
 use super::sidebar::{
     crown_jewel_glyph, sidebar_status_glyph, SidebarRow, SidebarRowKind, SidebarStatusKind,
@@ -13,9 +14,6 @@ use super::sidebar::{
 use super::terminal_view::for_each_terminal_screen_cell;
 use super::theme::{self, DerivedTheme, Role};
 const STATUSLINE_MODE_LABEL_WIDTH: i32 = 9;
-const SCROLLBAR_TRACK_GLYPH: &str = "│";
-const SCROLLBAR_THUMB_GLYPH: &str = "┃";
-const STATUS_SEPARATOR_GLYPH: &str = "│";
 const STATUS_NOTE_OK_FG: Color = Color::rgb(0, 0, 0);
 const STATUS_NOTE_ERROR_FG: Color = Color::rgb(255, 255, 255);
 
@@ -46,6 +44,8 @@ pub(super) struct ScenePalette {
     pub(super) warning: Color,
     pub(super) error: Color,
     pub(super) monochrome: bool,
+
+    pub(super) glyphs: GlyphSet,
 }
 
 impl ScenePalette {
@@ -74,6 +74,7 @@ impl ScenePalette {
             warning: theme.warning,
             error: theme.error,
             monochrome: false,
+            glyphs: GlyphSet::unicode(),
         }
     }
 }
@@ -362,12 +363,13 @@ fn render_statusbar_sidebar_segment(
         row,
         theme::TRANSPARENT,
         status_bg,
-        STATUS_SEPARATOR_GLYPH,
+        palette.glyphs.status_separator,
         false,
     );
     panel.col + sidebar_cols
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_sidebar_scrollbar(
     surface: &mut CellSurface,
     col: i32,
@@ -379,6 +381,7 @@ fn render_sidebar_scrollbar(
     track_fg: Color,
     track_bg: Color,
     thumb_fg: Color,
+    glyphs: &GlyphSet,
 ) {
     if rows <= 0 {
         return;
@@ -390,7 +393,7 @@ fn render_sidebar_scrollbar(
             row + offset,
             track_fg,
             track_bg,
-            SCROLLBAR_TRACK_GLYPH,
+            glyphs.scrollbar_track,
             false,
         );
     }
@@ -410,7 +413,7 @@ fn render_sidebar_scrollbar(
             thumb_row + offset,
             thumb_fg,
             track_bg,
-            SCROLLBAR_THUMB_GLYPH,
+            glyphs.scrollbar_thumb,
             false,
         );
     }
@@ -538,6 +541,7 @@ pub(super) fn render_sidebar(
             theme::TRANSPARENT,
             palette.sidebar_bg,
             palette.accent_2,
+            &palette.glyphs,
         );
         content.cols -= 1;
     }
@@ -588,7 +592,7 @@ pub(super) fn render_sidebar(
             SidebarRowKind::Session { .. } => {
                 let status = row.status.map(|status| {
                     (
-                        sidebar_status_glyph(status, now_ms),
+                        sidebar_status_glyph(&palette.glyphs, status, now_ms),
                         animated_sidebar_status_color(status, palette, now_ms, item.visible_row),
                     )
                 });
@@ -781,7 +785,7 @@ fn render_sidebar_project_header(
     } else {
         palette.accent
     };
-    let jewel = crown_jewel_glyph(status, now_ms);
+    let jewel = crown_jewel_glyph(&palette.glyphs, status, now_ms);
 
     // Header layout: `{rule} {title} {jewel} ` (4 fixed cells + rule >= 1) --
     // the mirror of the rail's `| {jewel} {title} {rule}` panelHeader in
@@ -797,7 +801,7 @@ fn render_sidebar_project_header(
 
     let mut cursor = rect.col;
     let lead_cols = (rect.cols - value_cols - 4).max(0);
-    let lead = format!("{} ", "─".repeat(lead_cols as usize));
+    let lead = format!("{} ", palette.glyphs.header_rule.repeat(lead_cols as usize));
     surface.put_text_styled(cursor, rect.row, lead_cols + 1, rule_fg, bg, &lead, reverse);
     cursor += lead_cols + 1;
     surface.put_text_bold_styled(cursor, rect.row, value_cols, title_fg, bg, &value, reverse);
@@ -1000,9 +1004,9 @@ fn render_terminal_scrollback(
         max_scroll.saturating_sub(screen.scrollback()),
         palette.border,
         palette.term_bg,
-        SCROLLBAR_TRACK_GLYPH,
+        palette.glyphs.scrollbar_track,
         palette.accent_2,
-        SCROLLBAR_THUMB_GLYPH,
+        palette.glyphs.scrollbar_thumb,
     );
 }
 
