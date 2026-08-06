@@ -41,6 +41,21 @@ pub(super) fn is_ctrl_char(bytes: &[u8], target: char) -> bool {
     })
 }
 
+/// Ctrl+? — terminals in Kitty disambiguate mode report the unshifted base key,
+/// so accept Ctrl+Shift+'/' as well as a literal shifted '?'.
+pub(super) fn is_ctrl_question(bytes: &[u8]) -> bool {
+    key_stroke_for_bytes(bytes).is_some_and(|stroke| {
+        stroke.modifiers.control
+            && !stroke.modifiers.alt
+            && match stroke.key {
+                KeyToken::Character(ref key) => {
+                    key == "?" || (stroke.modifiers.shift && key == "/")
+                }
+                _ => false,
+            }
+    })
+}
+
 fn legacy_key_stroke_for_bytes(bytes: &[u8]) -> Option<KeyStroke> {
     if let Some(stroke) = key_stroke_for_escape_sequence(bytes) {
         return Some(stroke);
@@ -60,11 +75,11 @@ fn legacy_key_stroke_for_bytes(bytes: &[u8]) -> Option<KeyStroke> {
             },
         )),
         b'\t' => Some(named_key(NamedKeyToken::Tab, KeyModifiers::default())),
-        // Terminals disagree whether Backspace is BS (^H, 0x08) or DEL (^?, 0x7f).
-        // In legacy byte mode those cannot reliably carry physical-key identity, so
-        // canonicalize both to semantic Backspace for binds/editing while forwarding
-        // the original byte to the PTY when unhandled.
-        0x08 | 0x7f => Some(named_key(NamedKeyToken::Backspace, KeyModifiers::default())),
+        // Only DEL (^?, 0x7f) is the physical Backspace key in legacy byte mode.
+        // BS (^H, 0x08) is genuinely Ctrl+H: let it fall through to the ctrl-letter
+        // range below so keybinds like "ctrl+h" keep working on terminals without
+        // the kitty keyboard protocol.
+        0x7f => Some(named_key(NamedKeyToken::Backspace, KeyModifiers::default())),
         0x1b => Some(named_key(NamedKeyToken::Escape, KeyModifiers::default())),
         0x01..=0x1a => {
             let ch = (b'a' + byte - 1) as char;
@@ -282,7 +297,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ctrl_byte_maps_to_ctrl_stroke_except_backspace_alias() {
+    fn ctrl_byte_maps_to_ctrl_stroke_and_del_maps_to_backspace() {
         assert_eq!(
             key_stroke_for_bytes(&[0x11]),
             Some(char_key(
@@ -295,6 +310,16 @@ mod tests {
         );
         assert_eq!(
             key_stroke_for_bytes(&[0x08]),
+            Some(char_key(
+                'h',
+                KeyModifiers {
+                    control: true,
+                    ..KeyModifiers::default()
+                },
+            ))
+        );
+        assert_eq!(
+            key_stroke_for_bytes(&[0x7f]),
             Some(named_key(NamedKeyToken::Backspace, KeyModifiers::default()))
         );
     }
@@ -311,6 +336,14 @@ mod tests {
                 },
             ))
         );
+    }
+
+    #[test]
+    fn ctrl_question_accepts_kitty_shifted_forms_only() {
+        assert!(is_ctrl_question(b"\x1b[47;6u"));
+        assert!(is_ctrl_question(b"\x1b[63;6u"));
+        assert!(!is_ctrl_question(b"\x1b[47;5u"));
+        assert!(!is_ctrl_question(&[0x07]));
     }
 
     #[test]

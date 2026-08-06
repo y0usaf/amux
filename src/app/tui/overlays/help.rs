@@ -28,7 +28,7 @@ pub(in crate::app::tui) fn help_overlay_visible_rows_for_terminal() -> usize {
 pub(in crate::app::tui) fn help_overlay_lines(config: &crate::config::AppConfig) -> Vec<String> {
     let mut lines = vec![
         "Global".to_string(),
-        help_line("ctrl+g / :help", "toggle this help"),
+        help_line("ctrl+? / :help", "toggle this help"),
         help_line(":open <dir>", "open project"),
         help_line(":archive", "browse archived sessions"),
         help_line(":usage", "show usage totals"),
@@ -124,7 +124,7 @@ pub(in crate::app::tui) fn render_help_overlay(
         inner.col,
         inner.cols,
         " HELP ",
-        " ctrl+g/Esc/q close ",
+        " ctrl+?/Esc/q close ",
         theme,
     );
 
