@@ -4,7 +4,15 @@
 // `tui.render` recurses (startup hang, sustained CPU). The rail therefore
 // overlays Pi instead of reflowing it; column width and footer handoff are
 // driven from the overlay `visible`/`render` callbacks.
+//
+// In fullscreen alt-screen mode the overlay paints on top of Pi, so the rail
+// also docks: on `TuiAltScreen` (mode === "fullscreen") we wrap the current
+// layout root in an `HStack` that reserves a right column the same width the
+// overlay draws at, making Pi content reflow instead of bleed underneath the
+// rail's transparent padding. The regular/proxy-render path is left alone.
+// This mirrors pi-atelier's fullscreen layout adapter.
 
+import { HStack } from "@earendil-works/pi-tui"
 import { renderRail } from "./render.js"
 
 // Fallback only: the harness sends the authoritative width in `hello`, sized
@@ -15,6 +23,13 @@ const MIN_RAIL_WIDTH = 24
 const MAX_RAIL_WIDTH = 80
 const MIN_MAIN_WIDTH = 64
 const ANIMATION_MS = 250
+
+// Docked-layout bookkeeping lives on the tui itself under a symbol key, so
+// other extensions do not observe it and our state disappears with the tui.
+// `owner` guards against two adapters (e.g. pi-atelier) fighting over the
+// layout root: whoever set it owns it until they restore it.
+const ADAPTER_OWNER = Symbol("pi-harness.fullscreen-layout-owner")
+const FULLSCREEN_LAYOUT_ADAPTER = Symbol("pi-harness.fullscreen-layout-adapter")
 
 export function registerRail(pi, store) {
 	let started = false
@@ -44,6 +59,17 @@ export function registerRail(pi, store) {
 		)
 	}
 
+	// The column the dock reserves (and the overlay draws at) is the resolved
+	// rail width, clamped into the same MIN/MAX band the overlay uses so the
+	// HStack basis never exceeds the documented rail sizing.
+	const resolveSidebarWidth = (terminalWidth) =>
+		Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, railWidth(terminalWidth)))
+
+	// Dock controller state: the sidebar width the current split root reserves.
+	// Refreshed whenever the terminal width / harness railWidth changes; the
+	// split root is recreated on mismatch in syncFullscreenLayoutAdapter.
+	let sidebarWidth = MIN_RAIL_WIDTH
+
 	const overlayOptions = {
 		anchor: "top-right",
 		width: MIN_RAIL_WIDTH,
@@ -52,6 +78,10 @@ export function registerRail(pi, store) {
 		nonCapturing: true,
 		visible: (terminalWidth) => {
 			overlayOptions.width = railWidth(terminalWidth)
+			sidebarWidth = resolveSidebarWidth(terminalWidth)
+			// Re-sync on every width callback so a resize updates the reserved
+			// column. Cheap and idempotent (sync returns early on no change).
+			syncFullscreenLayoutAdapter()
 			const visible = visibleAt(terminalWidth)
 			scheduleFooterSync(visible)
 			return visible
@@ -59,6 +89,59 @@ export function registerRail(pi, store) {
 	}
 
 	const requestRender = () => tuiRef?.requestRender()
+
+	// --- Docked-layout adapter (fullscreen mode only) ---
+	// Wraps the running layout root in an HStack that reserves a right column
+	// for the rail; the overlay still draws the content. Ported faithfully from
+	// pi-atelier's fullscreen adapter. Guarded to `mode === "fullscreen"` and
+	// to the `TuiAltScreen` class, so regular mode is a no-op. Wrap the real
+	// root, leaving the placeholder HStack child empty — it only reserves space.
+
+	const createFullscreenSplitRoot = (originalRoot) =>
+		new HStack([
+			{ component: originalRoot, basis: 0, grow: 1, shrink: 1, minSize: MIN_MAIN_WIDTH },
+			{
+				component: { render: () => [], invalidate() {} },
+				basis: sidebarWidth,
+				grow: 0,
+				shrink: 1,
+				minSize: MIN_RAIL_WIDTH,
+				maxSize: MAX_RAIL_WIDTH,
+				visible: ({ width }) => visibleAt(width),
+			},
+		])
+
+	const syncFullscreenLayoutAdapter = () => {
+		const tui = tuiRef
+		if (!tui || tui.mode !== "fullscreen") return
+		const adaptedTui = tui
+		const prototype = Object.getPrototypeOf(tui)
+		if (prototype?.constructor?.name !== "TuiAltScreen") return
+		const currentState = adaptedTui[FULLSCREEN_LAYOUT_ADAPTER]
+		if (currentState && currentState.owner !== ADAPTER_OWNER) return
+		const currentRoot = adaptedTui.layoutRoot
+		if (currentState?.owner === ADAPTER_OWNER && currentRoot === currentState.splitRoot) {
+			if (currentState.sidebarWidth === sidebarWidth) return
+			const splitRoot = createFullscreenSplitRoot(currentState.originalRoot)
+			adaptedTui.setLayoutRoot(splitRoot)
+			currentState.splitRoot = splitRoot
+			currentState.sidebarWidth = sidebarWidth
+			return
+		}
+		if (!currentRoot) return
+		const splitRoot = createFullscreenSplitRoot(currentRoot)
+		adaptedTui.setLayoutRoot(splitRoot)
+		adaptedTui[FULLSCREEN_LAYOUT_ADAPTER] = { owner: ADAPTER_OWNER, originalRoot: currentRoot, splitRoot, sidebarWidth }
+	}
+
+	const restoreFullscreenLayoutAdapter = () => {
+		if (!tuiRef) return
+		const adaptedTui = tuiRef
+		const currentState = adaptedTui[FULLSCREEN_LAYOUT_ADAPTER]
+		if (currentState?.owner !== ADAPTER_OWNER) return
+		if (adaptedTui.layoutRoot === currentState.splitRoot) adaptedTui.setLayoutRoot(currentState.originalRoot)
+		adaptedTui[FULLSCREEN_LAYOUT_ADAPTER] = undefined
+	}
 
 	// Footer takeover: the rail already draws cwd, git, model, usage and context,
 	// so while it is visible Pi's footer is replaced with a zero-line component.
@@ -123,6 +206,7 @@ export function registerRail(pi, store) {
 			.custom(
 				(tui) => {
 					tuiRef = tui
+					syncFullscreenLayoutAdapter()
 					return {
 						render(width) {
 							const rows = tuiRef?.terminal?.rows ?? 0
@@ -226,6 +310,8 @@ export function registerRail(pi, store) {
 			if (argument === "on") enabled = true
 			else if (argument === "off") enabled = false
 			else enabled = !enabled
+			if (enabled) syncFullscreenLayoutAdapter()
+			else restoreFullscreenLayoutAdapter()
 			ctx.ui?.notify?.(`rail ${enabled ? "on" : "off"}`, "info")
 			requestRender()
 		},
@@ -248,5 +334,6 @@ export function registerRail(pi, store) {
 	pi.on("session_shutdown", async () => {
 		if (animationTimer) clearInterval(animationTimer)
 		syncFooter(false)
+		restoreFullscreenLayoutAdapter()
 	})
 }
