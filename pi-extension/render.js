@@ -5,13 +5,12 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui"
 
 import { formatDuration } from "./activity.js"
+import { createGlyphs } from "./symbols.js"
 
-// Glyph set shared with src/app/sidebar.rs.
-export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⢸", "⢰", "⣰", "⣠", "⣤", "⣄", "⣆", "⡆", "⡇", "⠇", "⠏"]
+// Symbol set resolved once at module load from the harness env
+// (AGENT_HARNESS_PI_ASCII / AGENT_HARNESS_SYMBOL_OVERRIDES).
+const GLYPHS = createGlyphs()
 const SPINNER_FRAME_MS = 60
-const NOTIFICATION_GLYPH = "⣿"
-const JEWEL = "✦"
-const JEWEL_OPEN = "✧"
 const JEWEL_BLINK_MS = 400
 
 const TOKEN = Object.freeze({
@@ -32,22 +31,22 @@ export function createPainter(theme) {
 }
 
 function spinnerGlyph(nowMs) {
-	return SPINNER_FRAMES[Math.floor(nowMs / SPINNER_FRAME_MS) % SPINNER_FRAMES.length]
+	return GLYPHS.spinner[Math.floor(nowMs / SPINNER_FRAME_MS) % GLYPHS.spinner.length]
 }
 
 function jewelGlyph(active, nowMs) {
-	return active && Math.floor(nowMs / JEWEL_BLINK_MS) % 2 === 1 ? JEWEL_OPEN : JEWEL
+	return active && Math.floor(nowMs / JEWEL_BLINK_MS) % 2 === 1 ? GLYPHS.jewelOpen : GLYPHS.jewel
 }
 
 function panelHeader(title, role, paint, width, active, nowMs) {
 	const jewel = jewelGlyph(active, nowMs)
 	const label = ` ${jewel} ${title} `
-	const rule = "─".repeat(Math.max(0, width - visibleWidth(label)))
+	const rule = GLYPHS.rule.repeat(Math.max(0, width - visibleWidth(label)))
 	return `${paint(role, label)}${paint("border", rule)}`
 }
 
 function clip(line, width) {
-	return visibleWidth(line) > width ? truncateToWidth(line, Math.max(0, width - 1)) + "…" : line
+	return visibleWidth(line) > width ? truncateToWidth(line, Math.max(0, width - 1)) + GLYPHS.clip : line
 }
 
 function pad(text, columns) {
@@ -78,7 +77,7 @@ function agentLines(state, width, paint, nowMs) {
 	const lines = []
 	const stage = stageWord(state)
 	const busy = state.run.phase === "running"
-	const glyph = busy ? spinnerGlyph(nowMs) : NOTIFICATION_GLYPH
+	const glyph = busy ? spinnerGlyph(nowMs) : GLYPHS.notif
 	lines.push(clip(` ${paint(stage.role, glyph)} ${paint(stage.role, stage.word)}`, width))
 	if (state.model) {
 		const think = state.thinkingLevel ? `  ${paint("muted", `think:${state.thinkingLevel}`)}` : ""
@@ -105,7 +104,7 @@ function activityLines(state, width, paint, nowMs) {
 		lines.push(clip(` ${paint("running", spinnerGlyph(nowMs))} ${paint("text", tool.name)}${summary} ${paint("muted", dur)}`, width))
 	}
 	for (const tool of run.recentTools) {
-		const mark = tool.failed ? paint("error", "✗") : paint("success", "✓")
+		const mark = tool.failed ? paint("error", GLYPHS.err) : paint("success", GLYPHS.ok)
 		const summary = tool.summary ? ` ${paint("muted", tool.summary)}` : ""
 		lines.push(clip(` ${mark} ${paint("text", tool.name)}${summary} ${paint("muted", formatDuration(tool.durationMs))}`, width))
 	}
@@ -133,7 +132,7 @@ function contextLines(state, width, paint) {
 	const barWidth = Math.max(4, width - 10)
 	const filled = Math.round((percent / 100) * barWidth)
 	const role = percent >= 90 ? "error" : percent >= 70 ? "warning" : "accent2"
-	const bar = paint(role, "█".repeat(filled)) + paint("border", "░".repeat(barWidth - filled))
+	const bar = paint(role, GLYPHS.fill.repeat(filled)) + paint("border", GLYPHS.empty.repeat(barWidth - filled))
 	const lines = [clip(` ${bar} ${paint("text", `${Math.round(percent)}%`)}`, width)]
 	if (Number.isFinite(context.tokens ?? Number.NaN) && context.contextWindow > 0) {
 		lines.push(clip(` ${paint("muted", `${formatTokens(context.tokens)} / ${formatTokens(context.contextWindow)}`)}`, width))
@@ -178,7 +177,7 @@ function toolsLines(state, width, paint) {
 	const rows = Math.ceil(shown.length / columns)
 
 	const cells = shown.map((tool) => {
-		const marker = tool.active ? paint("success", "✓") : paint("border", "·")
+		const marker = tool.active ? paint("success", GLYPHS.ok) : paint("border", GLYPHS.dot)
 		return `${marker} ${paint(tool.active ? "text" : "muted", clip(tool.name, Math.max(1, cellWidth - 2)))}`
 	})
 
@@ -207,9 +206,9 @@ function statusLines(state, width, paint) {
 function digestGlyph(entry, paint, nowMs) {
 	if (entry.stage && entry.stage !== "idle") return paint("running", spinnerGlyph(nowMs))
 	if (entry.queued) return paint("warning", spinnerGlyph(nowMs))
-	if (entry.interrupted) return paint("error", NOTIFICATION_GLYPH)
-	if (entry.unread) return paint("success", NOTIFICATION_GLYPH)
-	return paint("border", "·")
+	if (entry.interrupted) return paint("error", GLYPHS.notif)
+	if (entry.unread) return paint("success", GLYPHS.notif)
+	return paint("border", GLYPHS.dot)
 }
 
 function sessionsLines(state, width, paint, nowMs) {
@@ -219,7 +218,7 @@ function sessionsLines(state, width, paint, nowMs) {
 	const lines = []
 	for (const entry of digest.slice(0, 8)) {
 		const self = selfKey && entry.key === selfKey
-		const marker = self ? paint("accent2", "▸ ") : "  "
+		const marker = self ? paint("accent2", GLYPHS.marker) : "  "
 		const role = self ? "text" : entry.unread ? "heading" : "muted"
 		const name = entry.name || "(unnamed)"
 		lines.push(clip(`${marker}${digestGlyph(entry, paint, nowMs)} ${paint(role, name)}`, width))
@@ -230,11 +229,10 @@ function sessionsLines(state, width, paint, nowMs) {
 	return lines
 }
 
-// Left-edge divider: a `│` glyph in the terminal's default foreground, the
+// Left-edge divider: a rail glyph in the terminal's default foreground, the
 // same treatment as the harness sidebar rail. Default fg is the terminal's
 // own high-contrast complement to its background, so the thin line adapts
 // to any theme without knowing its colors.
-const DIVIDER = "│"
 
 export function renderRail(state, width, nowMs, rows = 0, theme) {
 	const paint = createPainter(theme)
@@ -260,5 +258,5 @@ export function renderRail(state, width, nowMs, rows = 0, theme) {
 	}
 	// Run the divider the full terminal height, not just the content height.
 	while (lines.length < rows) lines.push("")
-	return lines.map((line) => DIVIDER + pad(line, inner))
+	return lines.map((line) => GLYPHS.divider + pad(line, inner))
 }
