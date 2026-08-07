@@ -347,7 +347,7 @@ export function registerRail(pi, store) {
 	}
 
 	pi.registerCommand("rail", {
-		description: "Toggle the harness right rail (on|off)",
+		description: "Toggle the harness' right sidebar",
 		handler: async (args, ctx) => {
 			const argument = String(args ?? "").trim()
 			if (argument === "on") enabled = true
