@@ -28,6 +28,8 @@ mod tests {
             harness_session_id: "local-session-1".into(),
             cwd: PathBuf::from("/tmp/project"),
             session_file: session_file.map(PathBuf::from),
+            ascii: false,
+            symbol_overrides: std::collections::BTreeMap::new(),
         }
     }
 

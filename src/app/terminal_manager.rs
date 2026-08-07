@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -16,6 +16,8 @@ pub(super) struct TerminalManager {
     sidecar_extension_path: Option<PathBuf>,
     tui_mode: Option<String>,
     sidecar_socket_path: PathBuf,
+    ascii: bool,
+    symbol_overrides: BTreeMap<String, String>,
 }
 
 impl TerminalManager {
@@ -24,6 +26,8 @@ impl TerminalManager {
         sidecar_extension_path: Option<PathBuf>,
         tui_mode: Option<String>,
         sidecar_socket_path: PathBuf,
+        ascii: bool,
+        symbol_overrides: BTreeMap<String, String>,
     ) -> Self {
         Self {
             notify,
@@ -32,6 +36,8 @@ impl TerminalManager {
             sidecar_extension_path,
             tui_mode,
             sidecar_socket_path,
+            ascii,
+            symbol_overrides,
         }
     }
 
@@ -177,6 +183,8 @@ impl TerminalManager {
                 harness_session_id: session.local_id.clone(),
                 cwd: project.path.clone(),
                 session_file: session.session_file.clone(),
+                ascii: self.ascii,
+                symbol_overrides: self.symbol_overrides.clone(),
             },
         )
     }
