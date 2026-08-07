@@ -1,17 +1,13 @@
 // Right rail: non-capturing overlay anchored top-right, rendered through Pi's
-// supported `ctx.ui.custom` overlay seam. No `tui.render` wrap: Pi 0.84
-// exposes `tui` as a stable Proxy, and capture-and-replace of the proxied
-// `tui.render` recurses (startup hang, sustained CPU). The rail therefore
-// overlays Pi instead of reflowing it; column width and footer handoff are
-// driven from the overlay `visible`/`render` callbacks.
-//
-// In fullscreen alt-screen mode the overlay paints on top of Pi, so the rail
-// also docks: on `TuiAltScreen` (mode === "fullscreen") we wrap the current
-// layout root in an `HStack` that reserves a right column the same width the
-// overlay draws at, making Pi content reflow instead of bleed underneath the
-// rail's transparent padding. The regular/proxy-render path is left alone.
-// This mirrors pi-atelier's fullscreen layout adapter.
-
+// supported `ctx.ui.custom` overlay seam. In regular mode Pi exposes `tui` as
+// a stable Proxy, so we find the unproxied `render` on the prototype chain
+// once and install one replacement that calls it with the rail width
+// subtracted — the rail docks (reserves a right column) instead of overlaying
+// content. In fullscreen alt-screen mode we wrap the current layout root in an
+// `HStack` that reserves a right column the same width the overlay draws at,
+// making Pi content reflow instead of bleed underneath the rail's transparent
+// padding. Column width and footer handoff are driven from the overlay
+// `visible`/`render` callbacks. Mirrors pi-atelier's dual-path adapter design.
 import { HStack } from "@earendil-works/pi-tui"
 import { renderRail } from "./render.js"
 
@@ -30,6 +26,7 @@ const ANIMATION_MS = 250
 // layout root: whoever set it owns it until they restore it.
 const ADAPTER_OWNER = Symbol("pi-harness.fullscreen-layout-owner")
 const FULLSCREEN_LAYOUT_ADAPTER = Symbol("pi-harness.fullscreen-layout-adapter")
+const REGULAR_RENDER_ADAPTER = Symbol("pi-harness.regular-render-adapter")
 
 export function registerRail(pi, store) {
 	let started = false
@@ -82,6 +79,7 @@ export function registerRail(pi, store) {
 			// Re-sync on every width callback so a resize updates the reserved
 			// column. Cheap and idempotent (sync returns early on no change).
 			syncFullscreenLayoutAdapter()
+			syncRegularRenderAdapter()
 			const visible = visibleAt(terminalWidth)
 			scheduleFooterSync(visible)
 			return visible
@@ -141,6 +139,50 @@ export function registerRail(pi, store) {
 		if (currentState?.owner !== ADAPTER_OWNER) return
 		if (adaptedTui.layoutRoot === currentState.splitRoot) adaptedTui.setLayoutRoot(currentState.originalRoot)
 		adaptedTui[FULLSCREEN_LAYOUT_ADAPTER] = undefined
+	}
+
+	// --- Docked-layout adapter (regular mode) ---
+	// Pi regular mode (TuiMainScreen) exposes `tui.render` through a stable Proxy,
+	// so a naive capture-and-replace of the proxied render recurses. Instead we
+	// find the unproxied `render` on the prototype chain once (findPrototypeRender)
+	// and install one replacement that calls it with the rail width subtracted.
+	// Guarded to `mode === "regular"` and the `TuiMainScreen` class, so fullscreen
+	// mode is a no-op. Ported faithfully from pi-atelier's regular adapter.
+
+	const findPrototypeRender = (nextTui) => {
+		let prototype = Object.getPrototypeOf(nextTui)
+		if (prototype?.constructor?.name !== "TuiMainScreen") return undefined
+		while (prototype) {
+			const descriptor = Object.getOwnPropertyDescriptor(prototype, "render")
+			if (typeof descriptor?.value === "function") return descriptor.value
+			prototype = Object.getPrototypeOf(prototype)
+		}
+		return undefined
+	}
+
+	const syncRegularRenderAdapter = () => {
+		const tui = tuiRef
+		if (!tui || tui.mode !== "regular") return
+		const adaptedTui = tui
+		const currentState = adaptedTui[REGULAR_RENDER_ADAPTER]
+		if (currentState?.owner === ADAPTER_OWNER) return
+		if (currentState) return // another extension owns this renderer
+		const baseRender = findPrototypeRender(tui)
+		if (!baseRender) return
+		adaptedTui[REGULAR_RENDER_ADAPTER] = { owner: ADAPTER_OWNER, baseRender }
+		adaptedTui.render = (width) => {
+			const sidebar = visibleAt(width) ? resolveSidebarWidth(width) : 0
+			return Reflect.apply(baseRender, tui, [sidebar > 0 ? width - sidebar : width])
+		}
+	}
+
+	const restoreRegularRenderAdapter = () => {
+		if (!tuiRef) return
+		const adaptedTui = tuiRef
+		const currentState = adaptedTui[REGULAR_RENDER_ADAPTER]
+		if (currentState?.owner !== ADAPTER_OWNER) return
+		adaptedTui.render = currentState.baseRender
+		adaptedTui[REGULAR_RENDER_ADAPTER] = undefined
 	}
 
 	// Footer takeover: the rail already draws cwd, git, model, usage and context,
@@ -207,6 +249,7 @@ export function registerRail(pi, store) {
 				(tui) => {
 					tuiRef = tui
 					syncFullscreenLayoutAdapter()
+					syncRegularRenderAdapter()
 					return {
 						render(width) {
 							const rows = tuiRef?.terminal?.rows ?? 0
@@ -310,8 +353,13 @@ export function registerRail(pi, store) {
 			if (argument === "on") enabled = true
 			else if (argument === "off") enabled = false
 			else enabled = !enabled
-			if (enabled) syncFullscreenLayoutAdapter()
-			else restoreFullscreenLayoutAdapter()
+			if (enabled) {
+				syncFullscreenLayoutAdapter()
+				syncRegularRenderAdapter()
+			} else {
+				restoreFullscreenLayoutAdapter()
+				restoreRegularRenderAdapter()
+			}
 			ctx.ui?.notify?.(`rail ${enabled ? "on" : "off"}`, "info")
 			requestRender()
 		},
@@ -335,5 +383,6 @@ export function registerRail(pi, store) {
 		if (animationTimer) clearInterval(animationTimer)
 		syncFooter(false)
 		restoreFullscreenLayoutAdapter()
+		restoreRegularRenderAdapter()
 	})
 }
