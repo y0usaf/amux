@@ -22,6 +22,7 @@ use crate::terminal::{
 use crate::util::{normalize_project_path, now_millis};
 
 use super::clipboard_image::{clipboard_image_path, clipboard_image_path_from_arboard};
+use super::glyphs::GlyphStyle;
 use super::layout::CellRect;
 use super::rail_bridge;
 use super::sidebar::{
@@ -189,6 +190,8 @@ impl HarnessCore {
             pi::extension_path(),
             config.pi_tui_mode().map(ToOwned::to_owned),
             sidecar_socket_path.clone(),
+            config.glyph_style() == GlyphStyle::Ascii,
+            config.symbols_overrides().cloned().unwrap_or_default(),
         );
         let persisted = PersistedState::load_default().unwrap_or_default();
         let keymap = config.keymap();

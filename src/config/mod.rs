@@ -48,8 +48,20 @@ pub struct AppConfig {
     pub tui_terminal_width_percent: Option<u8>,
     pub tui_sidebar_width_percent: Option<u8>,
     pub ascii: Option<bool>,
+    /// Per-symbol overrides for the in-Pi rail glyph table, e.g.
+    /// `symbols: { overrides: { "rail.ok": "OK" } }`. Showed as env on the
+    /// pi process; unicode/ascii preset base still comes from `ascii`.
+    pub symbols: Option<SymbolsConfig>,
     #[serde(default)]
     pub keybinds: BTreeMap<String, ConfigKeybind>,
+}
+
+/// Rail symbol overrides addressed by canonical "rail.*" keys. Values layer
+/// on top of the unicode/ascii preset selected by the `ascii` flag.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SymbolsConfig {
+    #[serde(default)]
+    pub overrides: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +173,11 @@ impl AppConfig {
         } else {
             GlyphStyle::Unicode
         }
+    }
+
+    /// Rail symbol overrides configured under `symbols.overrides`, if any.
+    pub fn symbols_overrides(&self) -> Option<&BTreeMap<String, String>> {
+        self.symbols.as_ref().map(|symbols| &symbols.overrides)
     }
 
     /// Rail width in PTY cells sent to the sidechannel extension, derived from

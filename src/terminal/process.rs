@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -20,6 +21,11 @@ pub struct TerminalTarget {
     pub harness_session_id: String,
     pub cwd: PathBuf,
     pub session_file: Option<PathBuf>,
+    /// Render the in-Pi rail with the ASCII glyph set (`AGENT_HARNESS_PI_ASCII=1`).
+    pub ascii: bool,
+    /// Per-symbol rail glyph overrides forwarded as JSON
+    /// (`AGENT_HARNESS_SYMBOL_OVERRIDES`).
+    pub symbol_overrides: BTreeMap<String, String>,
 }
 
 pub(crate) fn targets_share_process(
@@ -142,6 +148,18 @@ pub(crate) fn spawn_process(
         target.sidecar_socket_path.display().to_string(),
     );
     cmd.env(pi::PI_SIDECAR_SESSION_KEY_ENV, &target.harness_session_id);
+
+    if target.ascii {
+        cmd.env("AGENT_HARNESS_PI_ASCII", "1");
+    }
+    if !target.symbol_overrides.is_empty() {
+        match serde_json::to_string(&target.symbol_overrides) {
+            Ok(json) => cmd.env("AGENT_HARNESS_SYMBOL_OVERRIDES", json),
+            Err(error) => {
+                log::warn!("failed to serialize rail symbol overrides: {error}");
+            }
+        }
+    }
 
     let mut child = pair
         .slave

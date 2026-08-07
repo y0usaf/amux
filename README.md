@@ -81,6 +81,8 @@ If no project path is passed, the app falls back to persisted projects, then cur
 - `sidebar_width` overrides the left sidebar with a fixed cell count (`8..=120`); on narrow terminals it is reduced to preserve the main Pi area
 - `right_rail_width` overrides the in-Pi right rail with a fixed PTY cell count (`24..=80`, `0` disables); the resolved width is sent to the companion extension over the sidecar socket and re-sent on resize
 - `tui_mode` – Pi TUI mode forwarded to pi as `--tui-mode` on launch (`"regular"`/missing = default and flag omitted, `"fullscreen"` = pi's experimental fullscreen viewport; unknown values ignored with a warning)
+- `ascii` – render the in-Pi rail (and harness chrome) with plain ASCII glyphs instead of Unicode (`true` opts in; unset/`false` = Unicode)
+- `symbols.overrides` – per-symbol rail glyph overrides keyed by canonical `"rail.*"` names (e.g. `"rail.ok": "OK"`); each value replaces that glyph on top of the Unicode/ASCII baseline, forwarded to pi over env
 - legacy `sidebar_width_percent` / `tui_sidebar_width_percent` still override `panel_width_percent` for the sidebar alone
 - `terminal_width_percent` is accepted for config compatibility but ignored; the Pi terminal fills the remaining main area
 - missing `keybinds.*` → built-in defaults
