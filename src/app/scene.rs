@@ -122,6 +122,7 @@ pub(super) struct HardwareCursor {
 pub(super) struct TerminalSceneLayout {
     pub(super) card: CellRect,
     pub(super) terminal: CellRect,
+    pub(super) rail_cols: i32,
     pub(super) scrollbar_col: i32,
 }
 
@@ -133,7 +134,7 @@ pub(super) struct HarnessSceneLayout {
     pub(super) terminal: TerminalSceneLayout,
 }
 
-pub(super) fn harness_scene_layout(layout: &CellLayout) -> HarnessSceneLayout {
+pub(super) fn harness_scene_layout(layout: &CellLayout, rail_cols: i32) -> HarnessSceneLayout {
     let scrollbar_col = if layout.terminal_card.cols > 0 {
         layout.terminal_card.col + layout.terminal_card.cols - 1
     } else {
@@ -149,6 +150,7 @@ pub(super) fn harness_scene_layout(layout: &CellLayout) -> HarnessSceneLayout {
         terminal: TerminalSceneLayout {
             card: layout.terminal_card,
             terminal: layout.terminal,
+            rail_cols: rail_cols.clamp(0, layout.terminal.cols.max(0)),
             scrollbar_col,
         },
     }
@@ -936,6 +938,7 @@ pub(super) fn render_terminal(
     blit_terminal_screen(
         surface,
         layout.terminal,
+        layout.rail_cols,
         screen,
         selection,
         palette,
@@ -952,6 +955,7 @@ pub(super) fn render_terminal(
 fn blit_terminal_screen(
     surface: &mut CellSurface,
     rect: CellRect,
+    rail_cols: i32,
     screen: &vt100::Screen,
     selection: Option<TerminalSelectionRange>,
     palette: &ScenePalette,
@@ -961,6 +965,7 @@ fn blit_terminal_screen(
         screen,
         rect.rows.max(0) as u16,
         rect.cols.max(0) as u16,
+        (rect.cols - rail_cols).max(0) as u16,
         selection,
         palette.term_fg,
         palette.term_bg,

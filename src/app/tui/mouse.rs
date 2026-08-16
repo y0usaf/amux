@@ -126,5 +126,16 @@ impl TuiApp {
                 layout.terminal.cols.max(1) as u16,
             ));
         terminal_selection_point_for_cell_rect(layout.terminal, rows, cols, event.col, event.row)
+            .map(|mut point| {
+                // The in-PTY right rail occupies the rightmost `rail` columns;
+                // clamp the selection point to the selectable main area so the
+                // stored range (and thus copied text) never includes the rail.
+                let rail = i32::from(self.core.config.right_rail_columns(cols));
+                let main_cols = (i32::from(cols) - rail).max(0);
+                if i32::from(point.col) > main_cols {
+                    point.col = main_cols as u16;
+                }
+                point
+            })
     }
 }
