@@ -236,18 +236,13 @@ fn scan_files_parallel(files: &[PathBuf]) -> Vec<(String, CachedEntry)> {
     results
 }
 
-// Archived sessions are frozen, so we use mtime for updated_at and cap reads
-// to avoid scanning hundreds of megabytes when the archive is large.
+// Archived sessions are frozen, but we order them by their last-message
+// timestamp (deterministic, content-based) and cap reads to avoid scanning
+// hundreds of megabytes when the archive is huge.
 const ARCHIVED_SESSION_READ_LIMIT: u64 = 65_536;
 
 fn session_archived_meta_from_path(path: &Path) -> Option<ScanMeta> {
     let file = fs::File::open(path).ok()?;
-    let updated_at_ms = file
-        .metadata()
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as u64);
 
     let mut reader = BufReader::new(file.take(ARCHIVED_SESSION_READ_LIMIT));
     let header = first_jsonl_value(&mut reader)?;
@@ -266,7 +261,7 @@ fn session_archived_meta_from_path(path: &Path) -> Option<ScanMeta> {
         session_id,
         cwd,
         created_at_ms,
-        updated_at_ms: updated_at_ms.unwrap_or(created_at_ms),
+        updated_at_ms: created_at_ms,
         name: None,
         first_user_message: String::new(),
         interrupted: false,
@@ -280,6 +275,14 @@ fn session_archived_meta_from_path(path: &Path) -> Option<ScanMeta> {
         let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
             continue;
         };
+
+        if let Some(ts) = value
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(parse_rfc3339_ms)
+        {
+            meta.updated_at_ms = meta.updated_at_ms.max(ts);
+        }
 
         match value.get("type").and_then(Value::as_str).unwrap_or("") {
             "session_info" => {
