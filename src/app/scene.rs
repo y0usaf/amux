@@ -408,13 +408,15 @@ fn render_sidebar_scrollbar(
     let thumb_row = row
         + (((rows - thumb_rows).max(0) as i64 * scroll_from_top as i64) / max_scroll as i64) as i32;
     for offset in 0..thumb_rows {
-        surface.set_cell(
+        surface.set_cell_styled(
             col,
             thumb_row + offset,
             thumb_fg,
             track_bg,
             glyphs.scrollbar_thumb,
             false,
+            false,
+            true,
         );
     }
 }

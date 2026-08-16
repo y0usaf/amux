@@ -82,7 +82,7 @@ impl GlyphSet {
                 br: "+",
             },
             scrollbar_track: "|",
-            scrollbar_thumb: "#",
+            scrollbar_thumb: "|",
             status_separator: "|",
             header_rule: "-",
             spinner: &["-", "\\", "|", "/"],

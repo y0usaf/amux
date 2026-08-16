@@ -136,7 +136,7 @@ impl CellSurface {
         text: impl Into<String>,
         underline: bool,
     ) {
-        self.set_cell_styled(col, row, fg, bg, text, underline, false);
+        self.set_cell_styled(col, row, fg, bg, text, underline, false, false);
     }
 
     pub(super) fn set_cell_styled(
@@ -148,38 +148,12 @@ impl CellSurface {
         text: impl Into<String>,
         underline: bool,
         reverse: bool,
+        bold: bool,
     ) {
         if let Some(cell) = self.cell_mut(col, row) {
             let text = text.into();
-            cell.update(&text, fg, bg, false, underline, reverse, false);
+            cell.update(&text, fg, bg, bold, underline, reverse, false);
         }
-    }
-
-    pub(super) fn set_reverse_rect(&mut self, rect: CellRect, reverse: bool) {
-        let row0 = rect.row.max(0);
-        let row1 = (rect.row + rect.rows).min(self.rows).max(row0);
-        let col0 = rect.col.max(0);
-        let col1 = (rect.col + rect.cols).min(self.cols).max(col0);
-        for row in row0..row1 {
-            for col in col0..col1 {
-                if let Some(cell) = self.cell_mut(col, row) {
-                    cell.reverse = reverse;
-                }
-            }
-        }
-    }
-
-    pub(super) fn put_cell_span(
-        &mut self,
-        col: i32,
-        row: i32,
-        span: i32,
-        text: &str,
-        fg: Color,
-        bg: Color,
-        underline: bool,
-    ) {
-        self.put_cell_span_terminal(col, row, span, text, fg, bg, false, underline, false);
     }
 
     pub(super) fn put_cell_span_terminal(
@@ -393,7 +367,7 @@ pub(super) fn render_cell_scrollbar(
     let thumb_row = row
         + (((rows - thumb_rows).max(0) as i64 * scroll_from_top as i64) / max_scroll as i64) as i32;
     for offset in 0..thumb_rows {
-        surface.set_cell(col, thumb_row + offset, thumb_fg, bg, thumb_glyph, false);
+        surface.set_cell_styled(col, thumb_row + offset, thumb_fg, bg, thumb_glyph, false, false, true);
     }
 }
 

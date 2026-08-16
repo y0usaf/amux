@@ -525,5 +525,5 @@ fn ascii_glyph_set_uses_plain_box_and_spinner() {
     assert_eq!(glyphs.box_.bl, "+");
     assert_eq!(glyphs.box_.br, "+");
     assert_eq!(glyphs.scrollbar_track, "|");
-    assert_eq!(glyphs.scrollbar_thumb, "#");
+    assert_eq!(glyphs.scrollbar_thumb, "|");
 }
