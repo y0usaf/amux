@@ -23,22 +23,6 @@ pub(super) enum Role {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct TerminalPalette {
-    pub(super) fg: Color,
-    pub(super) bg: Color,
-    pub(super) ansi: [Color; 16],
-}
-impl TerminalPalette {
-    pub(super) fn fallback() -> Self {
-        Self {
-            fg: Color::ansi_index(7),
-            bg: TRANSPARENT,
-            ansi: std::array::from_fn(|i| Color::ansi_index(i as u8)),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct DerivedTheme {
     pub(super) text: Color,
     pub(super) muted: Color,
@@ -91,14 +75,8 @@ impl DerivedTheme {
     pub(super) fn fallback() -> Self {
         Self::from_roles(crate::app::theme::pi_defaults::dark())
     }
-    pub(super) fn from_terminal_palette(_palette: TerminalPalette) -> Self {
-        Self::fallback()
-    }
 }
 
-pub(super) fn default_ansi_palette() -> [Color; 16] {
-    std::array::from_fn(|i| Color::ansi_index(i as u8))
-}
 pub(super) fn screen_cell_colors(
     cell: &vt100::Cell,
     cursor_here: bool,
@@ -194,9 +172,7 @@ pub(super) fn fade_toward(c: Color, t: Color, m: u8) -> Color {
     }
     let (r1, g1, b1) = c.rgb_components();
     let (r2, g2, b2) = t.rgb_components();
-    let f = |a: u8, b: u8| {
-        (((u16::from(a) * u16::from(255 - m) + u16::from(b) * u16::from(m)) / 255) as u8)
-    };
+    let f = |a: u8, b: u8| ((u16::from(a) * u16::from(255 - m) + u16::from(b) * u16::from(m)) / 255) as u8;
     Color::rgb(f(r1, r2), f(g1, g2), f(b1, b2))
 }
 

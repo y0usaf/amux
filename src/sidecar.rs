@@ -113,7 +113,7 @@ impl SidecarListener {
     }
 
     /// Sticky line replayed to every future connection and broadcast to the
-    /// current ones. Used for the rail hello (palette + width).
+    /// current ones. Used for the rail hello (width).
     pub fn set_hello(&self, line: String) {
         self.downstream
             .lock()
