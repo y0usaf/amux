@@ -244,6 +244,7 @@ impl TuiApp {
         // Capture the style as a Copy value before prepare_frame borrows core
         // mutably, so the config borrow does not outlive the frame model.
         let glyph_style = self.core.config.glyph_style();
+        let rail_cols = i32::from(self.core.config.right_rail_columns(cols));
         let frame_model = self.core.prepare_frame(
             layout.terminal.rows.max(1) as u16,
             layout.terminal.cols.max(1) as u16,
@@ -263,7 +264,7 @@ impl TuiApp {
 
         let mut hardware_cursor = render_harness_scene(
             &mut surface,
-            harness_scene_layout(&layout),
+            harness_scene_layout(&layout, rail_cols),
             &frame_model,
             None,
             &palette,
