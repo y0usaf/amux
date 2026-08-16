@@ -49,6 +49,12 @@ pub(super) fn mouse_event_for_bytes(bytes: &[u8]) -> Option<MouseEvent> {
     Some(MouseEvent { col, row, kind })
 }
 
+/// Encode an SGR 1006 wheel event in terminal-local (0-based) cell coords.
+pub(super) fn mouse_wheel_sgr(col: i32, row: i32, up: bool) -> Vec<u8> {
+    let button = if up { 64 } else { 65 };
+    format!("\x1b[<{};{};{}M", button, col + 1, row + 1).into_bytes()
+}
+
 pub(super) fn split_input_chunks(bytes: &[u8]) -> Vec<Vec<u8>> {
     let mut chunks = Vec::new();
     let mut index = 0;
@@ -115,6 +121,12 @@ fn escape_sequence_end(bytes: &[u8], start: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mouse_wheel_sgr_encodes_button_and_coords() {
+        assert_eq!(mouse_wheel_sgr(0, 0, true), b"\x1b[<64;1;1M");
+        assert_eq!(mouse_wheel_sgr(9, 19, false), b"\x1b[<65;10;20M");
+    }
+
     use super::*;
 
     #[test]
