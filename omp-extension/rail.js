@@ -1,14 +1,12 @@
-// Right rail: non-capturing overlay anchored top-right, rendered through Pi's
-// supported `ctx.ui.custom` overlay seam. In regular mode Pi exposes `tui` as
-// a stable Proxy, so we find the unproxied `render` on the prototype chain
-// once and install one replacement that calls it with the rail width
-// subtracted — the rail docks (reserves a right column) instead of overlaying
-// content. In fullscreen alt-screen mode we wrap the current layout root in an
-// `HStack` that reserves a right column the same width the overlay draws at,
-// making Pi content reflow instead of bleed underneath the rail's transparent
-// padding. Column width and footer handoff are driven from the overlay
-// `visible`/`render` callbacks. Mirrors pi-atelier's dual-path adapter design.
-import { HStack } from "@earendil-works/pi-tui"
+// Right rail: non-capturing overlay anchored top-right, rendered through
+// omp's supported `ctx.ui.custom` overlay seam. In regular mode the tui
+// exposes `render` behind a stable Proxy, so we find the unproxied `render`
+// on the prototype chain once and install one replacement that calls it with
+// the rail width subtracted — the rail docks (reserves a right column)
+// instead of overlaying content. Column width and footer handoff are driven
+// from the overlay `visible`/`render` callbacks. Mirrors pi-atelier's
+// regular-mode adapter; the fullscreen HStack path is gone because omp
+// dropped fullscreen mode (and its pi-tui dropped HStack).
 import { renderRail } from "./render.js"
 
 // Fallback only: the harness sends the authoritative width in `hello`, sized
@@ -24,8 +22,7 @@ const ANIMATION_MS = 250
 // other extensions do not observe it and our state disappears with the tui.
 // `owner` guards against two adapters (e.g. pi-atelier) fighting over the
 // layout root: whoever set it owns it until they restore it.
-const ADAPTER_OWNER = Symbol("omp-harness.fullscreen-layout-owner")
-const FULLSCREEN_LAYOUT_ADAPTER = Symbol("omp-harness.fullscreen-layout-adapter")
+const ADAPTER_OWNER = Symbol("omp-harness.render-adapter-owner")
 const REGULAR_RENDER_ADAPTER = Symbol("omp-harness.regular-render-adapter")
 
 export function registerRail(pi, store) {
@@ -57,15 +54,11 @@ export function registerRail(pi, store) {
 	}
 
 	// The column the dock reserves (and the overlay draws at) is the resolved
-	// rail width, clamped into the same MIN/MAX band the overlay uses so the
-	// HStack basis never exceeds the documented rail sizing.
+	// rail width, clamped into the same MIN/MAX band the overlay uses.
 	const resolveSidebarWidth = (terminalWidth) =>
 		Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, railWidth(terminalWidth)))
 
-	// Dock controller state: the sidebar width the current split root reserves.
-	// Refreshed whenever the terminal width / harness railWidth changes; the
-	// split root is recreated on mismatch in syncFullscreenLayoutAdapter.
-	let sidebarWidth = MIN_RAIL_WIDTH
+	// Dock controller state for the regular-mode render adapter.
 
 	const overlayOptions = {
 		anchor: "top-right",
@@ -75,10 +68,8 @@ export function registerRail(pi, store) {
 		nonCapturing: true,
 		visible: (terminalWidth) => {
 			overlayOptions.width = railWidth(terminalWidth)
-			sidebarWidth = resolveSidebarWidth(terminalWidth)
 			// Re-sync on every width callback so a resize updates the reserved
 			// column. Cheap and idempotent (sync returns early on no change).
-			syncFullscreenLayoutAdapter()
 			syncRegularRenderAdapter()
 			const visible = visibleAt(terminalWidth)
 			scheduleFooterSync(visible)
@@ -87,59 +78,6 @@ export function registerRail(pi, store) {
 	}
 
 	const requestRender = () => tuiRef?.requestRender()
-
-	// --- Docked-layout adapter (fullscreen mode only) ---
-	// Wraps the running layout root in an HStack that reserves a right column
-	// for the rail; the overlay still draws the content. Ported faithfully from
-	// pi-atelier's fullscreen adapter. Guarded to `mode === "fullscreen"` and
-	// to the `TuiAltScreen` class, so regular mode is a no-op. Wrap the real
-	// root, leaving the placeholder HStack child empty — it only reserves space.
-
-	const createFullscreenSplitRoot = (originalRoot) =>
-		new HStack([
-			{ component: originalRoot, basis: 0, grow: 1, shrink: 1, minSize: MIN_MAIN_WIDTH },
-			{
-				component: { render: () => [], invalidate() {} },
-				basis: sidebarWidth,
-				grow: 0,
-				shrink: 1,
-				minSize: MIN_RAIL_WIDTH,
-				maxSize: MAX_RAIL_WIDTH,
-				visible: ({ width }) => visibleAt(width),
-			},
-		])
-
-	const syncFullscreenLayoutAdapter = () => {
-		const tui = tuiRef
-		if (!tui || tui.mode !== "fullscreen") return
-		const adaptedTui = tui
-		const prototype = Object.getPrototypeOf(tui)
-		if (prototype?.constructor?.name !== "TuiAltScreen") return
-		const currentState = adaptedTui[FULLSCREEN_LAYOUT_ADAPTER]
-		if (currentState && currentState.owner !== ADAPTER_OWNER) return
-		const currentRoot = adaptedTui.layoutRoot
-		if (currentState?.owner === ADAPTER_OWNER && currentRoot === currentState.splitRoot) {
-			if (currentState.sidebarWidth === sidebarWidth) return
-			const splitRoot = createFullscreenSplitRoot(currentState.originalRoot)
-			adaptedTui.setLayoutRoot(splitRoot)
-			currentState.splitRoot = splitRoot
-			currentState.sidebarWidth = sidebarWidth
-			return
-		}
-		if (!currentRoot) return
-		const splitRoot = createFullscreenSplitRoot(currentRoot)
-		adaptedTui.setLayoutRoot(splitRoot)
-		adaptedTui[FULLSCREEN_LAYOUT_ADAPTER] = { owner: ADAPTER_OWNER, originalRoot: currentRoot, splitRoot, sidebarWidth }
-	}
-
-	const restoreFullscreenLayoutAdapter = () => {
-		if (!tuiRef) return
-		const adaptedTui = tuiRef
-		const currentState = adaptedTui[FULLSCREEN_LAYOUT_ADAPTER]
-		if (currentState?.owner !== ADAPTER_OWNER) return
-		if (adaptedTui.layoutRoot === currentState.splitRoot) adaptedTui.setLayoutRoot(currentState.originalRoot)
-		adaptedTui[FULLSCREEN_LAYOUT_ADAPTER] = undefined
-	}
 
 	// --- Docked-layout adapter (regular mode) ---
 	// Pi regular mode (TuiMainScreen) exposes `tui.render` through a stable Proxy,
@@ -243,28 +181,26 @@ export function registerRail(pi, store) {
 		if (started || ctx.mode !== "tui" || !ctx.hasUI) return
 		started = true
 		uiRef = ctx.ui
-
-		void ctx.ui
-			.custom(
-				(tui) => {
-					tuiRef = tui
-					syncFullscreenLayoutAdapter()
-					syncRegularRenderAdapter()
-					return {
-						render(width) {
-							const rows = tuiRef?.terminal?.rows ?? 0
-							// Harvested during render, stored without notifying listeners:
-							// a notify here would schedule another render pass.
-							store.state.statuses = statusLines()
-							return renderRail(store.state, Math.max(1, width), Date.now(), rows, uiRef.theme)
-						},
-					}
-				},
-				{ overlay: true, overlayOptions },
-			)
-			.catch(() => {
-				wrapBroken = true
-			})
+	void ctx.ui
+		.custom(
+			(tui) => {
+				tuiRef = tui
+				syncRegularRenderAdapter()
+				return {
+					render(width) {
+						const rows = tuiRef?.terminal?.rows ?? 0
+						// Harvested during render, stored without notifying listeners:
+						// a notify here would schedule another render pass.
+						store.state.statuses = statusLines()
+						return renderRail(store.state, Math.max(1, width), Date.now(), rows, uiRef.theme)
+					},
+				}
+			},
+			{ overlay: true, overlayOptions },
+		)
+		.catch(() => {
+			wrapBroken = true
+		})
 
 		store.subscribe(requestRender)
 		animationTimer = setInterval(() => {
@@ -354,10 +290,8 @@ export function registerRail(pi, store) {
 			else if (argument === "off") enabled = false
 			else enabled = !enabled
 			if (enabled) {
-				syncFullscreenLayoutAdapter()
 				syncRegularRenderAdapter()
 			} else {
-				restoreFullscreenLayoutAdapter()
 				restoreRegularRenderAdapter()
 			}
 			ctx.ui?.notify?.(`rail ${enabled ? "on" : "off"}`, "info")
@@ -376,13 +310,11 @@ export function registerRail(pi, store) {
 	pi.on("tool_execution_end", async (_event, ctx) => refreshFromCtx(ctx))
 	pi.on("agent_end", async (_event, ctx) => {
 		refreshFromCtx(ctx)
-		void refreshGit(ctx)
 	})
 
 	pi.on("session_shutdown", async () => {
 		if (animationTimer) clearInterval(animationTimer)
 		syncFooter(false)
-		restoreFullscreenLayoutAdapter()
 		restoreRegularRenderAdapter()
 	})
 }

@@ -2,7 +2,7 @@
 // Visual language mirrors the harness left sidebar: caps panel headers with a
 // crown jewel and braille spinner/notification glyphs.
 
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui"
+import { truncateToWidth, visibleWidth } from "./pi-tui-shim.js"
 
 import { formatDuration } from "./activity.js"
 import { createGlyphs } from "./symbols.js"

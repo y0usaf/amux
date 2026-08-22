@@ -105,6 +105,12 @@ Verified against omp's extension API: `pi.getAllTools/getActiveTools`,
 `message_update`/`session_shutdown` events, `getContextUsage`,
 `modelRegistry.isUsingOAuth`.
 
+Text primitives (`visibleWidth`, `truncateToWidth`) are self-contained in
+`pi-tui-shim.js` (backed by `Bun.stringWidth`). omp's legacy-pi compat bundle
+dropped the upstream exports (`HStack` first), and any static named import
+from it fails the whole extension at ESM link time. The pi-atelier-style
+fullscreen docking adapter was removed with them: omp dropped fullscreen mode.
+
 Outside the harness (no `AGENT_HARNESS_OMP_SIDECAR_SOCKET`) the sidechannel
 stays dormant and the rail renders fallback panels.
 
