@@ -17,7 +17,7 @@
     # `flake = false` because cordis-rs's flake.nix is not committed at this rev;
     # we only need the crate source tree (its workspace Cargo.toml is committed).
     cordis-rs = {
-      url = "git+file:///home/y0usaf/dev/cordis-rs?rev=426a34e72d25ffb3dc72201523eed48416934f65";
+      url = "github:y0usaf/cordis-rs/426a34e72d25ffb3dc72201523eed48416934f65";
       flake = false;
     };
     # The agent this harness drives. Depending on the upstream flake puts the

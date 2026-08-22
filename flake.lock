@@ -53,16 +53,16 @@
       "locked": {
         "lastModified": 1786915120,
         "narHash": "sha256-wji4+CDyjoNpXXKb67JqI9+6lAD4qwjBanh2jr7ibhY=",
-        "ref": "refs/heads/main",
+        "owner": "y0usaf",
+        "repo": "cordis-rs",
         "rev": "426a34e72d25ffb3dc72201523eed48416934f65",
-        "revCount": 3,
-        "type": "git",
-        "url": "file:///home/y0usaf/dev/cordis-rs"
+        "type": "github"
       },
       "original": {
+        "owner": "y0usaf",
+        "repo": "cordis-rs",
         "rev": "426a34e72d25ffb3dc72201523eed48416934f65",
-        "type": "git",
-        "url": "file:///home/y0usaf/dev/cordis-rs"
+        "type": "github"
       }
     },
     "crane": {
