@@ -1,4 +1,4 @@
-//! Config-as-WASM: pi-harness's default config is a compiled `.wasm` module
+//! Config-as-WASM: omp-harness's default config is a compiled `.wasm` module
 //! (`config.wat`, compiled by `build.rs` into `OUT_DIR/config.wasm` and embedded
 //! here) loaded at startup through the cordis-rs core kernel — function set 1
 //! only (`ctx_set`/`ctx_remove`/`ctx_read`). There is no textual parser for the

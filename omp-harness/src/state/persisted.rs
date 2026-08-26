@@ -33,7 +33,7 @@ pub struct PersistedProject {
 pub struct PersistedSession {
     pub local_id: String,
     pub name: String,
-    pub pi_session_id: Option<String>,
+    pub omp_session_id: Option<String>,
     pub session_file: Option<PathBuf>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
@@ -162,7 +162,7 @@ fn save_queue() -> &'static Sender<SaveCommand> {
     SAVE_TX.get_or_init(|| {
         let (tx, rx) = mpsc::channel();
         let _ = thread::Builder::new()
-            .name("pi-harness-state-save".into())
+            .name("omp-harness-state-save".into())
             .spawn(move || {
                 let mut pending: Option<(PathBuf, PersistedState)> = None;
                 let mut deadline: Option<Instant> = None;

@@ -11,8 +11,8 @@ pub fn merge_scanned_sessions(current: &mut Vec<Session>, scanned: Vec<ScannedSe
         let Some(session) = session.as_ref() else {
             continue;
         };
-        if let Some(pi_session_id) = session.pi_session_id.as_ref() {
-            old_by_pi_id.insert(pi_session_id.clone(), index);
+        if let Some(omp_session_id) = session.omp_session_id.as_ref() {
+            old_by_pi_id.insert(omp_session_id.clone(), index);
         }
         if let Some(session_file) = session.session_file.as_ref() {
             old_by_session_file.insert(session_file.clone(), index);
@@ -86,8 +86,8 @@ fn update_indices(
     by_pi_id: &mut HashMap<String, usize>,
     by_session_file: &mut HashMap<PathBuf, usize>,
 ) {
-    if let Some(pi_session_id) = session.pi_session_id.as_ref() {
-        by_pi_id.insert(pi_session_id.clone(), index);
+    if let Some(omp_session_id) = session.omp_session_id.as_ref() {
+        by_pi_id.insert(omp_session_id.clone(), index);
     }
     if let Some(session_file) = session.session_file.as_ref() {
         by_session_file.insert(session_file.clone(), index);

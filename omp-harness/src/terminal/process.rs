@@ -8,20 +8,19 @@ use std::time::{Duration, Instant};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 
 use crate::notify::Notify;
-use crate::pi;
+use crate::omp;
 
 const READ_BUFFER_SIZE: usize = 8 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TerminalTarget {
-    pub pi_binary: Option<String>,
+    pub omp_binary: Option<String>,
     pub sidecar_extension_path: Option<PathBuf>,
     pub sidecar_socket_path: PathBuf,
-    pub tui_mode: Option<String>,
     pub harness_session_id: String,
     pub cwd: PathBuf,
     pub session_file: Option<PathBuf>,
-    /// Render the in-Pi rail with the ASCII glyph set (`AGENT_HARNESS_PI_ASCII=1`).
+    /// Render the in-Pi rail with the ASCII glyph set (`AGENT_HARNESS_OMP_ASCII=1`).
     pub ascii: bool,
     /// Per-symbol rail glyph overrides forwarded as JSON
     /// (`AGENT_HARNESS_SYMBOL_OVERRIDES`).
@@ -34,7 +33,7 @@ pub(crate) fn targets_share_process(
 ) -> bool {
     matches!((current, next),
         (Some(current), Some(next))
-            if current.pi_binary == next.pi_binary
+            if current.omp_binary == next.omp_binary
                 && current.sidecar_extension_path == next.sidecar_extension_path
                 && current.sidecar_socket_path == next.sidecar_socket_path
                 && current.harness_session_id == next.harness_session_id
@@ -119,11 +118,7 @@ pub(crate) fn spawn_process(
         args.push("--session".to_string());
         args.push(session_file.display().to_string());
     }
-    if let Some(tui_mode) = &target.tui_mode {
-        args.push("--tui-mode".to_string());
-        args.push(tui_mode.clone());
-    }
-    let argv = pi::launch_argv(target.pi_binary.as_deref(), &args)?;
+    let argv = omp::launch_argv(target.omp_binary.as_deref(), &args)?;
 
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -144,13 +139,13 @@ pub(crate) fn spawn_process(
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env(
-        pi::PI_SIDECAR_SOCKET_ENV,
+        omp::OMP_SIDECAR_SOCKET_ENV,
         target.sidecar_socket_path.display().to_string(),
     );
-    cmd.env(pi::PI_SIDECAR_SESSION_KEY_ENV, &target.harness_session_id);
+    cmd.env(omp::OMP_SIDECAR_SESSION_KEY_ENV, &target.harness_session_id);
 
     if target.ascii {
-        cmd.env("AGENT_HARNESS_PI_ASCII", "1");
+        cmd.env("AGENT_HARNESS_OMP_ASCII", "1");
     }
     if !target.symbol_overrides.is_empty() {
         match serde_json::to_string(&target.symbol_overrides) {
@@ -181,7 +176,7 @@ pub(crate) fn spawn_process(
     let read_tx = tx.clone();
     let read_notify = notify.clone();
     std::thread::Builder::new()
-        .name("pi-harness-terminal-reader".into())
+        .name("omp-harness-terminal-reader".into())
         .spawn(move || {
             let mut buf = vec![0u8; READ_BUFFER_SIZE];
             loop {
@@ -206,7 +201,7 @@ pub(crate) fn spawn_process(
 
     let wait_notify = notify;
     std::thread::Builder::new()
-        .name("pi-harness-terminal-wait".into())
+        .name("omp-harness-terminal-wait".into())
         .spawn(move || {
             let status = child
                 .wait()

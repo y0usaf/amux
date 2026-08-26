@@ -73,7 +73,7 @@ impl DerivedTheme {
         }
     }
     pub(super) fn fallback() -> Self {
-        Self::from_roles(crate::app::theme::pi_defaults::dark())
+        Self::from_roles(crate::app::theme::omp_defaults::dark())
     }
 }
 
@@ -176,4 +176,4 @@ pub(super) fn fade_toward(c: Color, t: Color, m: u8) -> Color {
     Color::rgb(f(r1, r2), f(g1, g2), f(b1, b2))
 }
 
-pub(super) mod pi_defaults;
+pub(super) mod omp_defaults;

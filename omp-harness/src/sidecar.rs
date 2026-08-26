@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 
 use crate::notify::Notify;
-use crate::pi::PiSidecarSnapshot;
+use crate::omp::PiSidecarSnapshot;
 use stream::read_sidecar_stream;
 
 #[derive(Debug)]
@@ -79,7 +79,7 @@ impl SidecarListener {
         let accept_downstream = Arc::clone(&downstream);
 
         std::thread::Builder::new()
-            .name("pi-harness-sidecar-listener".into())
+            .name("omp-harness-sidecar-listener".into())
             .spawn(move || {
                 for incoming in listener.incoming() {
                     match incoming {
@@ -93,7 +93,7 @@ impl SidecarListener {
                             let tx = tx.clone();
                             let notify = notify.clone();
                             let _ = std::thread::Builder::new()
-                                .name("pi-harness-sidecar-stream".into())
+                                .name("omp-harness-sidecar-stream".into())
                                 .spawn(move || read_sidecar_stream(stream, tx, notify));
                         }
                         Err(_) => break,

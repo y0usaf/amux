@@ -1,6 +1,6 @@
 use crate::terminal::TerminalSelectionPoint;
 
-use super::input::{mouse_wheel_sgr, MouseEvent, MouseEventKind, WheelDirection};
+use super::input::{MouseEvent, MouseEventKind, WheelDirection};
 use super::raw::terminal_size;
 use super::{TuiApp, TUI_WHEEL_LINES};
 use crate::app::backend::terminal_selection_point_for_cell_rect;
@@ -45,16 +45,7 @@ impl TuiApp {
         }
 
         if layout.terminal_card.contains_cell(event.col, event.row) {
-            if self.core.config.pi_tui_mode() == Some("fullscreen") {
-                let local_col = event.col - layout.terminal_card.col;
-                let local_row = event.row - layout.terminal_card.row;
-                let bytes =
-                    mouse_wheel_sgr(local_col, local_row, direction == WheelDirection::Up);
-                self.core
-                    .send_bytes_to_current_terminal(&bytes, "wheel mouse");
-            } else {
-                self.core.scroll_terminal_by_lines(delta);
-            }
+            self.core.scroll_terminal_by_lines(delta);
         }
     }
 

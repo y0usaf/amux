@@ -61,7 +61,7 @@ mod tests {
     #[test]
     fn session_index_for_restore_key_matches_persisted_selection_key() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         let sessions = vec![session];
 
         assert_eq!(
@@ -74,7 +74,7 @@ mod tests {
     fn session_index_for_restore_key_matches_local_id_for_in_memory_restore() {
         let mut session = Session::new_draft();
         session.local_id = "local-session-1".into();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         let sessions = vec![session];
 
         assert_eq!(
@@ -95,7 +95,7 @@ mod tests {
         let mut project = Project::new(PathBuf::from("/tmp/project"));
         let draft = Session::new_draft();
         let mut visible = Session::new_draft();
-        visible.pi_session_id = Some("pi-session-1".into());
+        visible.omp_session_id = Some("pi-session-1".into());
         visible.draft = false;
         project.sessions = vec![draft, visible];
 
@@ -108,11 +108,11 @@ mod tests {
     fn next_selectable_session_index_skips_hidden_draft_when_visible_session_remains() {
         let mut project = Project::new(PathBuf::from("/tmp/project"));
         let mut first = Session::new_draft();
-        first.pi_session_id = Some("pi-session-1".into());
+        first.omp_session_id = Some("pi-session-1".into());
         first.draft = false;
         let hidden = Session::new_draft();
         let mut third = Session::new_draft();
-        third.pi_session_id = Some("pi-session-2".into());
+        third.omp_session_id = Some("pi-session-2".into());
         third.draft = false;
         project.sessions = vec![first, hidden, third];
 

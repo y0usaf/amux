@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::pi;
+use crate::omp;
 use crate::state::{
     default_state_path, merge_scanned_sessions, PersistedProject, PersistedSession, PersistedState,
     Project, Session,
@@ -158,7 +158,7 @@ impl Workspace {
                 .unwrap_or_else(|| Project::new(path.clone()));
             project.path = path.clone();
             project.name = project_name_from_path(&path);
-            merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&path));
+            merge_scanned_sessions(&mut project.sessions, omp::scan_live_sessions(&path));
             project.sort_sessions();
             next_projects.push(project);
         }
@@ -257,7 +257,7 @@ impl Workspace {
         }
 
         let mut project = Project::new(path.clone());
-        merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&path));
+        merge_scanned_sessions(&mut project.sessions, omp::scan_live_sessions(&path));
         project.sort_sessions();
         self.projects.push(project);
         self.selected_project = self.projects.len().saturating_sub(1);
@@ -285,7 +285,7 @@ impl Workspace {
             .map(|session| session.selection_key());
 
         if let Some(project) = self.projects.get_mut(project_index) {
-            merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&project_path));
+            merge_scanned_sessions(&mut project.sessions, omp::scan_live_sessions(&project_path));
             project.sort_sessions();
         }
 
@@ -477,7 +477,7 @@ fn persisted_session_from_session(session: &Session) -> PersistedSession {
     PersistedSession {
         local_id: session.local_id.clone(),
         name: session.name.clone(),
-        pi_session_id: session.pi_session_id.clone(),
+        omp_session_id: session.omp_session_id.clone(),
         session_file: session.session_file.clone(),
         created_at_ms: session.created_at_ms,
         updated_at_ms: session.updated_at_ms,
@@ -490,7 +490,7 @@ fn session_from_persisted(persisted: &PersistedSession) -> Session {
     Session {
         local_id: persisted.local_id.clone(),
         name: persisted.name.clone(),
-        pi_session_id: persisted.pi_session_id.clone(),
+        omp_session_id: persisted.omp_session_id.clone(),
         session_file: persisted.session_file.clone(),
         created_at_ms: persisted.created_at_ms,
         updated_at_ms: persisted.updated_at_ms,
@@ -547,7 +547,7 @@ mod tests {
         let mut project = Project::new(PathBuf::from("/tmp/project"));
         let hidden = Session::new_draft();
         let mut visible = Session::new_draft();
-        visible.pi_session_id = Some("pi-session-1".into());
+        visible.omp_session_id = Some("pi-session-1".into());
         visible.draft = false;
         project.sessions = vec![hidden, visible];
 
@@ -592,7 +592,7 @@ mod tests {
         };
         let mut visible_session = Session::new_draft();
         visible_session.local_id = "local-session-1".into();
-        visible_session.pi_session_id = Some("pi-session-1".into());
+        visible_session.omp_session_id = Some("pi-session-1".into());
         visible_session.draft = false;
         let hidden_draft = Session::new_draft();
         let mut current_project = Project::new(PathBuf::from("/tmp/current-project"));
@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(snapshot.project_cache[0].sessions.len(), 2);
         assert_eq!(
             snapshot.project_cache[0].sessions[0]
-                .pi_session_id
+                .omp_session_id
                 .as_deref(),
             Some("pi-session-1")
         );

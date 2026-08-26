@@ -6,7 +6,7 @@ pub(super) use super::sidecar_reducer::{
     should_bind_sidecar_session, sidecar_order_update, SidecarApplyResult, SidecarOrderUpdate,
 };
 #[cfg(test)]
-use crate::pi::PiSidecarSnapshot;
+use crate::omp::PiSidecarSnapshot;
 #[cfg(test)]
 use crate::state::Session;
 #[cfg(test)]
@@ -18,7 +18,7 @@ mod tests {
 
     use super::*;
 
-    fn snapshot(stage: crate::pi::PiSessionStage, ts_ms: u64) -> PiSidecarSnapshot {
+    fn snapshot(stage: crate::omp::PiSessionStage, ts_ms: u64) -> PiSidecarSnapshot {
         PiSidecarSnapshot {
             kind: Some("snapshot".into()),
             session_id: "pi-session-1".into(),
@@ -36,14 +36,14 @@ mod tests {
     #[test]
     fn bind_sidecar_session_when_session_is_already_bound_by_pi_id() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         let snapshot = PiSidecarSnapshot {
             kind: Some("snapshot".into()),
             session_id: "pi-session-2".into(),
             harness_session_id: None,
             session_file: None,
             session_name: None,
-            stage: crate::pi::PiSessionStage::Idle,
+            stage: crate::omp::PiSessionStage::Idle,
             queued: false,
             interrupted: false,
             tool_name: None,
@@ -62,7 +62,7 @@ mod tests {
             harness_session_id: None,
             session_file: None,
             session_name: None,
-            stage: crate::pi::PiSessionStage::Tool,
+            stage: crate::omp::PiSessionStage::Tool,
             queued: false,
             interrupted: false,
             tool_name: Some("grep".into()),
@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn interrupted_snapshot_binds_new_session() {
         let session = Session::new_draft();
-        let mut snapshot = snapshot(crate::pi::PiSessionStage::Idle, 150);
+        let mut snapshot = snapshot(crate::omp::PiSessionStage::Idle, 150);
         snapshot.interrupted = true;
 
         assert!(should_bind_sidecar_session(&session, &snapshot));
@@ -91,7 +91,7 @@ mod tests {
             harness_session_id: None,
             session_file: None,
             session_name: None,
-            stage: crate::pi::PiSessionStage::Idle,
+            stage: crate::omp::PiSessionStage::Idle,
             queued: false,
             interrupted: false,
             tool_name: None,
@@ -159,12 +159,12 @@ mod tests {
     #[test]
     fn non_tool_snapshot_clears_stale_tool_name() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
         session.draft = false;
         session.runtime.tool_name = Some("Clipboard".into());
 
-        let mut next = snapshot(crate::pi::PiSessionStage::Thinking, 150);
+        let mut next = snapshot(crate::omp::PiSessionStage::Thinking, 150);
         next.tool_name = Some("Clipboard".into());
         apply_snapshot_to_session(&mut session, &next, false, 250);
 
@@ -177,7 +177,7 @@ mod tests {
         let mut session = Session::new_draft();
         session.local_id = "local-session-1".into();
 
-        let mut next = snapshot(crate::pi::PiSessionStage::Idle, 150);
+        let mut next = snapshot(crate::omp::PiSessionStage::Idle, 150);
         next.interrupted = true;
         apply_snapshot_to_session(&mut session, &next, false, 250);
 
@@ -192,7 +192,7 @@ mod tests {
         session.created_at_ms = 10;
         session.updated_at_ms = 10;
 
-        let active = snapshot(crate::pi::PiSessionStage::Thinking, 200);
+        let active = snapshot(crate::omp::PiSessionStage::Thinking, 200);
         let applied = apply_snapshot_to_session(&mut session, &active, false, 300);
 
         assert_eq!(
@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(session.runtime.last_sidecar_ts_ms, 200);
         let updated_at_ms = session.updated_at_ms;
 
-        let stale_idle = snapshot(crate::pi::PiSessionStage::Idle, 150);
+        let stale_idle = snapshot(crate::omp::PiSessionStage::Idle, 150);
         let applied_stale = apply_snapshot_to_session(&mut session, &stale_idle, false, 400);
 
         assert_eq!(applied_stale, SidecarApplyResult::default());
@@ -224,7 +224,7 @@ mod tests {
         let mut session = Session::new_draft();
         session.created_at_ms = 10;
         session.updated_at_ms = 10;
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
         session.draft = false;
         session.runtime.running = true;
@@ -233,7 +233,7 @@ mod tests {
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 150),
+            &snapshot(crate::omp::PiSessionStage::Idle, 150),
             false,
             250,
         );
@@ -259,12 +259,12 @@ mod tests {
         session.created_at_ms = 10;
         session.updated_at_ms = 10;
 
-        let active = snapshot(crate::pi::PiSessionStage::Thinking, 200);
+        let active = snapshot(crate::omp::PiSessionStage::Thinking, 200);
         apply_snapshot_to_session(&mut session, &active, false, 300);
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 0),
+            &snapshot(crate::omp::PiSessionStage::Idle, 0),
             false,
             400,
         );
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn idle_name_adoption_does_not_reorder_session() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
         session.updated_at_ms = 10;
         session.runtime.last_sidecar_ts_ms = 100;
@@ -295,7 +295,7 @@ mod tests {
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 150),
+            &snapshot(crate::omp::PiSessionStage::Idle, 150),
             false,
             250,
         );
@@ -310,13 +310,13 @@ mod tests {
     fn binding_snapshot_refreshes_stale_pi_session_id() {
         let mut session = Session::new_draft();
         session.local_id = "local-session-1".into();
-        session.pi_session_id = Some("stale-session-id".into());
+        session.omp_session_id = Some("stale-session-id".into());
         session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
         session.draft = false;
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Thinking, 150),
+            &snapshot(crate::omp::PiSessionStage::Thinking, 150),
             false,
             250,
         );
@@ -329,21 +329,21 @@ mod tests {
                 identity_changed: true,
             }
         );
-        assert_eq!(session.pi_session_id.as_deref(), Some("pi-session-1"));
+        assert_eq!(session.omp_session_id.as_deref(), Some("pi-session-1"));
         assert!(session.runtime.running);
     }
 
     #[test]
     fn zero_timestamp_snapshot_does_not_reactivate_completed_session() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
         session.draft = false;
         session.runtime.last_sidecar_ts_ms = 200;
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Thinking, 0),
+            &snapshot(crate::omp::PiSessionStage::Thinking, 0),
             false,
             400,
         );
@@ -357,7 +357,7 @@ mod tests {
     #[test]
     fn selected_completion_keeps_existing_unread_notification() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
         session.draft = false;
         session.runtime.running = true;
@@ -367,7 +367,7 @@ mod tests {
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 150),
+            &snapshot(crate::omp::PiSessionStage::Idle, 150),
             true,
             250,
         );
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn selected_completion_without_existing_unread_stays_read() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
         session.draft = false;
         session.runtime.running = true;
@@ -397,7 +397,7 @@ mod tests {
 
         apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 150),
+            &snapshot(crate::omp::PiSessionStage::Idle, 150),
             true,
             250,
         );
@@ -408,7 +408,7 @@ mod tests {
     #[test]
     fn selected_idle_snapshot_keeps_stale_unread_notification() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
         session.draft = false;
         session.runtime.unread = true;
@@ -416,7 +416,7 @@ mod tests {
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 150),
+            &snapshot(crate::omp::PiSessionStage::Idle, 150),
             true,
             250,
         );
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn queued_snapshot_clears_unread_notification() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         session.session_file = Some(PathBuf::from("/tmp/pi-session-1.jsonl"));
         session.draft = false;
         session.runtime.unread = true;
@@ -443,7 +443,7 @@ mod tests {
                 harness_session_id: Some("local-session-1".into()),
                 session_file: Some(PathBuf::from("/tmp/pi-session-1.jsonl")),
                 session_name: Some("Imported session".into()),
-                stage: crate::pi::PiSessionStage::Idle,
+                stage: crate::omp::PiSessionStage::Idle,
                 queued: true,
                 interrupted: false,
                 tool_name: None,

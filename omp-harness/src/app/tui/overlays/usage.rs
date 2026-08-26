@@ -4,7 +4,7 @@ use crate::app::cell_surface::{
 use crate::app::glyphs::GlyphSet;
 use crate::app::layout::CellRect as Rect;
 use crate::app::theme::{self, DerivedTheme};
-use crate::pi::{self, PiUsageDay, PiUsageModelBreakdown, PiUsageReport, PiUsageTotals};
+use crate::omp::{self, PiUsageDay, PiUsageModelBreakdown, PiUsageReport, PiUsageTotals};
 
 use super::super::raw::terminal_size;
 use super::dialog::render_dialog_title_line;
@@ -22,13 +22,13 @@ pub(in crate::app::tui) struct UsageOverlayState {
 impl UsageOverlayState {
     pub(in crate::app::tui) fn load() -> Self {
         Self {
-            report: pi::load_usage_report(),
+            report: omp::load_usage_report(),
             scroll: 0,
         }
     }
 
     pub(in crate::app::tui) fn reload(&mut self) {
-        self.report = pi::load_usage_report();
+        self.report = omp::load_usage_report();
         self.scroll = 0;
     }
 
@@ -335,7 +335,7 @@ fn format_currency(amount: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pi::{PiUsageDay, PiUsageModelBreakdown, PiUsageTotals};
+    use crate::omp::{PiUsageDay, PiUsageModelBreakdown, PiUsageTotals};
 
     #[test]
     fn formats_model_names_like_pi_usage() {

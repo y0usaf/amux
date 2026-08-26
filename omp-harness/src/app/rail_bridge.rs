@@ -1,6 +1,6 @@
 //! Harness → sidechannel downstream payloads for the in-Pi right rail.
 //!
-//! The rail extension (pi-extension/) renders inside each Pi PTY. The harness
+//! The rail extension (omp-extension/) renders inside each Pi PTY. The harness
 //! owns rail policy: width travels in a sticky `hello` line, the cross-session
 //! summary travels in `digest` lines. Wire vocabulary is
 //! additive JSON-lines; unknown types are ignored on both ends.
@@ -72,7 +72,7 @@ mod tests {
         let mut project = Project::new(PathBuf::from("/tmp/demo"));
         let mut running = Session::new_draft();
         running.name = "run".into();
-        running.pi_session_id = Some("pi-1".into());
+        running.omp_session_id = Some("pi-1".into());
         running.draft = false;
         running.runtime.running = true;
         running.runtime.status = Some("tool".into());

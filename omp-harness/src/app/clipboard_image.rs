@@ -83,7 +83,7 @@ fn read_clipboard_image() -> Result<Option<ClipboardImage>, String> {
 fn write_clipboard_image_to_temp_file(image: &ClipboardImage) -> Result<PathBuf, String> {
     let extension = extension_for_image_mime_type(&image.mime_type).unwrap_or("png");
     let path = env::temp_dir().join(format!(
-        "pi-harness-clipboard-{}.{}",
+        "omp-harness-clipboard-{}.{}",
         Uuid::new_v4(),
         extension
     ));
@@ -187,7 +187,7 @@ fn read_clipboard_image_via_xclip() -> Result<Option<ClipboardImage>, String> {
 }
 
 fn read_clipboard_image_via_powershell() -> Result<Option<ClipboardImage>, String> {
-    let path = env::temp_dir().join(format!("pi-harness-wsl-clip-{}.png", Uuid::new_v4()));
+    let path = env::temp_dir().join(format!("omp-harness-wsl-clip-{}.png", Uuid::new_v4()));
     let Some(path_str) = path.to_str() else {
         return Ok(None);
     };
@@ -212,12 +212,12 @@ fn read_clipboard_image_via_powershell() -> Result<Option<ClipboardImage>, Strin
     let script = [
         "Add-Type -AssemblyName System.Windows.Forms",
         "Add-Type -AssemblyName System.Drawing",
-        "$path = $env:PI_HARNESS_WSL_CLIPBOARD_IMAGE_PATH",
+        "$path = $env:OMP_HARNESS_WSL_CLIPBOARD_IMAGE_PATH",
         "$img = [System.Windows.Forms.Clipboard]::GetImage()",
         "if ($img) { $img.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 'ok' } else { Write-Output 'empty' }",
     ]
     .join("; ");
-    let envs = [("PI_HARNESS_WSL_CLIPBOARD_IMAGE_PATH", win_path.as_str())];
+    let envs = [("OMP_HARNESS_WSL_CLIPBOARD_IMAGE_PATH", win_path.as_str())];
     let result = run_command(
         "powershell.exe",
         &["-NoProfile", "-Command", script.as_str()],

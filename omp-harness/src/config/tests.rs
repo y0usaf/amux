@@ -236,35 +236,6 @@ fn explicit_rail_width_still_overrides_the_shared_percent() {
 }
 
 #[test]
-fn pi_tui_mode_maps_fullscreen_and_defaults_to_none() {
-    assert_eq!(AppConfig::default().pi_tui_mode(), None);
-    assert_eq!(
-        AppConfig {
-            tui_mode: Some("regular".into()),
-            ..AppConfig::default()
-        }
-        .pi_tui_mode(),
-        None
-    );
-    assert_eq!(
-        AppConfig {
-            tui_mode: Some("fullscreen".into()),
-            ..AppConfig::default()
-        }
-        .pi_tui_mode(),
-        Some("fullscreen")
-    );
-    assert_eq!(
-        AppConfig {
-            tui_mode: Some("bogus".into()),
-            ..AppConfig::default()
-        }
-        .pi_tui_mode(),
-        None
-    );
-}
-
-#[test]
 fn configured_sidebar_width_uses_fixed_columns() {
     let config = AppConfig {
         sidebar_width: Some(34),

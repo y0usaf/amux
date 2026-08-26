@@ -12,7 +12,7 @@ use crate::config::{
     AppAction, AppConfig, KeyChordState, KeyStroke, KeyToken, Keymap, KeymapMatch, NamedKeyToken,
 };
 use crate::notify::Notify;
-use crate::pi::{self, PiSidecarSnapshot};
+use crate::omp::{self, PiSidecarSnapshot};
 use crate::sidecar::SidecarListener;
 use crate::sidecar::SidecarMessage;
 use crate::state::{PersistedState, Project, ScannedSession, Session};
@@ -80,10 +80,10 @@ impl SessionLocator {
                     .by_harness_session_id
                     .entry(session.local_id.clone())
                     .or_insert(location);
-                if let Some(pi_session_id) = session.pi_session_id.as_ref() {
+                if let Some(omp_session_id) = session.omp_session_id.as_ref() {
                     locator
                         .by_pi_session_id
-                        .entry(pi_session_id.clone())
+                        .entry(omp_session_id.clone())
                         .or_insert(location);
                 }
                 if let Some(session_file) = session.session_file.as_ref() {
@@ -138,9 +138,9 @@ impl SessionLocator {
                 self.by_session_file.remove(prev_session_file);
             }
         }
-        if let Some(pi_session_id) = session.pi_session_id.as_ref() {
+        if let Some(omp_session_id) = session.omp_session_id.as_ref() {
             self.by_pi_session_id
-                .insert(pi_session_id.clone(), location);
+                .insert(omp_session_id.clone(), location);
         }
         if let Some(session_file) = session.session_file.as_ref() {
             self.by_session_file.insert(session_file.clone(), location);
@@ -182,13 +182,12 @@ pub(super) struct HarnessCore {
 
 impl HarnessCore {
     pub(super) fn new(notify: Notify, initial_project_paths: Vec<PathBuf>) -> anyhow::Result<Self> {
-        let sidecar_socket_path = pi::socket_path();
+        let sidecar_socket_path = omp::socket_path();
         let sidecar = SidecarListener::start(notify.clone(), sidecar_socket_path.clone())?;
         let config = AppConfig::load_default().unwrap_or_default();
         let terminal_manager = TerminalManager::new(
             notify,
-            pi::extension_path(),
-            config.pi_tui_mode().map(ToOwned::to_owned),
+            omp::extension_path(),
             sidecar_socket_path.clone(),
             config.glyph_style() == GlyphStyle::Ascii,
             config.symbols_overrides().cloned().unwrap_or_default(),
@@ -341,7 +340,7 @@ impl HarnessCore {
             project: self
                 .current_project()
                 .map(|project| project.name.clone())
-                .unwrap_or_else(|| "pi-harness".to_string()),
+                .unwrap_or_else(|| "omp-harness".to_string()),
             status: note.map(|note| note.text.clone()).unwrap_or_else(|| {
                 status_text_for_session(
                     self.current_project().is_some(),
@@ -599,7 +598,7 @@ impl HarnessCore {
     }
 
     pub(super) fn cleanup_archive(&mut self) {
-        let evicted = pi::evict_old_archived_sessions(30);
+        let evicted = omp::evict_old_archived_sessions(30);
         if evicted > 0 {
             self.set_note_ok(format!(
                 "removed {evicted} archived sessions older than 30 days"
@@ -627,7 +626,7 @@ impl HarnessCore {
         };
 
         if let Some(path) = target.session_file.as_ref() {
-            if let Err(error) = pi::archive_session_file(path) {
+            if let Err(error) = omp::archive_session_file(path) {
                 if terminal_stopped {
                     self.mark_terminals_dirty();
                 }
@@ -645,7 +644,7 @@ impl HarnessCore {
         archived: &ScannedSession,
     ) -> Result<(), String> {
         let project_path = normalize_project_path(&archived.cwd);
-        pi::restore_session_file(&archived.session_file, &project_path)?;
+        omp::restore_session_file(&archived.session_file, &project_path)?;
 
         let project_is_open = self
             .workspace
@@ -759,7 +758,7 @@ impl HarnessCore {
             .map(|session| session.local_id.clone());
         let (update, prev_pi_session_id, prev_session_file) = {
             let session = &mut self.workspace.projects_mut()[project_index].sessions[session_index];
-            let prev_pi_session_id = session.pi_session_id.clone();
+            let prev_pi_session_id = session.omp_session_id.clone();
             let prev_session_file = session.session_file.clone();
             let update = apply_snapshot_to_session(session, &snapshot, selected, now_millis());
             (update, prev_pi_session_id, prev_session_file)

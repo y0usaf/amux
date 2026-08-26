@@ -14,7 +14,6 @@ pub(super) struct TerminalManager {
     controllers: HashMap<String, TerminalController>,
     last_selected_session_id: Option<String>,
     sidecar_extension_path: Option<PathBuf>,
-    tui_mode: Option<String>,
     sidecar_socket_path: PathBuf,
     ascii: bool,
     symbol_overrides: BTreeMap<String, String>,
@@ -24,7 +23,6 @@ impl TerminalManager {
     pub(super) fn new(
         notify: Notify,
         sidecar_extension_path: Option<PathBuf>,
-        tui_mode: Option<String>,
         sidecar_socket_path: PathBuf,
         ascii: bool,
         symbol_overrides: BTreeMap<String, String>,
@@ -34,7 +32,6 @@ impl TerminalManager {
             controllers: HashMap::new(),
             last_selected_session_id: None,
             sidecar_extension_path,
-            tui_mode,
             sidecar_socket_path,
             ascii,
             symbol_overrides,
@@ -176,10 +173,9 @@ impl TerminalManager {
         (
             session.local_id.clone(),
             TerminalTarget {
-                pi_binary: None,
+                omp_binary: None,
                 sidecar_extension_path: self.sidecar_extension_path.clone(),
                 sidecar_socket_path: self.sidecar_socket_path.clone(),
-                tui_mode: self.tui_mode.clone(),
                 harness_session_id: session.local_id.clone(),
                 cwd: project.path.clone(),
                 session_file: session.session_file.clone(),

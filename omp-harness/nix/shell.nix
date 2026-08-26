@@ -25,7 +25,7 @@ mkShell {
   ];
 
   shellHook = ''
-    echo "pi-harness dev shell"
+    echo "omp-harness dev shell"
     export ACP_RUNTIME_LIBS="${lib.makeLibraryPath acpRuntimeLibs}"
     export LD_LIBRARY_PATH="$ACP_RUNTIME_LIBS''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   '';

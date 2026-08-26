@@ -1,4 +1,4 @@
-use crate::pi::PiSidecarSnapshot;
+use crate::omp::PiSidecarSnapshot;
 use crate::state::Session;
 use crate::terminal::TerminalStatus;
 
@@ -10,7 +10,7 @@ pub(super) enum SidecarOrderUpdate {
 }
 
 pub(super) fn should_bind_sidecar_session(session: &Session, snapshot: &PiSidecarSnapshot) -> bool {
-    session.pi_session_id.is_some()
+    session.omp_session_id.is_some()
         || session.session_file.is_some()
         || session.runtime.running
         || session.runtime.queued
@@ -102,12 +102,12 @@ pub(super) fn apply_snapshot_to_session(
 
     let timestamp = snapshot.ts_ms.max(now_ms);
     let prev_trackable = session.counts_for_activity_ordering();
-    let prev_pi_session_id = session.pi_session_id.clone();
+    let prev_pi_session_id = session.omp_session_id.clone();
     let prev_session_file = session.session_file.clone();
     let should_bind = should_bind_sidecar_session(session, snapshot);
 
     if should_bind {
-        session.pi_session_id = Some(snapshot.session_id.clone());
+        session.omp_session_id = Some(snapshot.session_id.clone());
         if let Some(path) = snapshot.session_file.clone() {
             session.session_file = Some(path);
         }
@@ -128,7 +128,7 @@ pub(super) fn apply_snapshot_to_session(
     session.runtime.status = snapshot.stage.as_runtime_status().map(ToOwned::to_owned);
     session.runtime.queued = snapshot.queued;
     session.runtime.interrupted = snapshot.interrupted;
-    session.runtime.tool_name = if matches!(snapshot.stage, crate::pi::PiSessionStage::Tool) {
+    session.runtime.tool_name = if matches!(snapshot.stage, crate::omp::PiSessionStage::Tool) {
         snapshot.tool_name.clone()
     } else {
         None
@@ -139,7 +139,7 @@ pub(super) fn apply_snapshot_to_session(
 
     let mut result = SidecarApplyResult::default();
     result.identity_changed =
-        session.pi_session_id != prev_pi_session_id || session.session_file != prev_session_file;
+        session.omp_session_id != prev_pi_session_id || session.session_file != prev_session_file;
     let trackable = session.counts_for_activity_ordering();
     match sidecar_order_update(
         prev_running,

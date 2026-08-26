@@ -793,7 +793,7 @@ fn render_sidebar_project_header(
 
     // Header layout: `{rule} {title} {jewel} ` (4 fixed cells + rule >= 1) --
     // the mirror of the rail's `| {jewel} {title} {rule}` panelHeader in
-    // pi-extension/render.js, so both jewels sit against the Pi window.
+    // omp-extension/render.js, so both jewels sit against the Pi window.
     if rect.cols < 7 {
         let value = truncate_to_cells(&format!(" {label} "), rect.cols as usize);
         surface.put_text_bold_styled(rect.col, rect.row, rect.cols, title_fg, bg, &value, reverse);

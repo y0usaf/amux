@@ -31,7 +31,7 @@ impl SessionRuntime {
 pub struct Session {
     pub local_id: String,
     pub name: String,
-    pub pi_session_id: Option<String>,
+    pub omp_session_id: Option<String>,
     pub session_file: Option<PathBuf>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
@@ -45,7 +45,7 @@ impl Session {
         Self {
             local_id: scan.session_id.clone(),
             name: scan.name,
-            pi_session_id: Some(scan.session_id),
+            omp_session_id: Some(scan.session_id),
             session_file: Some(scan.session_file),
             created_at_ms: scan.created_at_ms,
             updated_at_ms: scan.updated_at_ms,
@@ -60,7 +60,7 @@ impl Session {
         Self {
             local_id: Uuid::new_v4().to_string(),
             name: "Session".to_string(),
-            pi_session_id: None,
+            omp_session_id: None,
             session_file: None,
             created_at_ms: now,
             updated_at_ms: now,
@@ -76,7 +76,7 @@ impl Session {
     }
 
     pub fn persisted_selection_key(&self) -> Option<String> {
-        self.pi_session_id.clone().or_else(|| {
+        self.omp_session_id.clone().or_else(|| {
             self.session_file
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned())
@@ -87,7 +87,7 @@ impl Session {
         if self.should_adopt_name(&scan.name) {
             self.name = scan.name.clone();
         }
-        self.pi_session_id = Some(scan.session_id);
+        self.omp_session_id = Some(scan.session_id);
         self.session_file = Some(scan.session_file);
         self.created_at_ms = self.created_at_ms.min(scan.created_at_ms);
         self.updated_at_ms = self.updated_at_ms.max(scan.updated_at_ms);
@@ -110,7 +110,7 @@ impl Session {
 
     pub fn is_ephemeral_draft(&self) -> bool {
         self.draft
-            && self.pi_session_id.is_none()
+            && self.omp_session_id.is_none()
             && self.session_file.is_none()
             && !self.runtime.is_active()
             && self.runtime.status.is_none()
@@ -127,18 +127,18 @@ impl Session {
     }
 
     pub fn matches_scan(&self, scan: &ScannedSession) -> bool {
-        self.pi_session_id.as_deref() == Some(scan.session_id.as_str())
+        self.omp_session_id.as_deref() == Some(scan.session_id.as_str())
             || self.session_file.as_ref() == Some(&scan.session_file)
     }
 
     pub fn matches_identity(
         &self,
         harness_session_id: Option<&str>,
-        pi_session_id: &str,
+        omp_session_id: &str,
         session_file: Option<&Path>,
     ) -> bool {
         harness_session_id.is_some_and(|id| id == self.local_id)
-            || self.pi_session_id.as_deref() == Some(pi_session_id)
+            || self.omp_session_id.as_deref() == Some(omp_session_id)
             || session_file.is_some_and(|path| self.session_file.as_deref() == Some(path))
     }
 

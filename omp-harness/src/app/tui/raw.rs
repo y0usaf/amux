@@ -66,7 +66,7 @@ fn stty_inherit(args: &[&str]) -> anyhow::Result<()> {
 
 pub(super) fn spawn_stdin_reader(tx: mpsc::Sender<TuiEvent>) {
     let _ = std::thread::Builder::new()
-        .name("pi-harness-tui-stdin".into())
+        .name("omp-harness-tui-stdin".into())
         .spawn(move || {
             let mut stdin = io::stdin();
             let mut buf = [0u8; 4096];

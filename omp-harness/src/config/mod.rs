@@ -1,4 +1,5 @@
 mod actions;
+pub mod cordis;
 mod keymap;
 mod keys;
 
@@ -44,7 +45,6 @@ pub struct AppConfig {
     pub sidebar_width_percent: Option<u8>,
     pub panel_width_percent: Option<u8>,
     pub right_rail_width: Option<u16>,
-    pub tui_mode: Option<String>,
     pub tui_terminal_width_percent: Option<u8>,
     pub tui_sidebar_width_percent: Option<u8>,
     pub ascii: Option<bool>,
@@ -107,15 +107,19 @@ impl ConfigKeybind {
 impl AppConfig {
     pub fn load_default() -> anyhow::Result<Self> {
         let path = default_config_path();
-        if !path.exists() {
-            return Ok(Self::default());
+        if path.exists() {
+            let content =
+                fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+            let mut config: Self = serde_json::from_str(&content)
+                .with_context(|| format!("parsing {}", path.display()))?;
+            config.normalize();
+            return Ok(config);
         }
-        let content =
-            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-        let mut config: Self = serde_json::from_str(&content)
-            .with_context(|| format!("parsing {}", path.display()))?;
-        config.normalize();
-        Ok(config)
+        // No user `config.json: the default config comes from the compiled
+        // `config.wasm` mounted on the cordis-rs core kernel at startup
+        // ([[principle:no-privileged-path]]). Unmounting reverts it.
+        let kernel = cordis::ConfigKernel::mount()?;
+        kernel.to_app_config()
     }
 
     pub fn save_default(&self) -> anyhow::Result<()> {
@@ -193,21 +197,6 @@ impl AppConfig {
                 panel_columns(total_cols, self.panel_width_percent())
             }
             None => panel_columns(total_cols, self.panel_width_percent()),
-        }
-    }
-
-    /// Pi TUI mode forwarded as `--tui-mode <mode>` on launch. `None`/`regular`
-    /// are the default (flag omitted); `fullscreen` is pi's experimental mode.
-    pub fn pi_tui_mode(&self) -> Option<&str> {
-        match self.tui_mode.as_deref() {
-            Some("fullscreen") => Some("fullscreen"),
-            Some("regular") | None => None,
-            Some(other) => {
-                log::warn!(
-                    "invalid tui_mode={other:?} (need \"regular\" or \"fullscreen\"); ignoring"
-                );
-                None
-            }
         }
     }
 

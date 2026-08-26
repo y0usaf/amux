@@ -1,11 +1,12 @@
-# pi-harness
+# omp-harness
 
-Minimal Pi terminal harness.
+Minimal omp (oh-my-pi) terminal harness — the pi-harness TUI retargeted to
+drive [omp](https://github.com/can1357/oh-my-pi) instead of Pi.
 
 Layout:
 - TUI only
 - shared cell scene rendered to ANSI
-- Neo-tree style left sidebar + unboxed Pi terminal + nvim-style bottom statusline/command row
+- Neo-tree style left sidebar + unboxed omp terminal + nvim-style bottom statusline/command row
 
 No GUI. No TUI framework. Minimal config surface.
 
@@ -14,92 +15,144 @@ No GUI. No TUI framework. Minimal config surface.
 ```text
 src/
   app/       # TUI runtime + app state + workspace/sidebar/sidecar components
-  pi/        # Pi discovery/session scan/files/types
+  omp/       # omp discovery/session scan/files/types/usage
   render/    # color type
   sidecar/   # unix socket stream ingestion
   state/     # persisted state + project/session models + merge/sort
   terminal/  # controller + input/process/selection
   util/      # paths/text/time helpers
 crates/
-  pi-harness-tui/  # TUI binary crate (`pi-harness`, plus `pi-harness-tui` alias)
+  omp-harness-tui/  # TUI binary crate (`omp-harness`, plus `omp-harness-tui` alias)
+omp-extension/     # companion extension injected into every omp PTY
 ```
 
-Notes:
-- `src/lib.rs` is the shared library module root.
-- TUI entrypoints live in `crates/pi-harness-tui/src/main*.rs`.
+## The omp dependency
+
+The flake depends on upstream `github:can1357/oh-my-pi`, so `nix run` pulls the
+real `omp` binary into the closure — no system install, no version drift:
+
+```bash
+nix run . -- /path/to/project        # harness + omp, both from the flake
+nix run .#omp -- /path/to/project    # bare omp passthrough
+```
+
+The default package wraps `bin/omp-harness` with the flake's `omp` on PATH;
+discovery resolves it via `which()`. Overrides in discovery order:
+
+1. config agent path (`~/.config/omp-harness/config.json`)
+2. `$OMP_BINARY`
+3. `which("omp")` — what the wrapper provides
+4. well-known install locations (`.bun/bin/omp`, npm globals, mise shims, Nix profile)
+5. `bunx`/`npx @oh-my-pi/pi-coding-agent`
 
 ## Controls
 
-- `:` → command line (`:open <dir>` adds/selects a project, `:archive` opens archive restore viewer, `:usage` opens Pi usage, `:refresh`, `:reload`, `:q` quits)
-- click the `+` in the left statusline segment → opens command line prefilled as `:open `
-- bottom statusline shows `NORMAL` / `COMMAND`; command mode keeps the nvim-style command row below it
-- command line: `Enter` run, `Esc`/`Ctrl+C` cancel, arrows/Home/End edit; `::` sends a literal `:` to the terminal
-- `Ctrl+N` → new session
-- `Ctrl+R` → refresh selected idle session
-- `Ctrl+Shift+R` → reload Pi sessions from disk
-- `Ctrl+Delete` → archive selected session
-- archive viewer: `↑`/`↓`/`j`/`k` select, `Enter` restores to original project cwd, `r` reloads, `q`/`Esc` closes
-- usage overlay: usage totals table/tree by date/model with per-model costs; `r` reloads, `q`/`Esc` closes
-- `Ctrl+Shift+Delete` / `Ctrl+Shift+D` → remove selected project
-- `Ctrl+Left` / `Ctrl+Right` → prev/next project
-- `Ctrl+Up` / `Ctrl+Down` → prev/next session
-- drag in terminal → highlight text + auto-copy selection (`Clipboard` + Linux `Primary`)
-- `Ctrl+Shift+C` → copy current terminal selection
-- `Ctrl+V` / `Shift+Insert` → paste clipboard text into terminal; image clipboard → saved to temp file + path pasted
-- `Shift+PageUp` / `Shift+PageDown` → local terminal scrollback
-- `Shift+Home` / `Shift+End` → top/bottom of local terminal scrollback
+Identical to pi-harness:
 
-## Run
+- `:` → command line (`:open <dir>`, `:archive`, `:usage`, `:refresh`, `:reload`, `:q`)
+- `Ctrl+N` new session · `Ctrl+R` refresh idle session · `Ctrl+Shift+R` reload sessions
+- `Ctrl+Delete` archive session · archive viewer: `↑↓/jk` select, `Enter` restore, `r` reload, `q` close
+- `:usage` → usage totals by date/model · `r` reload
+- `Ctrl+Left/Right` prev/next project · `Ctrl+Up/Down` prev/next session
+- drag → select + auto-copy · `Ctrl+Shift+C` copy · `Ctrl+V` / `Shift+Insert` paste (image paste saves temp file)
+- `Shift+PageUp/PageDown`, `Shift+Home/End` local scrollback · `Ctrl+Q` quit
 
-```bash
-nix develop . --command cargo run --package pi-harness-tui --bin pi-harness -- /path/to/project
-# or
-nix run . -- /path/to/project
-# explicit alias binary:
-nix run .#pi-harness-tui -- /path/to/project
-```
+## Launch contract
 
-If no project path is passed, the app falls back to persisted projects, then current working directory.
+Harness spawns omp in a PTY with:
+
+- `-e <extension>` — the bundled companion extension (`omp-extension/index.js`)
+- `--session <file>` — resume when reopening a session
+
+`--tui-mode` was dropped: omp removed that flag upstream. The `tui_mode`
+config key no longer exists.
+
+Env forwarded into the PTY:
+
+| Variable | Purpose |
+| --- | --- |
+| `AGENT_HARNESS_OMP_SIDECAR_SOCKET` | unix socket path for the sidecar bridge |
+| `AGENT_HARNESS_OMP_SESSION_KEY` | harness-side session id |
+| `AGENT_HARNESS_OMP_ASCII` | render rail/chrome with ASCII glyphs |
+| `AGENT_HARNESS_SYMBOL_OVERRIDES` | JSON map of `rail.*` glyph overrides |
+
+## Session directory resolution
+
+Mirrors omp's own resolver so the sidebar sees live sessions:
+
+1. `$PI_CODING_AGENT_SESSION_DIR` (honored natively by omp)
+2. `$PI_CODING_AGENT_DIR/sessions`
+3. `$XDG_DATA_HOME/omp/sessions` once `$XDG_DATA_HOME/omp` exists
+4. `~/.omp/agent/sessions`
+
+Harness archives live in `ARCHIVE/` under the resolved sessions root;
+restores move files back to the encoded project directory.
+
+## Companion extension
+
+One extension, two halves sharing one store and one unix socket:
+
+- **sidechannel** — session snapshots up to the harness (name, run state,
+  context, usage), hello/digest lines down
+- **rail** — atelier-style right rail rendered through omp's supported
+  `ctx.ui.custom` overlay seam; docks a right column, takes over the footer,
+  exposes `/rail`, `/rail on`, `/rail off`; auto-hides below
+  rail-width + 64 columns
+
+Verified against omp's extension API: `pi.getAllTools/getActiveTools`,
+`pi.registerCommand`, `ctx.ui.custom/setStatus/theme`,
+`session_start`/`before_agent_start`/`agent_*`/`turn_*`/`tool_execution_*`/
+`message_update`/`session_shutdown` events, `getContextUsage`,
+`modelRegistry.isUsingOAuth`.
+
+Text primitives (`visibleWidth`, `truncateToWidth`) are self-contained in
+`pi-tui-shim.js` (backed by `Bun.stringWidth`). omp's legacy-pi compat bundle
+dropped the upstream exports (`HStack` first), and any static named import
+from it fails the whole extension at ESM link time. The pi-atelier-style
+fullscreen docking adapter was removed with them: omp dropped fullscreen mode.
+
+Outside the harness (no `AGENT_HARNESS_OMP_SIDECAR_SOCKET`) the sidechannel
+stays dormant and the rail renders fallback panels.
 
 ## Config
 
-`~/.config/pi-harness/config.json`
+`~/.config/omp-harness/config.json`
 
 ```json
 {
   "panel_width_percent": 22,
+  "right_rail_width": 32,
+  "ascii": false,
   "keybinds": {
     "project_prev": "ctrl+h",
-    "project_next": "ctrl+l",
-    "session_prev": "ctrl+k",
-    "session_next": "ctrl+j"
+    "project_next": "ctrl+l"
   }
 }
 ```
 
-- `panel_width_percent` sets **both** bars to the same share of the terminal (`5..=40`, default `22`), clamped to `24..=80` cells each, so the left sidebar and the in-Pi right rail always match
-- `sidebar_width` overrides the left sidebar with a fixed cell count (`8..=120`); on narrow terminals it is reduced to preserve the main Pi area
-- `right_rail_width` overrides the in-Pi right rail with a fixed PTY cell count (`24..=80`, `0` disables); the resolved width is sent to the companion extension over the sidecar socket and re-sent on resize
-- `tui_mode` – Pi TUI mode forwarded to pi as `--tui-mode` on launch (`"regular"`/missing = default and flag omitted, `"fullscreen"` = pi's experimental fullscreen viewport; unknown values ignored with a warning)
-- `ascii` – render the in-Pi rail (and harness chrome) with plain ASCII glyphs instead of Unicode (`true` opts in; unset/`false` = Unicode)
-- `symbols.overrides` – per-symbol rail glyph overrides keyed by canonical `"rail.*"` names (e.g. `"rail.ok": "OK"`); each value replaces that glyph on top of the Unicode/ASCII baseline, forwarded to pi over env
-- legacy `sidebar_width_percent` / `tui_sidebar_width_percent` still override `panel_width_percent` for the sidebar alone
-- `terminal_width_percent` is accepted for config compatibility but ignored; the Pi terminal fills the remaining main area
-- missing `keybinds.*` → built-in defaults
-- value shape = string or string array
-- multi-stroke chords are space-separated, e.g. `"ctrl+p n"`
-- key names use tokens like `left/right/up/down`, `delete`, `insert`, `equal`, `plus`, `minus`
+- `panel_width_percent` — both bars share one percentage (5..=40, default 22)
+- `sidebar_width` / `right_rail_width` — fixed cell-count overrides (rail 0 disables)
+- `ascii` + `symbols.overrides` (`"rail.ok": "OK"`) — glyph control
+- keybind names/strokes as in pi-harness; multi-stroke chords are space-separated
 
-## Notes
+## Development
 
-- Uses Pi session directory precedence: `PI_CODING_AGENT_SESSION_DIR`, then `${PI_CODING_AGENT_DIR:-~/.pi/agent}/sessions`
-- Stores harness archives in `ARCHIVE` under resolved Pi session directory
-- Launches Pi in a PTY
-- Injects the bundled companion extension (`pi-extension/index.js`) with `-e`: sidechannel session bridge + in-Pi right rail
-- Right rail renders inside each Pi PTY (agent state, run activity, usage, context, workspace, tool roster, cross-session digest) as a non-capturing top-right overlay; the rail docks (reserves a right column and reflows Pi content) in both regular and fullscreen mode; toggle inside Pi with `/rail`, `/rail on`, `/rail off`; auto-hides when the PTY is narrower than rail width + 64 cols
-- While the rail is visible it takes over Pi's footer: the footer renders zero lines and other extensions' `ctx.ui.setStatus` text moves into the rail's `EXT` panel; when the rail hides (narrow PTY, `/rail off`, broken wrap) Pi's own footer comes back
-- Harness owns rail policy: width + palette travel in a sticky `hello` line, cross-session summary in `digest` lines (harness → extension over the same socket); snapshots flow extension → harness unchanged
-- Compact tool rendering lives in separate `pi-compact`; sidecar remains session/status bridge
-- `TOOLS` panel lists the registered roster (`pi.getAllTools()`), `✓` for tools active in the prompt (`pi.getActiveTools()`), `·` for configured-but-inactive; packed into `ls`-style columns read top-to-bottom, capped at 8 rows plus `+n more`
-- Sidecar snapshots update session name/runtime state in the sidebar + statusline
-- Uses the host terminal grid/ANSI renderer, leaves harness chrome on the terminal's default theme, renders an unboxed main terminal with a Neo-tree style sidebar and dual bottom statusline/command row, uses inverse video for sidebar selection, renders sidebar/terminal scrollbars, supports mouse wheel + `Shift+PageUp/PageDown` scrolling, and exits with `Ctrl+Q`
+```bash
+nix develop . --command cargo check --workspace --all-targets
+nix develop . --command cargo test --workspace
+nix develop . --command cargo run -p omp-harness-tui --bin omp-harness -- /path/to/project
+```
+
+Extension tests: `nix build .#checks.x86_64-linux.omp-extension-tests`
+(node --test over `omp-extension/*.test.js`).
+
+## Run
+
+```bash
+nix run . -- /path/to/project
+# or explicit package:
+nix run .#omp-harness -- /path/to/project
+```
+
+If no project path is passed, the app falls back to persisted projects, then
+the current working directory.

@@ -2,7 +2,7 @@
 pub mod app;
 pub mod config;
 pub mod notify;
-pub mod pi;
+pub mod omp;
 #[path = "render/mod.rs"]
 pub mod render;
 pub mod sidecar;

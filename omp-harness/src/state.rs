@@ -73,7 +73,7 @@ mod tests {
     fn finished_unlinked_session_renders_in_sidebar() {
         let mut session = Session::new_draft();
         session.draft = false;
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
 
         assert!(session.should_render_in_sidebar());
     }
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn persisted_selection_key_prefers_pi_session_id_over_session_file() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         session.session_file = Some("/tmp/pi-session-1.jsonl".into());
 
         assert_eq!(
@@ -194,7 +194,7 @@ mod tests {
         });
 
         assert_eq!(session.name, "Imported");
-        assert_eq!(session.pi_session_id.as_deref(), Some("pi-session-1"));
+        assert_eq!(session.omp_session_id.as_deref(), Some("pi-session-1"));
         assert_eq!(
             session.session_file.as_deref(),
             Some(std::path::Path::new("/tmp/pi-session-1.jsonl"))
@@ -248,14 +248,14 @@ mod tests {
         });
 
         assert_eq!(session.name, "Pinned name");
-        assert_eq!(session.pi_session_id.as_deref(), Some("pi-session-1"));
+        assert_eq!(session.omp_session_id.as_deref(), Some("pi-session-1"));
         assert!(!session.draft);
     }
 
     #[test]
     fn matches_identity_accepts_any_supported_identifier() {
         let mut session = Session::new_draft();
-        session.pi_session_id = Some("pi-session-1".into());
+        session.omp_session_id = Some("pi-session-1".into());
         session.session_file = Some("/tmp/pi-session-1.jsonl".into());
 
         assert!(session.matches_identity(Some(&session.local_id), "other", None));
@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn merge_scanned_sessions_updates_matching_session_without_dropping_runtime() {
         let mut existing = Session::new_draft();
-        existing.pi_session_id = Some("pi-session-1".into());
+        existing.omp_session_id = Some("pi-session-1".into());
         existing.session_file = Some("/tmp/session.jsonl".into());
         existing.runtime.running = true;
         existing.updated_at_ms = 500;
@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn merge_scanned_sessions_dedupes_duplicate_scan_entries() {
         let mut existing = Session::new_draft();
-        existing.pi_session_id = Some("pi-session-1".into());
+        existing.omp_session_id = Some("pi-session-1".into());
         existing.session_file = Some("/tmp/session.jsonl".into());
         existing.runtime.running = true;
         existing.updated_at_ms = 50;
@@ -363,7 +363,7 @@ mod tests {
         );
 
         assert_eq!(current.len(), 1);
-        assert_eq!(current[0].pi_session_id.as_deref(), Some("pi-session-1"));
+        assert_eq!(current[0].omp_session_id.as_deref(), Some("pi-session-1"));
         assert_eq!(current[0].updated_at_ms, 800);
         assert!(current[0].runtime.running);
     }
@@ -384,7 +384,7 @@ mod tests {
 
         let mut stale = Session::new_draft();
         stale.draft = false;
-        stale.pi_session_id = Some("pi-session-stale".into());
+        stale.omp_session_id = Some("pi-session-stale".into());
         stale.name = "stale".into();
 
         let mut current = vec![draft.clone(), running.clone(), queued.clone(), stale];
@@ -408,7 +408,7 @@ mod tests {
         let mut finished = Session::new_draft();
         finished.draft = false;
         finished.name = "finished".into();
-        finished.pi_session_id = Some("pi-session-1".into());
+        finished.omp_session_id = Some("pi-session-1".into());
         finished.session_file = Some("/tmp/pi-session-1.jsonl".into());
         finished.runtime.last_sidecar_ts_ms = 123;
 

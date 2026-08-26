@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::backend::ChromeView;
-use crate::pi::{PiSessionStage, PiSidecarSnapshot};
+use crate::omp::{PiSessionStage, PiSidecarSnapshot};
 use crate::state::Session;
 
 use super::{

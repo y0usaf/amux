@@ -46,19 +46,19 @@ fn normalize_lexical_path(path: &Path) -> PathBuf {
 }
 
 pub fn app_config_dir() -> PathBuf {
-    xdg_config_home().join("pi-harness")
+    xdg_config_home().join("omp-harness")
 }
 
 pub fn app_state_dir() -> PathBuf {
-    xdg_state_home().join("pi-harness")
+    xdg_state_home().join("omp-harness")
 }
 
 pub fn app_runtime_dir() -> PathBuf {
     if let Some(runtime_dir) = env::var_os("XDG_RUNTIME_DIR") {
-        return PathBuf::from(runtime_dir).join("pi-harness");
+        return PathBuf::from(runtime_dir).join("omp-harness");
     }
 
-    xdg_state_home().join("pi-harness").join("runtime")
+    xdg_state_home().join("omp-harness").join("runtime")
 }
 
 fn xdg_config_home() -> PathBuf {
@@ -172,15 +172,15 @@ mod tests {
     fn app_dirs_prefer_xdg_variables_and_runtime_falls_back_to_state() {
         let _lock = test_support::env_lock();
         with_env_var_set("XDG_CONFIG_HOME", "/tmp/pi-config", || {
-            assert_eq!(app_config_dir(), PathBuf::from("/tmp/pi-config/pi-harness"));
+            assert_eq!(app_config_dir(), PathBuf::from("/tmp/pi-config/omp-harness"));
         });
 
         with_env_var_set("XDG_STATE_HOME", "/tmp/pi-state", || {
-            assert_eq!(app_state_dir(), PathBuf::from("/tmp/pi-state/pi-harness"));
+            assert_eq!(app_state_dir(), PathBuf::from("/tmp/pi-state/omp-harness"));
             with_env_var_removed("XDG_RUNTIME_DIR", || {
                 assert_eq!(
                     app_runtime_dir(),
-                    PathBuf::from("/tmp/pi-state/pi-harness/runtime")
+                    PathBuf::from("/tmp/pi-state/omp-harness/runtime")
                 );
             });
         });
@@ -192,7 +192,7 @@ mod tests {
         with_env_var_set("XDG_RUNTIME_DIR", "/tmp/pi-runtime", || {
             assert_eq!(
                 app_runtime_dir(),
-                PathBuf::from("/tmp/pi-runtime/pi-harness")
+                PathBuf::from("/tmp/pi-runtime/omp-harness")
             );
         });
     }
@@ -204,7 +204,7 @@ mod tests {
             with_env_var_set("XDG_RUNTIME_DIR", "/tmp/pi-runtime", || {
                 assert_eq!(
                     app_runtime_dir(),
-                    PathBuf::from("/tmp/pi-runtime/pi-harness")
+                    PathBuf::from("/tmp/pi-runtime/omp-harness")
                 );
             });
         });
