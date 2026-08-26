@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
+[workspace]
+members = ["crates/pi-harness-tui"]
 
 [dependencies]
-cordis = { path = "../../cordis-rs/crates/cordis" }
+cordis = { path = "../cordis-rs/crates/cordis" }
 arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

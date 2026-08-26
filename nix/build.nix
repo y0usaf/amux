@@ -2,11 +2,11 @@
 let
   src = lib.fileset.toSource {
     inherit root;
-    fileset = lib.fileset.unions [ (root + "/src") (root + "/crates") (root + "/build.rs") (root + "/config.wat") (root + "/Cargo.toml") (root + "/Cargo.lock") (root + "/pi-extension") (root + "/omp-extension") ];
+    fileset = lib.fileset.unions [ (root + "/src") (root + "/crates") (root + "/build.rs") (root + "/config.wat") (root + "/Cargo.toml") (root + "/Cargo.lock") (lib.fileset.maybeMissing (root + "/pi-extension")) (lib.fileset.maybeMissing (root + "/omp-extension")) ];
   };
   common = {
     inherit pname src;
-    version = (builtins.fromTOML (builtins.readFile (root + "/Cargo.toml")).package.version);
+    version = (builtins.fromTOML (builtins.readFile (root + "/Cargo.toml"))).package.version;
     cargoExtraArgs = "--package ${cargoPackage} --bin ${binaryName}";
     cargoLock = root + "/Cargo.lock";
     preConfigure = ''ln -s ${cordisRs} "$PWD/../cordis-rs"'';
