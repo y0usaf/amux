@@ -120,7 +120,8 @@ pub fn extension_path() -> Option<PathBuf> {
         }
     }
 
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEV_EXTENSION_REL);
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../adapters/omp/extension");
     dev.exists().then_some(dev)
 }
 

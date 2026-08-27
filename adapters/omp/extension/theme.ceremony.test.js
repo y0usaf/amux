@@ -182,3 +182,39 @@ test("SP-Temporal ceremony: mount -> theme line -> exhaust -> detach -> re-mount
 		fs.rmSync(SOCKET_PATH, { force: true })
 	}
 })
+
+test("lifecycle snapshots mark a submitted OMP session active", async () => {
+	process.env.AGENT_HARNESS_OMP_SIDECAR_SOCKET = SOCKET_PATH
+	try {
+		fs.rmSync(SOCKET_PATH, { force: true })
+		const { createStore } = await import("./store.js")
+		const { registerSidechannel } = await import("./sidechannel.js")
+		const { server, connections, allLines } = await startServer()
+		const pi = makePi()
+		const store = createStore()
+		registerSidechannel(pi, store)
+		let idle = true
+		const ctx = {
+			...makeCtx(makeTheme(), "omp-session-1"),
+			isIdle: () => idle,
+		}
+
+		await pi.emit("session_start", {}, ctx)
+		idle = false
+		await pi.emit("before_agent_start", { prompt: "run the task" }, ctx)
+		await waitFor(() => allLines.flat().some((line) => {
+			try {
+				const snapshot = JSON.parse(line)
+				return snapshot.type === "snapshot" && snapshot.sessionId === "omp-session-1" && snapshot.stage === "thinking"
+			} catch {
+				return false
+			}
+		}))
+		assert.equal(store.state.stage, "thinking")
+		for (const connection of connections) connection.socket.destroy()
+		await new Promise((resolve) => server.close(resolve))
+	} finally {
+		delete process.env.AGENT_HARNESS_OMP_SIDECAR_SOCKET
+		fs.rmSync(SOCKET_PATH, { force: true })
+	}
+})
