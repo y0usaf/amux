@@ -88,16 +88,14 @@ Mirrors omp's own resolver so the sidebar sees live sessions:
 Harness archives live in `ARCHIVE/` under the resolved sessions root;
 restores move files back to the encoded project directory.
 
-## Companion extension
-
-One extension, two halves sharing one store and one unix socket:
+The companion extension provides the sidechannel and activity bridge. Omp does
+not load the Pi-only right rail extension, so the harness terminal remains the
+sole owner of omp's layout and input path.
 
 - **sidechannel** — session snapshots up to the harness (name, run state,
   context, usage), hello/digest lines down
-- **rail** — atelier-style right rail rendered through omp's supported
-  `ctx.ui.custom` overlay seam; docks a right column, takes over the footer,
-  exposes `/rail`, `/rail on`, `/rail off`; auto-hides below
-  rail-width + 64 columns
+
+The Pi-only right rail is intentionally not loaded by omp.
 
 Verified against omp's extension API: `pi.getAllTools/getActiveTools`,
 `pi.registerCommand`, `ctx.ui.custom/setStatus/theme`,

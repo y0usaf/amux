@@ -15,4 +15,9 @@ in crane.buildPackage {
   buildInputs = [ wayland ];
   cargoVendorDir = crane.vendorCargoDeps { inherit src; cargoLock = ../Cargo.lock; };
   dontPatchELF = true;
+  postInstall = lib.optionalString (cargoPackage == "omp-harness-tui") ''
+    mkdir -p $out/share/omp-harness
+    cp -r ${../adapters/omp/extension} $out/share/omp-harness/omp-extension
+    chmod -R u+w $out/share/omp-harness/omp-extension
+  '';
 }
