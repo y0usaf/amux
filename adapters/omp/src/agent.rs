@@ -1,12 +1,12 @@
-#[path = "omp/discovery.rs"]
+#[path = "agent/discovery.rs"]
 mod discovery;
-#[path = "omp/files.rs"]
+#[path = "agent/files.rs"]
 mod files;
-#[path = "omp/scan.rs"]
+#[path = "agent/scan.rs"]
 mod scan;
-#[path = "omp/types.rs"]
+#[path = "agent/types.rs"]
 mod types;
-#[path = "omp/usage.rs"]
+#[path = "agent/usage.rs"]
 mod usage;
 
 pub use crate::state::ScannedSession;

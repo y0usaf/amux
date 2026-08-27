@@ -1,12 +1,12 @@
-#[path = "pi/discovery.rs"]
+#[path = "agent/discovery.rs"]
 mod discovery;
-#[path = "pi/files.rs"]
+#[path = "agent/files.rs"]
 mod files;
-#[path = "pi/scan.rs"]
+#[path = "agent/scan.rs"]
 mod scan;
-#[path = "pi/types.rs"]
+#[path = "agent/types.rs"]
 mod types;
-#[path = "pi/usage.rs"]
+#[path = "agent/usage.rs"]
 mod usage;
 
 pub use crate::state::ScannedSession;
@@ -26,3 +26,6 @@ pub use usage::{
 pub const PI_SIDECAR_SOCKET_ENV: &str = "AGENT_HARNESS_PI_SIDECAR_SOCKET";
 pub const PI_SIDECAR_SESSION_KEY_ENV: &str = "AGENT_HARNESS_PI_SESSION_KEY";
 pub const PI_EXTENSION_PATH_ENV: &str = "AGENT_HARNESS_PI_EXTENSION";
+
+pub const OMP_SIDECAR_SOCKET_ENV: &str = PI_SIDECAR_SOCKET_ENV;
+pub const OMP_SIDECAR_SESSION_KEY_ENV: &str = PI_SIDECAR_SESSION_KEY_ENV;

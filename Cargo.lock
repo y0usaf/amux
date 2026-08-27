@@ -18,6 +18,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "aho-corasick"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -500,6 +509,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_filter"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "900d271a03799a1ee8d1ca9b19893b48ca674a9284fefcfb85f05e74ed314217"
+dependencies = [
+ "log",
+ "regex",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.11.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de671bd27a75a797dc9ae289ba1e77276e75e2026408aab65185384e2d5cd3f6"
+dependencies = [
+ "env_filter",
+ "log",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -740,6 +769,26 @@ dependencies = [
  "cfg-if",
  "crunchy",
  "zerocopy",
+]
+
+[[package]]
+name = "harness-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "chrono",
+ "cordis",
+ "image",
+ "libc",
+ "log",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "unicode-width",
+ "uuid",
+ "vt100",
+ "wat",
 ]
 
 [[package]]
@@ -1100,20 +1149,17 @@ dependencies = [
 name = "omp-harness"
 version = "0.1.0"
 dependencies = [
+ "harness-core",
+]
+
+[[package]]
+name = "omp-harness-tui"
+version = "0.1.0"
+dependencies = [
  "anyhow",
- "arboard",
- "chrono",
- "cordis",
- "image",
- "libc",
+ "env_logger",
+ "harness-core",
  "log",
- "portable-pty",
- "serde",
- "serde_json",
- "unicode-width",
- "uuid",
- "vt100",
- "wat",
 ]
 
 [[package]]
@@ -1186,20 +1232,17 @@ dependencies = [
 name = "pi-harness"
 version = "0.1.0"
 dependencies = [
+ "harness-core",
+]
+
+[[package]]
+name = "pi-harness-tui"
+version = "0.1.0"
+dependencies = [
  "anyhow",
- "arboard",
- "chrono",
- "cordis",
- "image",
- "libc",
+ "env_logger",
+ "harness-core",
  "log",
- "portable-pty",
- "serde",
- "serde_json",
- "unicode-width",
- "uuid",
- "vt100",
- "wat",
 ]
 
 [[package]]
@@ -1382,6 +1425,35 @@ dependencies = [
  "serde",
  "smallvec",
 ]
+
+[[package]]
+name = "regex"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
+name = "regex-automata"
+version = "0.4.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-syntax",
+]
+
+[[package]]
+name = "regex-syntax"
+version = "0.8.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rustc-demangle"

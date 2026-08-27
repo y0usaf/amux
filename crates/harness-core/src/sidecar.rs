@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 
 use crate::notify::Notify;
-use crate::pi::PiSidecarSnapshot;
+use crate::agent::PiSidecarSnapshot;
 use stream::read_sidecar_stream;
 
 #[derive(Debug)]

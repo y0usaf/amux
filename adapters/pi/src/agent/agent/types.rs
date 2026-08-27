@@ -4,14 +4,14 @@ use serde::Deserialize;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum PiSessionStage {
+pub enum AgentSessionStage {
     Idle,
     Thinking,
     Outputting,
     Tool,
 }
 
-impl PiSessionStage {
+impl AgentSessionStage {
     pub fn as_runtime_status(self) -> Option<&'static str> {
         match self {
             Self::Idle => None,
@@ -28,7 +28,7 @@ impl PiSessionStage {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PiSidecarSnapshot {
+pub struct AgentSidecarSnapshot {
     #[serde(default, rename = "type")]
     pub kind: Option<String>,
     pub session_id: String,
@@ -38,7 +38,7 @@ pub struct PiSidecarSnapshot {
     pub session_file: Option<PathBuf>,
     #[serde(default)]
     pub session_name: Option<String>,
-    pub stage: PiSessionStage,
+    pub stage: AgentSessionStage,
     #[serde(default)]
     pub queued: bool,
     #[serde(default)]
@@ -49,7 +49,7 @@ pub struct PiSidecarSnapshot {
     pub ts_ms: u64,
 }
 
-impl PiSidecarSnapshot {
+impl AgentSidecarSnapshot {
     pub fn is_valid(&self) -> bool {
         self.kind.as_deref().is_none_or(|kind| kind == "snapshot") && !self.session_id.is_empty()
     }
@@ -61,31 +61,31 @@ mod tests {
 
     #[test]
     fn session_stage_reports_runtime_status_and_activity() {
-        assert_eq!(PiSessionStage::Idle.as_runtime_status(), None);
+        assert_eq!(AgentSessionStage::Idle.as_runtime_status(), None);
         assert_eq!(
-            PiSessionStage::Thinking.as_runtime_status(),
+            AgentSessionStage::Thinking.as_runtime_status(),
             Some("thinking")
         );
         assert_eq!(
-            PiSessionStage::Outputting.as_runtime_status(),
+            AgentSessionStage::Outputting.as_runtime_status(),
             Some("outputting")
         );
-        assert_eq!(PiSessionStage::Tool.as_runtime_status(), Some("tool"));
-        assert!(!PiSessionStage::Idle.is_active());
-        assert!(PiSessionStage::Thinking.is_active());
-        assert!(PiSessionStage::Outputting.is_active());
-        assert!(PiSessionStage::Tool.is_active());
+        assert_eq!(AgentSessionStage::Tool.as_runtime_status(), Some("tool"));
+        assert!(!AgentSessionStage::Idle.is_active());
+        assert!(AgentSessionStage::Thinking.is_active());
+        assert!(AgentSessionStage::Outputting.is_active());
+        assert!(AgentSessionStage::Tool.is_active());
     }
 
     #[test]
     fn sidecar_snapshot_validation_accepts_missing_or_snapshot_kind_only() {
-        let base = PiSidecarSnapshot {
+        let base = AgentSidecarSnapshot {
             kind: None,
             session_id: "session-1".into(),
             harness_session_id: None,
             session_file: None,
             session_name: None,
-            stage: PiSessionStage::Idle,
+            stage: AgentSessionStage::Idle,
             queued: false,
             interrupted: false,
             tool_name: None,
@@ -93,19 +93,19 @@ mod tests {
         };
         assert!(base.is_valid());
 
-        let with_snapshot_kind = PiSidecarSnapshot {
+        let with_snapshot_kind = AgentSidecarSnapshot {
             kind: Some("snapshot".into()),
             ..base.clone()
         };
         assert!(with_snapshot_kind.is_valid());
 
-        let with_other_kind = PiSidecarSnapshot {
+        let with_other_kind = AgentSidecarSnapshot {
             kind: Some("other".into()),
             ..base.clone()
         };
         assert!(!with_other_kind.is_valid());
 
-        let with_empty_session = PiSidecarSnapshot {
+        let with_empty_session = AgentSidecarSnapshot {
             session_id: String::new(),
             ..base
         };

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
-use crate::omp::OMP_EXTENSION_PATH_ENV;
+use crate::agent::OMP_EXTENSION_PATH_ENV;
 
 pub const PACKAGED_EXTENSION_REL: &str = "share/omp-harness/omp-extension/index.js";
 pub const DEV_EXTENSION_REL: &str = "omp-extension/index.js";

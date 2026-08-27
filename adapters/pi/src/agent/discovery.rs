@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
-use crate::pi::PI_EXTENSION_PATH_ENV;
+use crate::agent::PI_EXTENSION_PATH_ENV;
 
 pub const PACKAGED_EXTENSION_REL: &str = "share/pi-harness/pi-extension/index.js";
 pub const DEV_EXTENSION_REL: &str = "pi-extension/index.js";

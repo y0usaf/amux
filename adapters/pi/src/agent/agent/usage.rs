@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::files::sessions_root;
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct PiUsageTotals {
+pub struct AgentUsageTotals {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
@@ -19,7 +19,7 @@ pub struct PiUsageTotals {
     pub total_cost: f64,
 }
 
-impl PiUsageTotals {
+impl AgentUsageTotals {
     pub fn total_tokens(&self) -> u64 {
         self.input_tokens
             .saturating_add(self.output_tokens)
@@ -41,23 +41,23 @@ impl PiUsageTotals {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct PiUsageModelBreakdown {
+pub struct AgentUsageModelBreakdown {
     pub model_name: String,
-    pub totals: PiUsageTotals,
+    pub totals: AgentUsageTotals,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct PiUsageDay {
+pub struct AgentUsageDay {
     pub date: String,
-    pub totals: PiUsageTotals,
+    pub totals: AgentUsageTotals,
     pub models_used: Vec<String>,
-    pub model_breakdowns: Vec<PiUsageModelBreakdown>,
+    pub model_breakdowns: Vec<AgentUsageModelBreakdown>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct PiUsageReport {
-    pub days: Vec<PiUsageDay>,
-    pub totals: PiUsageTotals,
+pub struct AgentUsageReport {
+    pub days: Vec<AgentUsageDay>,
+    pub totals: AgentUsageTotals,
     pub files_scanned: usize,
     pub entries: usize,
     pub skipped_duplicates: usize,
@@ -68,7 +68,7 @@ struct UsageEntry {
     timestamp_ms: i64,
     date: String,
     model: Option<String>,
-    totals: PiUsageTotals,
+    totals: AgentUsageTotals,
     total_tokens_for_dedupe: u64,
 }
 
@@ -92,29 +92,29 @@ fn usage_entries_cache() -> &'static Mutex<HashMap<PathBuf, CachedUsageEntries>>
 
 #[derive(Default)]
 struct DayAccumulator {
-    totals: PiUsageTotals,
-    models: BTreeMap<String, PiUsageTotals>,
+    totals: AgentUsageTotals,
+    models: BTreeMap<String, AgentUsageTotals>,
 }
 
-pub fn load_usage_report() -> PiUsageReport {
+pub fn load_usage_report() -> AgentUsageReport {
     let Some(path) = default_usage_path() else {
-        return PiUsageReport::default();
+        return AgentUsageReport::default();
     };
     load_usage_report_from_path(&path)
 }
 
-pub fn load_usage_report_from_path(path: &Path) -> PiUsageReport {
+pub fn load_usage_report_from_path(path: &Path) -> AgentUsageReport {
     if !path.is_dir() {
-        return PiUsageReport::default();
+        return AgentUsageReport::default();
     }
 
     let mut files = Vec::new();
     collect_jsonl_files(path, &mut files);
     files.sort();
 
-    let mut report = PiUsageReport {
+    let mut report = AgentUsageReport {
         files_scanned: files.len(),
-        ..PiUsageReport::default()
+        ..AgentUsageReport::default()
     };
     let mut processed_hashes = HashSet::new();
     let mut by_day = BTreeMap::<String, DayAccumulator>::new();
@@ -143,13 +143,13 @@ pub fn load_usage_report_from_path(path: &Path) -> PiUsageReport {
             let model_breakdowns = day
                 .models
                 .into_iter()
-                .map(|(model_name, totals)| PiUsageModelBreakdown { model_name, totals })
+                .map(|(model_name, totals)| AgentUsageModelBreakdown { model_name, totals })
                 .collect::<Vec<_>>();
             let models_used = model_breakdowns
                 .iter()
                 .map(|breakdown| breakdown.model_name.clone())
                 .collect();
-            PiUsageDay {
+            AgentUsageDay {
                 date,
                 totals: day.totals,
                 models_used,
@@ -301,7 +301,7 @@ fn usage_entry_from_value_in_timezone<Tz: TimeZone>(
         timestamp_ms: date_time.timestamp_millis(),
         date,
         model,
-        totals: PiUsageTotals {
+        totals: AgentUsageTotals {
             input_tokens,
             output_tokens,
             cache_creation_tokens,
@@ -338,7 +338,7 @@ mod tests {
     impl TestDir {
         fn new() -> Self {
             let unique = format!(
-                "pi-harness-usage-tests-{}-{}",
+                "amux-usage-tests-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)

@@ -1,3 +1,4 @@
 [workspace]
-members = ["pi-harness", "omp-harness"]
+members = ["crates/harness-core", "pi-harness", "omp-harness", "pi-harness/crates/pi-harness-tui", "omp-harness/crates/omp-harness-tui"]
+exclude = ["cordis-rs"]
 resolver = "2"

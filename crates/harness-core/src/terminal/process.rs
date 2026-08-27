@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 
 use crate::notify::Notify;
-use crate::pi;
+use crate::agent;
 
 const READ_BUFFER_SIZE: usize = 8 * 1024;
 
@@ -119,11 +119,12 @@ pub(crate) fn spawn_process(
         args.push("--session".to_string());
         args.push(session_file.display().to_string());
     }
+    #[cfg(not(feature = "omp"))]
     if let Some(tui_mode) = &target.tui_mode {
         args.push("--tui-mode".to_string());
         args.push(tui_mode.clone());
     }
-    let argv = pi::launch_argv(target.pi_binary.as_deref(), &args)?;
+    let argv = agent::launch_argv(target.pi_binary.as_deref(), &args)?;
 
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -144,10 +145,10 @@ pub(crate) fn spawn_process(
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env(
-        pi::PI_SIDECAR_SOCKET_ENV,
+        agent::OMP_SIDECAR_SOCKET_ENV,
         target.sidecar_socket_path.display().to_string(),
     );
-    cmd.env(pi::PI_SIDECAR_SESSION_KEY_ENV, &target.harness_session_id);
+    cmd.env(agent::OMP_SIDECAR_SESSION_KEY_ENV, &target.harness_session_id);
 
     if target.ascii {
         cmd.env("AGENT_HARNESS_PI_ASCII", "1");

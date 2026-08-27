@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::pi;
+use crate::agent;
 use crate::state::{
     default_state_path, merge_scanned_sessions, PersistedProject, PersistedSession, PersistedState,
     Project, Session,
@@ -158,7 +158,7 @@ impl Workspace {
                 .unwrap_or_else(|| Project::new(path.clone()));
             project.path = path.clone();
             project.name = project_name_from_path(&path);
-            merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&path));
+            merge_scanned_sessions(&mut project.sessions, agent::scan_live_sessions(&path));
             project.sort_sessions();
             next_projects.push(project);
         }
@@ -257,7 +257,7 @@ impl Workspace {
         }
 
         let mut project = Project::new(path.clone());
-        merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&path));
+        merge_scanned_sessions(&mut project.sessions, agent::scan_live_sessions(&path));
         project.sort_sessions();
         self.projects.push(project);
         self.selected_project = self.projects.len().saturating_sub(1);
@@ -285,7 +285,7 @@ impl Workspace {
             .map(|session| session.selection_key());
 
         if let Some(project) = self.projects.get_mut(project_index) {
-            merge_scanned_sessions(&mut project.sessions, pi::scan_live_sessions(&project_path));
+            merge_scanned_sessions(&mut project.sessions, agent::scan_live_sessions(&project_path));
             project.sort_sessions();
         }
 
