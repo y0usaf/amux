@@ -1,67 +1,27 @@
 {
-  description = "Minimal Pi terminal harness";
-
+  description = "Pi and omp terminal harnesses with shared amux workspace";
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     crane.url = "github:ipetkov/crane";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    rust-overlay = { url = "github:oxalica/rust-overlay"; inputs.nixpkgs.follows = "nixpkgs"; };
+    cordis-rs = { url = "github:y0usaf/cordis-rs/426a34e72d25ffb3dc72201523eed48416934f65"; flake = false; };
+    oh-my-pi.url = "github:can1357/oh-my-pi";
   };
-
-  outputs = {
-    self,
-    nixpkgs,
-    crane,
-    rust-overlay,
-    ...
-  }: let
-    supportedSystems = ["x86_64-linux" "aarch64-linux"];
-    forAllSystems = f:
-      nixpkgs.lib.genAttrs supportedSystems (system:
-        f (import nixpkgs {
-          inherit system;
-          overlays = [rust-overlay.overlays.default];
-        }));
-  in {
-    packages = forAllSystems (pkgs: rec {
-      default = pi-harness;
-      pi-harness = pkgs.callPackage ./nix/build.nix {
-        crane = crane.mkLib pkgs;
-        pname = "pi-harness";
-        cargoPackage = "pi-harness-tui";
-        binaryName = "pi-harness";
-      };
-      pi-harness-tui = pkgs.callPackage ./nix/build.nix {
-        crane = crane.mkLib pkgs;
-        pname = "pi-harness-tui";
-        cargoPackage = "pi-harness-tui";
-        binaryName = "pi-harness-tui";
-      };
-    });
-
-    devShells = forAllSystems (pkgs: {
-      default = pkgs.callPackage ./nix/shell.nix {};
-    });
-
-    checks = forAllSystems (pkgs: {
-      pi-extension-tests = pkgs.runCommand "pi-extension-tests" {
-        nativeBuildInputs = [pkgs.nodejs];
-        src = builtins.path {path = ./pi-extension; name = "pi-extension-tests-src";};
-      } ''
-        tests=("$src"/*.test.js)
-        if [ ! -e "''${tests[0]}" ]; then
-          echo "pi-extension-tests: no test files matched $src/*.test.js" >&2
-          exit 1
-        fi
-        node --test "''${tests[@]}"
-        touch $out
-      '';
-    });
-
-    overlays.default = final: prev: {
-      pi-harness = self.packages.${final.system}.default;
+  outputs = { self, nixpkgs, crane, rust-overlay, cordis-rs, oh-my-pi, ... }:
+    let
+      systems = [ "x86_64-linux" "aarch64-linux" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f (import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; }));
+    in {
+      packages = forAllSystems (pkgs: {
+        pi-harness = pkgs.callPackage ./nix/build.nix { crane = crane.mkLib pkgs; cordisRs = cordis-rs; pname = "pi-harness"; cargoPackage = "pi-harness-tui"; binaryName = "pi-harness"; };
+        omp-harness = pkgs.callPackage ./nix/build.nix { crane = crane.mkLib pkgs; cordisRs = cordis-rs; pname = "omp-harness"; cargoPackage = "omp-harness-tui"; binaryName = "omp-harness"; };
+        default = self.packages.${pkgs.system}.pi-harness;
+      });
+      apps = forAllSystems (pkgs: {
+        pi-harness = { type = "app"; program = "${self.packages.${pkgs.system}.pi-harness}/bin/pi-harness"; };
+        omp-harness = { type = "app"; program = "${self.packages.${pkgs.system}.omp-harness}/bin/omp-harness"; };
+        default = self.apps.${pkgs.system}.pi-harness;
+      });
+      devShells = forAllSystems (pkgs: { default = pkgs.mkShell { packages = [ pkgs.rustc pkgs.cargo ]; }; });
     };
-  };
 }

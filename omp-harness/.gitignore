@@ -1,0 +1,7 @@
+target/
+result
+ref/
+@ref/
+
+docs/demo/*.gif
+docs/demo/*.webm
