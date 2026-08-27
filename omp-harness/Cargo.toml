@@ -4,23 +4,5 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
-[workspace]
-members = ["crates/omp-harness-tui"]
-
 [dependencies]
-cordis = { path = "../cordis-rs/crates/cordis" }
-arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
-anyhow = "1"
-chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
-log = "0.4"
-libc = "0.2"
-portable-pty = "0.9"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-unicode-width = "0.2"
-uuid = { version = "1", default-features = false, features = ["v4"] }
-vt100 = "0.16"
-
-[build-dependencies]
-wat = "1"
+harness-core = { path = "../crates/harness-core" }

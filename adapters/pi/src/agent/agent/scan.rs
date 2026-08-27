@@ -508,7 +508,7 @@ fn parse_rfc3339_ms(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pi::files::{PI_AGENT_DIR_ENV, PI_SESSION_DIR_ENV};
+    use crate::agent::files::{AGENT_AGENT_DIR_ENV, AGENT_SESSION_DIR_ENV};
     use crate::test_support;
     use std::ffi::OsString;
     use std::fs;
@@ -527,8 +527,8 @@ mod tests {
             let keys = [
                 "HOME",
                 "XDG_STATE_HOME",
-                PI_AGENT_DIR_ENV,
-                PI_SESSION_DIR_ENV,
+                AGENT_AGENT_DIR_ENV,
+                AGENT_SESSION_DIR_ENV,
             ];
             let old = keys
                 .into_iter()
@@ -536,8 +536,8 @@ mod tests {
                 .collect();
             std::env::set_var("HOME", value);
             std::env::remove_var("XDG_STATE_HOME");
-            std::env::remove_var(PI_AGENT_DIR_ENV);
-            std::env::remove_var(PI_SESSION_DIR_ENV);
+            std::env::remove_var(AGENT_AGENT_DIR_ENV);
+            std::env::remove_var(AGENT_SESSION_DIR_ENV);
             Self { _lock: lock, old }
         }
     }
@@ -558,7 +558,7 @@ mod tests {
     impl TestDir {
         fn new() -> Self {
             let unique = format!(
-                "pi-harness-scan-tests-{}-{}",
+                "amux-scan-tests-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)

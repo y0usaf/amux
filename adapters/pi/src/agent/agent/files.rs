@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use crate::util::{app_runtime_dir, normalize_project_path};
 
-pub(crate) const PI_AGENT_DIR_ENV: &str = "PI_CODING_AGENT_DIR";
-pub(crate) const PI_SESSION_DIR_ENV: &str = "PI_CODING_AGENT_SESSION_DIR";
+pub(crate) const AGENT_AGENT_DIR_ENV: &str = "AGENT_CODING_AGENT_DIR";
+pub(crate) const AGENT_SESSION_DIR_ENV: &str = "AGENT_CODING_AGENT_SESSION_DIR";
 pub(crate) const DEFAULT_AGENT_DIR_REL: &str = ".pi/agent";
 pub(crate) const SESSIONS_DIR_NAME: &str = "sessions";
 pub(crate) const ARCHIVE_DIR_NAME: &str = "ARCHIVE";
@@ -12,7 +12,7 @@ pub fn socket_path() -> PathBuf {
     app_runtime_dir().join(format!("pi-sidecar-{}.sock", std::process::id()))
 }
 
-pub fn is_pi_session_path(path: &Path) -> bool {
+pub fn is_agent_session_path(path: &Path) -> bool {
     sessions_root().is_some_and(|root| path.starts_with(root))
 }
 
@@ -49,11 +49,11 @@ pub(crate) fn sessions_root() -> Option<PathBuf> {
 }
 
 fn agent_dir() -> Option<PathBuf> {
-    env_path(PI_AGENT_DIR_ENV).or_else(|| Some(home_dir()?.join(DEFAULT_AGENT_DIR_REL)))
+    env_path(AGENT_AGENT_DIR_ENV).or_else(|| Some(home_dir()?.join(DEFAULT_AGENT_DIR_REL)))
 }
 
 fn configured_session_dir() -> Option<PathBuf> {
-    env_path(PI_SESSION_DIR_ENV)
+    env_path(AGENT_SESSION_DIR_ENV)
 }
 
 pub(super) fn archive_dir() -> Option<PathBuf> {
@@ -190,7 +190,7 @@ mod tests {
 
         fn set_paths(home: &Path, agent_dir: Option<&Path>, session_dir: Option<&Path>) -> Self {
             let lock = test_support::env_lock();
-            let keys = ["HOME", PI_AGENT_DIR_ENV, PI_SESSION_DIR_ENV];
+            let keys = ["HOME", AGENT_AGENT_DIR_ENV, AGENT_SESSION_DIR_ENV];
             let old = keys
                 .into_iter()
                 .map(|key| (key, std::env::var_os(key)))
@@ -198,12 +198,12 @@ mod tests {
 
             std::env::set_var("HOME", home);
             match agent_dir {
-                Some(value) => std::env::set_var(PI_AGENT_DIR_ENV, value),
-                None => std::env::remove_var(PI_AGENT_DIR_ENV),
+                Some(value) => std::env::set_var(AGENT_AGENT_DIR_ENV, value),
+                None => std::env::remove_var(AGENT_AGENT_DIR_ENV),
             }
             match session_dir {
-                Some(value) => std::env::set_var(PI_SESSION_DIR_ENV, value),
-                None => std::env::remove_var(PI_SESSION_DIR_ENV),
+                Some(value) => std::env::set_var(AGENT_SESSION_DIR_ENV, value),
+                None => std::env::remove_var(AGENT_SESSION_DIR_ENV),
             }
 
             Self { _lock: lock, old }
@@ -226,7 +226,7 @@ mod tests {
     impl TestDir {
         fn new() -> Self {
             let unique = format!(
-                "pi-harness-files-tests-{}-{}",
+                "amux-files-tests-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -317,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn is_pi_session_path_matches_only_under_pi_root() {
+    fn is_agent_session_path_matches_only_under_pi_root() {
         let home = TestDir::new();
         let _guard = EnvGuard::default_paths(home.path());
         let inside = home
@@ -327,8 +327,8 @@ mod tests {
             .join("--work-tree--/a.jsonl");
         let outside = home.path().join("elsewhere/a.jsonl");
 
-        assert!(is_pi_session_path(&inside));
-        assert!(!is_pi_session_path(&outside));
+        assert!(is_agent_session_path(&inside));
+        assert!(!is_agent_session_path(&outside));
     }
 
     #[test]

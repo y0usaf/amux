@@ -1,5 +1,5 @@
 {
-  description = "Pi and omp terminal harnesses with shared agent-mux workspace";
+  description = "Pi and omp terminal harnesses with shared amux workspace";
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     crane.url = "github:ipetkov/crane";
@@ -13,8 +13,8 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f (import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; }));
     in {
       packages = forAllSystems (pkgs: {
-        pi-harness = pkgs.callPackage ./nix/build.nix { crane = crane.mkLib pkgs; cordisRs = cordis-rs; root = ./pi-harness; pname = "pi-harness"; cargoPackage = "pi-harness-tui"; binaryName = "pi-harness"; };
-        omp-harness = pkgs.callPackage ./nix/build.nix { crane = crane.mkLib pkgs; cordisRs = cordis-rs; root = ./omp-harness; pname = "omp-harness"; cargoPackage = "omp-harness-tui"; binaryName = "omp-harness"; };
+        pi-harness = pkgs.callPackage ./nix/build.nix { crane = crane.mkLib pkgs; cordisRs = cordis-rs; pname = "pi-harness"; cargoPackage = "pi-harness-tui"; binaryName = "pi-harness"; };
+        omp-harness = pkgs.callPackage ./nix/build.nix { crane = crane.mkLib pkgs; cordisRs = cordis-rs; pname = "omp-harness"; cargoPackage = "omp-harness-tui"; binaryName = "omp-harness"; };
         default = self.packages.${pkgs.system}.pi-harness;
       });
       apps = forAllSystems (pkgs: {

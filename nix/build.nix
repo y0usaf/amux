@@ -1,18 +1,18 @@
-{ lib, crane, rustPlatform, pkg-config, wayland, cordisRs, root, binaryName, pname, cargoPackage }:
+{ lib, crane, rustPlatform, pkg-config, wayland, cordisRs, binaryName, pname, cargoPackage }:
 let
+  workspaceRoot = ../.;
   src = lib.fileset.toSource {
-    inherit root;
-    fileset = lib.fileset.unions [ (root + "/src") (root + "/crates") (root + "/build.rs") (root + "/config.wat") (root + "/Cargo.toml") (root + "/Cargo.lock") (lib.fileset.maybeMissing (root + "/pi-extension")) (lib.fileset.maybeMissing (root + "/omp-extension")) ];
+    root = workspaceRoot;
+    fileset = workspaceRoot;
   };
-  common = {
-    inherit pname src;
-    version = (builtins.fromTOML (builtins.readFile (root + "/Cargo.toml"))).package.version;
-    cargoExtraArgs = "--package ${cargoPackage} --bin ${binaryName}";
-    cargoLock = root + "/Cargo.lock";
-    preConfigure = ''ln -s ${cordisRs} "$PWD/../cordis-rs"'';
-    nativeBuildInputs = [ pkg-config rustPlatform.bindgenHook ];
-    buildInputs = [ wayland ];
-    cargoVendorDir = crane.vendorCargoDeps { inherit src; cargoLock = root + "/Cargo.lock"; };
-    dontPatchELF = true;
-  };
-in crane.buildPackage common
+in crane.buildPackage {
+  inherit pname src;
+  version = "0.1.0";
+  cargoExtraArgs = "--package ${cargoPackage} --bin ${binaryName}";
+  cargoLock = ../Cargo.lock;
+  preConfigure = ''ln -s ${cordisRs} "$PWD/cordis-rs"'';
+  nativeBuildInputs = [ pkg-config rustPlatform.bindgenHook ];
+  buildInputs = [ wayland ];
+  cargoVendorDir = crane.vendorCargoDeps { inherit src; cargoLock = ../Cargo.lock; };
+  dontPatchELF = true;
+}

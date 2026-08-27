@@ -1,4 +1,4 @@
-use crate::pi;
+use crate::agent;
 use crate::state::ScannedSession;
 
 use super::super::raw::terminal_size;
@@ -19,7 +19,7 @@ pub(in crate::app::tui) struct ArchiveViewerState {
 impl ArchiveViewerState {
     pub(in crate::app::tui) fn load() -> Self {
         let mut viewer = Self {
-            sessions: pi::scan_archived_sessions(),
+            sessions: agent::scan_archived_sessions(),
             selected: 0,
             scroll: 0,
             note: None,
@@ -32,7 +32,7 @@ impl ArchiveViewerState {
         let selected_id = self
             .selected_session()
             .map(|session| session.session_id.clone());
-        self.sessions = pi::scan_archived_sessions();
+        self.sessions = agent::scan_archived_sessions();
         self.selected = selected_id
             .as_deref()
             .and_then(|id| {

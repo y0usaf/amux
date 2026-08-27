@@ -508,7 +508,7 @@ fn parse_rfc3339_ms(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pi::files::{PI_AGENT_DIR_ENV, PI_SESSION_DIR_ENV};
+    use crate::agent::files::{PI_AGENT_DIR_ENV, PI_SESSION_DIR_ENV};
     use crate::test_support;
     use std::ffi::OsString;
     use std::fs;

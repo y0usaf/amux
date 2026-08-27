@@ -6,7 +6,7 @@ pub(super) use super::sidecar_reducer::{
     should_bind_sidecar_session, sidecar_order_update, SidecarApplyResult, SidecarOrderUpdate,
 };
 #[cfg(test)]
-use crate::pi::PiSidecarSnapshot;
+use crate::agent::PiSidecarSnapshot;
 #[cfg(test)]
 use crate::state::Session;
 #[cfg(test)]
@@ -18,7 +18,7 @@ mod tests {
 
     use super::*;
 
-    fn snapshot(stage: crate::pi::PiSessionStage, ts_ms: u64) -> PiSidecarSnapshot {
+    fn snapshot(stage: crate::agent::PiSessionStage, ts_ms: u64) -> PiSidecarSnapshot {
         PiSidecarSnapshot {
             kind: Some("snapshot".into()),
             session_id: "pi-session-1".into(),
@@ -43,7 +43,7 @@ mod tests {
             harness_session_id: None,
             session_file: None,
             session_name: None,
-            stage: crate::pi::PiSessionStage::Idle,
+            stage: crate::agent::PiSessionStage::Idle,
             queued: false,
             interrupted: false,
             tool_name: None,
@@ -62,7 +62,7 @@ mod tests {
             harness_session_id: None,
             session_file: None,
             session_name: None,
-            stage: crate::pi::PiSessionStage::Tool,
+            stage: crate::agent::PiSessionStage::Tool,
             queued: false,
             interrupted: false,
             tool_name: Some("grep".into()),
@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn interrupted_snapshot_binds_new_session() {
         let session = Session::new_draft();
-        let mut snapshot = snapshot(crate::pi::PiSessionStage::Idle, 150);
+        let mut snapshot = snapshot(crate::agent::PiSessionStage::Idle, 150);
         snapshot.interrupted = true;
 
         assert!(should_bind_sidecar_session(&session, &snapshot));
@@ -91,7 +91,7 @@ mod tests {
             harness_session_id: None,
             session_file: None,
             session_name: None,
-            stage: crate::pi::PiSessionStage::Idle,
+            stage: crate::agent::PiSessionStage::Idle,
             queued: false,
             interrupted: false,
             tool_name: None,
@@ -164,7 +164,7 @@ mod tests {
         session.draft = false;
         session.runtime.tool_name = Some("Clipboard".into());
 
-        let mut next = snapshot(crate::pi::PiSessionStage::Thinking, 150);
+        let mut next = snapshot(crate::agent::PiSessionStage::Thinking, 150);
         next.tool_name = Some("Clipboard".into());
         apply_snapshot_to_session(&mut session, &next, false, 250);
 
@@ -177,7 +177,7 @@ mod tests {
         let mut session = Session::new_draft();
         session.local_id = "local-session-1".into();
 
-        let mut next = snapshot(crate::pi::PiSessionStage::Idle, 150);
+        let mut next = snapshot(crate::agent::PiSessionStage::Idle, 150);
         next.interrupted = true;
         apply_snapshot_to_session(&mut session, &next, false, 250);
 
@@ -192,7 +192,7 @@ mod tests {
         session.created_at_ms = 10;
         session.updated_at_ms = 10;
 
-        let active = snapshot(crate::pi::PiSessionStage::Thinking, 200);
+        let active = snapshot(crate::agent::PiSessionStage::Thinking, 200);
         let applied = apply_snapshot_to_session(&mut session, &active, false, 300);
 
         assert_eq!(
@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(session.runtime.last_sidecar_ts_ms, 200);
         let updated_at_ms = session.updated_at_ms;
 
-        let stale_idle = snapshot(crate::pi::PiSessionStage::Idle, 150);
+        let stale_idle = snapshot(crate::agent::PiSessionStage::Idle, 150);
         let applied_stale = apply_snapshot_to_session(&mut session, &stale_idle, false, 400);
 
         assert_eq!(applied_stale, SidecarApplyResult::default());
@@ -233,7 +233,7 @@ mod tests {
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 150),
+            &snapshot(crate::agent::PiSessionStage::Idle, 150),
             false,
             250,
         );
@@ -259,12 +259,12 @@ mod tests {
         session.created_at_ms = 10;
         session.updated_at_ms = 10;
 
-        let active = snapshot(crate::pi::PiSessionStage::Thinking, 200);
+        let active = snapshot(crate::agent::PiSessionStage::Thinking, 200);
         apply_snapshot_to_session(&mut session, &active, false, 300);
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 0),
+            &snapshot(crate::agent::PiSessionStage::Idle, 0),
             false,
             400,
         );
@@ -295,7 +295,7 @@ mod tests {
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 150),
+            &snapshot(crate::agent::PiSessionStage::Idle, 150),
             false,
             250,
         );
@@ -316,7 +316,7 @@ mod tests {
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Thinking, 150),
+            &snapshot(crate::agent::PiSessionStage::Thinking, 150),
             false,
             250,
         );
@@ -343,7 +343,7 @@ mod tests {
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Thinking, 0),
+            &snapshot(crate::agent::PiSessionStage::Thinking, 0),
             false,
             400,
         );
@@ -367,7 +367,7 @@ mod tests {
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 150),
+            &snapshot(crate::agent::PiSessionStage::Idle, 150),
             true,
             250,
         );
@@ -397,7 +397,7 @@ mod tests {
 
         apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 150),
+            &snapshot(crate::agent::PiSessionStage::Idle, 150),
             true,
             250,
         );
@@ -416,7 +416,7 @@ mod tests {
 
         let applied = apply_snapshot_to_session(
             &mut session,
-            &snapshot(crate::pi::PiSessionStage::Idle, 150),
+            &snapshot(crate::agent::PiSessionStage::Idle, 150),
             true,
             250,
         );
@@ -443,7 +443,7 @@ mod tests {
                 harness_session_id: Some("local-session-1".into()),
                 session_file: Some(PathBuf::from("/tmp/pi-session-1.jsonl")),
                 session_name: Some("Imported session".into()),
-                stage: crate::pi::PiSessionStage::Idle,
+                stage: crate::agent::PiSessionStage::Idle,
                 queued: true,
                 interrupted: false,
                 tool_name: None,

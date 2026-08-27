@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
-use crate::pi::PI_EXTENSION_PATH_ENV;
+use crate::agent::AGENT_EXTENSION_PATH_ENV;
 
-pub const PACKAGED_EXTENSION_REL: &str = "share/pi-harness/pi-extension/index.js";
+pub const PACKAGED_EXTENSION_REL: &str = "share/amux/pi-extension/index.js";
 pub const DEV_EXTENSION_REL: &str = "pi-extension/index.js";
 
 #[derive(Clone, Debug)]
-pub enum PiLaunch {
+pub enum AgentLaunch {
     Binary(PathBuf),
     PackageRunner {
         runner: PathBuf,
@@ -17,7 +17,7 @@ pub enum PiLaunch {
     },
 }
 
-impl PiLaunch {
+impl AgentLaunch {
     pub fn display(&self) -> String {
         match self {
             Self::Binary(path) => path.display().to_string(),
@@ -35,7 +35,7 @@ impl PiLaunch {
 
 #[derive(Clone, Debug)]
 pub struct DiscoverResult {
-    pub launch: PiLaunch,
+    pub launch: AgentLaunch,
     pub version: Option<String>,
 }
 
@@ -89,8 +89,8 @@ pub fn launch_argv(
     })?;
 
     let mut argv = match discovered.launch {
-        PiLaunch::Binary(path) => vec![path.into_os_string()],
-        PiLaunch::PackageRunner {
+        AgentLaunch::Binary(path) => vec![path.into_os_string()],
+        AgentLaunch::PackageRunner {
             runner,
             prefix_args,
         } => {
@@ -104,7 +104,7 @@ pub fn launch_argv(
 }
 
 pub fn extension_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var(PI_EXTENSION_PATH_ENV) {
+    if let Ok(path) = std::env::var(AGENT_EXTENSION_PATH_ENV) {
         let path = PathBuf::from(path);
         if path.exists() {
             return Some(path);
@@ -130,7 +130,7 @@ fn discover_inner(config_override: Option<&str>) -> Option<DiscoverResult> {
         return try_binary(&path);
     }
 
-    if let Ok(path) = std::env::var("PI_BINARY") {
+    if let Ok(path) = std::env::var("AGENT_BINARY") {
         let path = PathBuf::from(path);
         return try_binary(&path);
     }
@@ -158,7 +158,7 @@ fn try_binary(path: &Path) -> Option<DiscoverResult> {
     }
 
     Some(DiscoverResult {
-        launch: PiLaunch::Binary(path.to_path_buf()),
+        launch: AgentLaunch::Binary(path.to_path_buf()),
         version: probe_version_binary(path),
     })
 }
@@ -180,7 +180,7 @@ fn try_package_runner() -> Option<DiscoverResult> {
             .is_some_and(|status| status.success())
         {
             return Some(DiscoverResult {
-                launch: PiLaunch::PackageRunner {
+                launch: AgentLaunch::PackageRunner {
                     runner: runner_path,
                     prefix_args: vec![pkg_arg.to_string()],
                 },
@@ -215,7 +215,7 @@ fn well_known_locations(home: &Path) -> Vec<PathBuf> {
     ];
 
     #[cfg(test)]
-    let skip_system_paths = std::env::var_os("PI_HARNESS_SKIP_SYSTEM_DISCOVERY_PATHS").is_some();
+    let skip_system_paths = std::env::var_os("AGENT_HARNESS_SKIP_SYSTEM_DISCOVERY_PATHS").is_some();
     #[cfg(not(test))]
     let skip_system_paths = false;
 
@@ -321,7 +321,7 @@ mod tests {
     impl TestDir {
         fn new() -> Self {
             let unique = format!(
-                "pi-harness-discovery-tests-{}-{}",
+                "amux-discovery-tests-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -357,10 +357,10 @@ mod tests {
 
     #[test]
     fn pi_launch_display_formats_binary_and_runner_variants() {
-        let binary = PiLaunch::Binary(PathBuf::from("/tmp/pi"));
+        let binary = AgentLaunch::Binary(PathBuf::from("/tmp/pi"));
         assert_eq!(binary.display(), "/tmp/pi");
 
-        let runner = PiLaunch::PackageRunner {
+        let runner = AgentLaunch::PackageRunner {
             runner: PathBuf::from("/usr/bin/env"),
             prefix_args: vec!["bunx".into(), "pi".into()],
         };
@@ -385,8 +385,8 @@ mod tests {
 
         let result = try_binary(&exe).unwrap();
         match result.launch {
-            PiLaunch::Binary(path) => assert_eq!(path, exe),
-            PiLaunch::PackageRunner { .. } => panic!("expected binary launch"),
+            AgentLaunch::Binary(path) => assert_eq!(path, exe),
+            AgentLaunch::PackageRunner { .. } => panic!("expected binary launch"),
         }
         assert_eq!(result.version.as_deref(), Some("pi-test 1.2.3"));
     }
@@ -406,7 +406,7 @@ mod tests {
         let dir = TestDir::new();
         let extension = dir.path().join("harness-sidechannel.js");
         fs::write(&extension, "// test extension\n").unwrap();
-        let _guard = EnvGuard::set(PI_EXTENSION_PATH_ENV, extension.as_os_str());
+        let _guard = EnvGuard::set(AGENT_EXTENSION_PATH_ENV, extension.as_os_str());
 
         assert_eq!(extension_path(), Some(extension));
     }
@@ -416,7 +416,7 @@ mod tests {
         let _lock = test_support::env_lock();
         let home = Path::new("/home/tester");
 
-        with_env_var_removed("PI_HARNESS_SKIP_SYSTEM_DISCOVERY_PATHS", || {
+        with_env_var_removed("AGENT_HARNESS_SKIP_SYSTEM_DISCOVERY_PATHS", || {
             let locations = well_known_locations(home);
 
             assert!(locations.contains(&home.join(".bun/bin/pi")));
@@ -433,15 +433,15 @@ mod tests {
         let override_path = dir.path().join("pi-override");
         write_executable(&cached, "#!/bin/sh\nexit 0\n");
         write_executable(&override_path, "#!/bin/sh\nexit 0\n");
-        let _guard = EnvGuard::set("PI_BINARY", cached.as_os_str());
+        let _guard = EnvGuard::set("AGENT_BINARY", cached.as_os_str());
 
         reset_discovery_cache();
         let _ = discover(None);
         let result = discover(Some(override_path.to_str().unwrap())).expect("override result");
 
         match result.launch {
-            PiLaunch::Binary(path) => assert_eq!(path, override_path),
-            PiLaunch::PackageRunner { .. } => panic!("expected binary launch"),
+            AgentLaunch::Binary(path) => assert_eq!(path, override_path),
+            AgentLaunch::PackageRunner { .. } => panic!("expected binary launch"),
         }
         reset_discovery_cache();
     }
@@ -461,7 +461,7 @@ exit 0
         let _lock = test_support::env_lock();
 
         with_env_var_set("PATH", path.as_os_str(), || {
-            with_env_var_removed("PI_BINARY", || {
+            with_env_var_removed("AGENT_BINARY", || {
                 reset_discovery_cache();
                 assert!(discover(Some(missing.to_str().unwrap())).is_none());
                 reset_discovery_cache();
@@ -484,7 +484,7 @@ exit 0
         let _lock = test_support::env_lock();
 
         with_env_var_set("PATH", path.as_os_str(), || {
-            with_env_var_set("PI_BINARY", missing.as_os_str(), || {
+            with_env_var_set("AGENT_BINARY", missing.as_os_str(), || {
                 reset_discovery_cache();
                 assert!(discover(None).is_none());
                 reset_discovery_cache();
@@ -504,13 +504,13 @@ exit 0
         let (first_result, second_cached, second_fresh) = with_env_var_removed("PATH", || {
             with_env_var_removed("HOME", || {
                 reset_discovery_cache();
-                let first_result = with_env_var_set("PI_BINARY", first.as_os_str(), || {
+                let first_result = with_env_var_set("AGENT_BINARY", first.as_os_str(), || {
                     discover(None).expect("first discovery")
                 });
-                let second_cached = with_env_var_set("PI_BINARY", second.as_os_str(), || {
+                let second_cached = with_env_var_set("AGENT_BINARY", second.as_os_str(), || {
                     discover(None).expect("cached discovery")
                 });
-                let second_fresh = with_env_var_set("PI_BINARY", second.as_os_str(), || {
+                let second_fresh = with_env_var_set("AGENT_BINARY", second.as_os_str(), || {
                     discover_fresh(None).expect("fresh discovery")
                 });
                 reset_discovery_cache();
@@ -519,16 +519,16 @@ exit 0
         });
 
         match first_result.launch {
-            PiLaunch::Binary(path) => assert_eq!(path, first),
-            PiLaunch::PackageRunner { .. } => panic!("expected binary launch"),
+            AgentLaunch::Binary(path) => assert_eq!(path, first),
+            AgentLaunch::PackageRunner { .. } => panic!("expected binary launch"),
         }
         match second_cached.launch {
-            PiLaunch::Binary(path) => assert_eq!(path, first),
-            PiLaunch::PackageRunner { .. } => panic!("expected binary launch"),
+            AgentLaunch::Binary(path) => assert_eq!(path, first),
+            AgentLaunch::PackageRunner { .. } => panic!("expected binary launch"),
         }
         match second_fresh.launch {
-            PiLaunch::Binary(path) => assert_eq!(path, second),
-            PiLaunch::PackageRunner { .. } => panic!("expected binary launch"),
+            AgentLaunch::Binary(path) => assert_eq!(path, second),
+            AgentLaunch::PackageRunner { .. } => panic!("expected binary launch"),
         }
     }
 
@@ -542,14 +542,14 @@ exit 0
 
         let result = try_package_runner().expect("should find npx");
         match result.launch {
-            PiLaunch::PackageRunner {
+            AgentLaunch::PackageRunner {
                 runner,
                 prefix_args,
             } => {
                 assert_eq!(runner, npx);
                 assert_eq!(prefix_args, vec!["@mariozechner/pi-coding-agent"]);
             }
-            PiLaunch::Binary(_) => panic!("expected package runner launch"),
+            AgentLaunch::Binary(_) => panic!("expected package runner launch"),
         }
     }
 
@@ -562,9 +562,9 @@ exit 0
 
         with_env_var_set("HOME", dir.path().as_os_str(), || {
             with_env_var_set("PATH", path.as_os_str(), || {
-                with_env_var_removed("PI_BINARY", || {
+                with_env_var_removed("AGENT_BINARY", || {
                     with_env_var_set(
-                        "PI_HARNESS_SKIP_SYSTEM_DISCOVERY_PATHS",
+                        "AGENT_HARNESS_SKIP_SYSTEM_DISCOVERY_PATHS",
                         OsStr::new("1"),
                         || {
                             reset_discovery_cache();
@@ -574,8 +574,8 @@ exit 0
                             reset_discovery_cache();
                             let result = discover(None).expect("should discover pi on PATH");
                             match result.launch {
-                                PiLaunch::Binary(path) => assert_eq!(path, exe),
-                                PiLaunch::PackageRunner { .. } => panic!("expected binary launch"),
+                                AgentLaunch::Binary(path) => assert_eq!(path, exe),
+                                AgentLaunch::PackageRunner { .. } => panic!("expected binary launch"),
                             }
                             reset_discovery_cache();
                         },

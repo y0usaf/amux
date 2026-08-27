@@ -12,7 +12,7 @@ use crate::config::{
     AppAction, AppConfig, KeyChordState, KeyStroke, KeyToken, Keymap, KeymapMatch, NamedKeyToken,
 };
 use crate::notify::Notify;
-use crate::pi::{self, PiSidecarSnapshot};
+use crate::agent::{self, PiSidecarSnapshot};
 use crate::sidecar::SidecarListener;
 use crate::sidecar::SidecarMessage;
 use crate::state::{PersistedState, Project, ScannedSession, Session};
@@ -182,12 +182,12 @@ pub(super) struct HarnessCore {
 
 impl HarnessCore {
     pub(super) fn new(notify: Notify, initial_project_paths: Vec<PathBuf>) -> anyhow::Result<Self> {
-        let sidecar_socket_path = pi::socket_path();
+        let sidecar_socket_path = agent::socket_path();
         let sidecar = SidecarListener::start(notify.clone(), sidecar_socket_path.clone())?;
         let config = AppConfig::load_default().unwrap_or_default();
         let terminal_manager = TerminalManager::new(
             notify,
-            pi::extension_path(),
+            agent::extension_path(),
             config.pi_tui_mode().map(ToOwned::to_owned),
             sidecar_socket_path.clone(),
             config.glyph_style() == GlyphStyle::Ascii,
@@ -599,7 +599,7 @@ impl HarnessCore {
     }
 
     pub(super) fn cleanup_archive(&mut self) {
-        let evicted = pi::evict_old_archived_sessions(30);
+        let evicted = agent::evict_old_archived_sessions(30);
         if evicted > 0 {
             self.set_note_ok(format!(
                 "removed {evicted} archived sessions older than 30 days"
@@ -627,7 +627,7 @@ impl HarnessCore {
         };
 
         if let Some(path) = target.session_file.as_ref() {
-            if let Err(error) = pi::archive_session_file(path) {
+            if let Err(error) = agent::archive_session_file(path) {
                 if terminal_stopped {
                     self.mark_terminals_dirty();
                 }
@@ -645,7 +645,7 @@ impl HarnessCore {
         archived: &ScannedSession,
     ) -> Result<(), String> {
         let project_path = normalize_project_path(&archived.cwd);
-        pi::restore_session_file(&archived.session_file, &project_path)?;
+        agent::restore_session_file(&archived.session_file, &project_path)?;
 
         let project_is_open = self
             .workspace

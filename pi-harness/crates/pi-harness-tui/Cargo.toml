@@ -15,4 +15,4 @@ path = "src/main_tui.rs"
 anyhow = "1"
 env_logger = { version = "0.11", default-features = false }
 log = "0.4"
-pi-harness = { path = "../.." }
+harness-core = { path = "../../../crates/harness-core" }

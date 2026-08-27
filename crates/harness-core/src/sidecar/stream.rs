@@ -1,6 +1,6 @@
 use super::SidecarMessage;
 use crate::notify::Notify;
-use crate::pi::PiSidecarSnapshot;
+use crate::agent::PiSidecarSnapshot;
 use crate::render::Color;
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixStream;

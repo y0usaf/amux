@@ -1,4 +1,4 @@
-use crate::pi::PiSidecarSnapshot;
+use crate::agent::PiSidecarSnapshot;
 use crate::state::Session;
 use crate::terminal::TerminalStatus;
 
@@ -128,7 +128,7 @@ pub(super) fn apply_snapshot_to_session(
     session.runtime.status = snapshot.stage.as_runtime_status().map(ToOwned::to_owned);
     session.runtime.queued = snapshot.queued;
     session.runtime.interrupted = snapshot.interrupted;
-    session.runtime.tool_name = if matches!(snapshot.stage, crate::pi::PiSessionStage::Tool) {
+    session.runtime.tool_name = if matches!(snapshot.stage, crate::agent::PiSessionStage::Tool) {
         snapshot.tool_name.clone()
     } else {
         None
