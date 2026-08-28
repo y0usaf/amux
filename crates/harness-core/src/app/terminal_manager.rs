@@ -145,6 +145,11 @@ impl TerminalManager {
 
         for project in projects {
             for session in &project.sessions {
+                // Subagent rows run inside their parent's PTY; they never
+                // get their own terminal process.
+                if session.is_child() {
+                    continue;
+                }
                 let (session_id, target) = self.terminal_target_for_session(project, session);
                 active_ids.insert(session_id.clone());
 

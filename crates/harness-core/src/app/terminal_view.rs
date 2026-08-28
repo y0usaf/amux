@@ -112,14 +112,8 @@ mod tests {
         let selection_fg = Color::rgb(250, 0, 0);
         let selection_bg = Color::rgb(0, 250, 0);
         let selection = Some(TerminalSelectionRange {
-            start: TerminalSelectionPoint {
-                row: 0,
-                col: 0,
-            },
-            end: TerminalSelectionPoint {
-                row: 2,
-                col: 6,
-            },
+            start: TerminalSelectionPoint { row: 0, col: 0 },
+            end: TerminalSelectionPoint { row: 2, col: 6 },
         });
         let mut selected = 0usize;
         for_each_terminal_screen_cell(

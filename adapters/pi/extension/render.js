@@ -229,10 +229,8 @@ function sessionsLines(state, width, paint, nowMs) {
 	return lines
 }
 
-// Left-edge divider: a rail glyph in the terminal's default foreground, the
-// same treatment as the harness sidebar rail. Default fg is the terminal's
-// own high-contrast complement to its background, so the thin line adapts
-// to any theme without knowing its colors.
+// Left-edge divider: match the harness sidebar separator.
+// Leave its foreground unpainted so the terminal provides the line contrast.
 
 export function renderRail(state, width, nowMs, rows = 0, theme) {
 	const paint = createPainter(theme)

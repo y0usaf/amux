@@ -48,23 +48,6 @@
         "type": "github"
       }
     },
-    "cordis-rs": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1786915120,
-        "narHash": "sha256-wji4+CDyjoNpXXKb67JqI9+6lAD4qwjBanh2jr7ibhY=",
-        "owner": "y0usaf",
-        "repo": "cordis-rs",
-        "rev": "426a34e72d25ffb3dc72201523eed48416934f65",
-        "type": "github"
-      },
-      "original": {
-        "owner": "y0usaf",
-        "repo": "cordis-rs",
-        "rev": "426a34e72d25ffb3dc72201523eed48416934f65",
-        "type": "github"
-      }
-    },
     "crane": {
       "locked": {
         "lastModified": 1787326676,
@@ -218,7 +201,6 @@
     },
     "root": {
       "inputs": {
-        "cordis-rs": "cordis-rs",
         "crane": "crane",
         "nixpkgs": "nixpkgs",
         "oh-my-pi": "oh-my-pi",

@@ -1,28 +1,17 @@
+//! omp adapter: binary discovery, launch argv, extension packaging, and the
+//! on-disk session-store contract (env vars, default dirs, project-dir
+//! encoding, socket prefix).
+//!
+//! Session-store reading machinery lives at harness level
+//! (`crates/harness-core` `agent` module) and consumes the omp-shaped facts
+//! declared here.
+
 #[path = "agent/discovery.rs"]
 mod discovery;
-#[path = "agent/files.rs"]
-mod files;
-#[path = "agent/scan.rs"]
-mod scan;
-#[path = "agent/types.rs"]
-mod types;
-#[path = "agent/usage.rs"]
-mod usage;
 
-pub use crate::state::ScannedSession;
+#[path = "agent/store.rs"]
+pub mod store;
+
 pub use discovery::{
     discover, discover_fresh, extension_path, launch_argv, DiscoverResult, OmpLaunch,
 };
-pub use files::{
-    archive_session_file, is_omp_session_path, live_project_dir, restore_session_file, socket_path,
-};
-pub use scan::{evict_old_archived_sessions, scan_archived_sessions, scan_live_sessions};
-pub use types::{PiSessionStage, PiSidecarSnapshot};
-pub use usage::{
-    load_usage_report, load_usage_report_from_path, PiUsageDay, PiUsageModelBreakdown,
-    PiUsageReport, PiUsageTotals,
-};
-
-pub const OMP_SIDECAR_SOCKET_ENV: &str = "AGENT_HARNESS_OMP_SIDECAR_SOCKET";
-pub const OMP_SIDECAR_SESSION_KEY_ENV: &str = "AGENT_HARNESS_OMP_SESSION_KEY";
-pub const OMP_EXTENSION_PATH_ENV: &str = "AGENT_HARNESS_OMP_EXTENSION";

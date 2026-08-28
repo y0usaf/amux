@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use harness_core::app::tui;
 use log::LevelFilter;
-use omp_harness::app::tui;
 
 pub fn run() -> Result<()> {
     env_logger::builder()

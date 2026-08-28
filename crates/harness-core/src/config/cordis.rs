@@ -18,8 +18,7 @@ use super::AppConfig;
 
 /// The compiled default config bytes, embedded at build time. This is exactly
 /// what a user-provided `config.wasm` would be — same format, same ABI.
-const DEFAULT_CONFIG_WASM: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/config.wasm"));
+const DEFAULT_CONFIG_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/config.wasm"));
 
 /// A config-as-WASM guest mounted at startup. It owns the cordis kernel context
 /// so that unmounting (explicitly, or on drop) reverts every config key with no
@@ -74,8 +73,8 @@ impl Drop for ConfigKernel {
 
 #[cfg(test)]
 mod tests {
-    use super::DEFAULT_CONFIG_WASM;
     use super::ConfigKernel;
+    use super::DEFAULT_CONFIG_WASM;
 
     /// Mirror of the cordis-rs `config_wasm` reference test: the embedded
     /// default config mounts at startup, serves its keys as strings, and —
@@ -102,7 +101,9 @@ mod tests {
     fn config_reverts_pre_existing_keys() {
         let mut ctx = cordis::Context::new();
         ctx.set("panel_width_percent", "33").expect("seed");
-        let id = ctx.mount(DEFAULT_CONFIG_WASM).expect("mount config at startup");
+        let id = ctx
+            .mount(DEFAULT_CONFIG_WASM)
+            .expect("mount config at startup");
         assert_eq!(
             ctx.get("panel_width_percent").as_deref(),
             Some("22"),

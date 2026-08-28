@@ -10,8 +10,9 @@ use crate::state::{
 use crate::util::{normalize_project_path, project_name_from_path};
 
 use super::selection::{
-    ephemeral_draft_session_index, next_selectable_session_index, preferred_session_index,
-    session_index_for_restore_key, visible_session_indices,
+    ephemeral_draft_session_index, is_selectable_session, next_selectable_session_index,
+    preferred_session_index, selectable_session_index, session_index_for_restore_key,
+    sidebar_session_order,
 };
 
 #[derive(Clone, Debug)]
@@ -194,7 +195,9 @@ impl Workspace {
 
         let desired_session = session_key.or_else(|| self.persisted.selected_session.clone());
         self.selected_session = desired_session.as_deref().and_then(|key| {
-            session_index_for_restore_key(&self.projects[self.selected_project].sessions, key)
+            let sessions = &self.projects[self.selected_project].sessions;
+            session_index_for_restore_key(sessions, key)
+                .and_then(|index| selectable_session_index(sessions, index))
         });
 
         if self.selected_session.is_none() {
@@ -285,7 +288,10 @@ impl Workspace {
             .map(|session| session.selection_key());
 
         if let Some(project) = self.projects.get_mut(project_index) {
-            merge_scanned_sessions(&mut project.sessions, agent::scan_live_sessions(&project_path));
+            merge_scanned_sessions(
+                &mut project.sessions,
+                agent::scan_live_sessions(&project_path),
+            );
             project.sort_sessions();
         }
 
@@ -316,11 +322,14 @@ impl Workspace {
         let Some(project) = self.projects.get_mut(target.project_index) else {
             return;
         };
-        if target.session_index >= project.sessions.len() {
-            return;
-        }
-
-        project.sessions.remove(target.session_index);
+        // Subagent rows are runtime views of in-process task runs under their
+        // parent; they cannot be opened on their own and die with it.
+        let target_id = target.session_id.clone();
+        let parent_file = target.session_file.clone();
+        project.sessions.retain(|session| {
+            session.local_id != target_id
+                && session.parent_session_file.as_ref() != parent_file.as_ref()
+        });
         self.selected_project = target
             .project_index
             .min(self.projects.len().saturating_sub(1));
@@ -379,9 +388,10 @@ impl Workspace {
         let Some(project) = self.projects.get(project_index) else {
             return false;
         };
-        if session_index >= project.sessions.len() {
+        // Subagent rows own no PTY; pointing at one opens its parent instead.
+        let Some(session_index) = selectable_session_index(&project.sessions, session_index) else {
             return false;
-        }
+        };
         self.selected_project = project_index;
         self.selected_session = Some(session_index);
         self.view_selected_session();
@@ -432,10 +442,6 @@ impl Workspace {
         Ok(self.selected_project)
     }
 
-    pub(super) fn selected_terminal_restart_target(&self) -> Option<(usize, usize)> {
-        Some((self.selected_project, self.selected_session?))
-    }
-
     fn ensure_default_session_for_project(&mut self, project_index: usize) -> Option<usize> {
         let project = self.projects.get_mut(project_index)?;
         if let Some(index) = preferred_session_index(project) {
@@ -479,6 +485,7 @@ fn persisted_session_from_session(session: &Session) -> PersistedSession {
         name: session.name.clone(),
         pi_session_id: session.pi_session_id.clone(),
         session_file: session.session_file.clone(),
+        parent_session_file: session.parent_session_file.clone(),
         created_at_ms: session.created_at_ms,
         updated_at_ms: session.updated_at_ms,
         promoted_at_ms: session.promoted_at_ms,
@@ -492,6 +499,7 @@ fn session_from_persisted(persisted: &PersistedSession) -> Session {
         name: persisted.name.clone(),
         pi_session_id: persisted.pi_session_id.clone(),
         session_file: persisted.session_file.clone(),
+        parent_session_file: persisted.parent_session_file.clone(),
         created_at_ms: persisted.created_at_ms,
         updated_at_ms: persisted.updated_at_ms,
         promoted_at_ms: persisted.promoted_at_ms,
@@ -514,11 +522,17 @@ pub(super) fn normalize_unique_project_paths(paths: Vec<PathBuf>) -> Vec<PathBuf
 }
 
 pub(super) fn cycle_session_indices(project: &Project) -> Vec<usize> {
-    let visible = visible_session_indices(project);
-    if visible.is_empty() {
+    // Cycle in sidebar display order so Ctrl+Up/Down matches what you see,
+    // skipping subagent rows: they own no PTY and cannot be opened directly.
+    let order: Vec<usize> = sidebar_session_order(project)
+        .into_iter()
+        .map(|(index, _)| index)
+        .filter(|index| is_selectable_session(&project.sessions[*index]))
+        .collect();
+    if order.is_empty() {
         (0..project.sessions.len()).collect()
     } else {
-        visible
+        order
     }
 }
 
@@ -638,5 +652,73 @@ mod tests {
         let target = workspace.archive_target().unwrap();
 
         assert_eq!(target.session_id, "local-session-1");
+    }
+
+    #[test]
+    fn select_session_in_project_resolves_subagent_to_parent() {
+        let mut project = Project::new(PathBuf::from("/tmp/project"));
+        let mut parent = Session::new_draft();
+        parent.local_id = "parent-1".into();
+        parent.session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
+        parent.draft = false;
+        let mut subagent = Session::new_draft();
+        subagent.parent_session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
+        subagent.draft = false;
+        project.sessions = vec![parent, subagent];
+
+        let mut workspace = Workspace::new(Vec::new(), PersistedState::default());
+        workspace.projects = vec![project];
+        workspace.selected_project = 0;
+
+        assert!(workspace.select_session_in_project(0, 1)); // the subagent row
+        assert_eq!(workspace.selected_session, Some(0)); // its parent
+    }
+
+    #[test]
+    fn remove_archived_session_removes_subagent_rows_with_parent() {
+        let mut project = Project::new(PathBuf::from("/tmp/project"));
+        let mut parent = Session::new_draft();
+        parent.local_id = "parent-1".into();
+        parent.session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
+        parent.draft = false;
+        let mut subagent = Session::new_draft();
+        subagent.parent_session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
+        subagent.draft = false;
+        let mut other = Session::new_draft();
+        other.local_id = "other-1".into();
+        other.session_file = Some(PathBuf::from("/sessions/other.jsonl"));
+        other.draft = false;
+        project.sessions = vec![parent, subagent, other];
+
+        let mut workspace = Workspace::new(Vec::new(), PersistedState::default());
+        workspace.projects = vec![project];
+        workspace.selected_project = 0;
+        workspace.selected_session = Some(0);
+
+        let target = workspace.archive_target().unwrap();
+        workspace.remove_archived_session(&target);
+
+        // The subagent row dies with its parent; only the unrelated session
+        // stays, and selection lands on it.
+        assert_eq!(workspace.projects[0].sessions.len(), 1);
+        assert_eq!(workspace.projects[0].sessions[0].local_id, "other-1");
+        assert_eq!(workspace.selected_session, Some(0));
+    }
+
+    #[test]
+    fn cycle_session_indices_skip_subagent_rows() {
+        let mut project = Project::new(PathBuf::from("/tmp/project"));
+        let mut parent = Session::new_draft();
+        parent.session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
+        parent.draft = false;
+        let mut subagent = Session::new_draft();
+        subagent.parent_session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
+        subagent.draft = false;
+        let mut other = Session::new_draft();
+        other.session_file = Some(PathBuf::from("/sessions/other.jsonl"));
+        other.draft = false;
+        project.sessions = vec![parent, subagent, other];
+
+        assert_eq!(cycle_session_indices(&project), vec![0, 2]);
     }
 }

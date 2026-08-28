@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 
-use crate::notify::Notify;
 use crate::agent;
+use crate::notify::Notify;
 
 const READ_BUFFER_SIZE: usize = 8 * 1024;
 
@@ -21,7 +21,8 @@ pub struct TerminalTarget {
     pub harness_session_id: String,
     pub cwd: PathBuf,
     pub session_file: Option<PathBuf>,
-    /// Render the in-Pi rail with the ASCII glyph set (`AGENT_HARNESS_PI_ASCII=1`).
+    /// Render the agent's in-terminal rail with the ASCII glyph set
+    /// (`agent::ASCII_ENV=1`).
     pub ascii: bool,
     /// Per-symbol rail glyph overrides forwarded as JSON
     /// (`AGENT_HARNESS_SYMBOL_OVERRIDES`).
@@ -145,13 +146,13 @@ pub(crate) fn spawn_process(
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env(
-        agent::OMP_SIDECAR_SOCKET_ENV,
+        agent::SIDECAR_SOCKET_ENV,
         target.sidecar_socket_path.display().to_string(),
     );
-    cmd.env(agent::OMP_SIDECAR_SESSION_KEY_ENV, &target.harness_session_id);
+    cmd.env(agent::SIDECAR_SESSION_KEY_ENV, &target.harness_session_id);
 
     if target.ascii {
-        cmd.env("AGENT_HARNESS_PI_ASCII", "1");
+        cmd.env(agent::ASCII_ENV, "1");
     }
     if !target.symbol_overrides.is_empty() {
         match serde_json::to_string(&target.symbol_overrides) {

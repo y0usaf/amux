@@ -33,6 +33,10 @@ pub struct Session {
     pub name: String,
     pub pi_session_id: Option<String>,
     pub session_file: Option<PathBuf>,
+    /// Set for subagent rows: the parent session file these snapshots belong
+    /// to. Children are runtime-bound rows rendered indented under their
+    /// parent; they never own a PTY and never match disk scans.
+    pub parent_session_file: Option<PathBuf>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
     pub promoted_at_ms: u64,
@@ -47,6 +51,7 @@ impl Session {
             name: scan.name,
             pi_session_id: Some(scan.session_id),
             session_file: Some(scan.session_file),
+            parent_session_file: None,
             created_at_ms: scan.created_at_ms,
             updated_at_ms: scan.updated_at_ms,
             promoted_at_ms: 0,
@@ -62,6 +67,7 @@ impl Session {
             name: "Session".to_string(),
             pi_session_id: None,
             session_file: None,
+            parent_session_file: None,
             created_at_ms: now,
             updated_at_ms: now,
             promoted_at_ms: 0,
@@ -116,6 +122,10 @@ impl Session {
             && self.runtime.status.is_none()
             && !self.runtime.interrupted
             && !self.runtime.unread
+    }
+
+    pub fn is_child(&self) -> bool {
+        self.parent_session_file.is_some()
     }
 
     pub fn should_render_in_sidebar(&self) -> bool {

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 
 use arboard::Clipboard;
@@ -8,11 +9,11 @@ use arboard::Clipboard;
 ))]
 use arboard::{LinuxClipboardKind, SetExtLinux};
 
+use crate::agent::{self, PiSidecarSnapshot};
 use crate::config::{
     AppAction, AppConfig, KeyChordState, KeyStroke, KeyToken, Keymap, KeymapMatch, NamedKeyToken,
 };
 use crate::notify::Notify;
-use crate::agent::{self, PiSidecarSnapshot};
 use crate::sidecar::SidecarListener;
 use crate::sidecar::SidecarMessage;
 use crate::state::{PersistedState, Project, ScannedSession, Session};
@@ -31,6 +32,7 @@ use super::sidebar::{
     sidebar_viewport_items, sticky_sidebar_anchor_row, SidebarRow, SidebarRowKind,
     SidebarSelectionSpan, SidebarStatusKind, SidebarViewportItem,
 };
+use super::sidecar_reducer::apply_child_snapshot_to_project;
 use super::sidecar_reducer::{apply_snapshot_to_session, reconcile_terminal_note};
 use super::status::status_text_for_session;
 use super::terminal_manager::TerminalManager;
@@ -188,7 +190,10 @@ impl HarnessCore {
         let terminal_manager = TerminalManager::new(
             notify,
             agent::extension_path(),
+            #[cfg(not(feature = "omp"))]
             config.pi_tui_mode().map(ToOwned::to_owned),
+            #[cfg(feature = "omp")]
+            None,
             sidecar_socket_path.clone(),
             config.glyph_style() == GlyphStyle::Ascii,
             config.symbols_overrides().cloned().unwrap_or_default(),
@@ -341,7 +346,7 @@ impl HarnessCore {
             project: self
                 .current_project()
                 .map(|project| project.name.clone())
-                .unwrap_or_else(|| "pi-harness".to_string()),
+                .unwrap_or_else(|| "amux".to_string()),
             status: note.map(|note| note.text.clone()).unwrap_or_else(|| {
                 status_text_for_session(
                     self.current_project().is_some(),
@@ -359,19 +364,21 @@ impl HarnessCore {
 
     pub(super) fn current_terminal(&self) -> Option<&TerminalController> {
         self.terminal_manager.current(
-            self.current_session()
+            self.workspace
+                .current_session()
                 .map(|session| session.local_id.as_str()),
         )
     }
 
     pub(super) fn current_terminal_mut(&mut self) -> Option<&mut TerminalController> {
-        let session_id = self.current_session()?.local_id.clone();
+        let session_id = self.workspace.current_session()?.local_id.clone();
         self.terminal_manager.current_mut(Some(&session_id))
     }
 
     pub(super) fn current_terminal_status(&self) -> Option<&TerminalStatus> {
         self.terminal_manager.status(
-            self.current_session()
+            self.workspace
+                .current_session()
                 .map(|session| session.local_id.as_str()),
         )
     }
@@ -431,6 +438,23 @@ impl HarnessCore {
         let Some(terminal) = self.current_terminal_mut() else {
             return false;
         };
+
+        // The alternate screen has no local scrollback (vt100 sizes the alternate
+        // grid with scrollback 0), so local scrolling here would be a silent
+        // no-op while Pi's fullscreen TUI detaches its own follow-end viewport
+        // from the bottom. Forward the scroll keys as plain (unshifted)
+        // sequences so Pi's altScreen bindings scroll its transcript, and End
+        // re-engages follow-end so streaming content tracks the bottom again.
+        if terminal.screen().alternate_screen() {
+            let bytes: &[u8] = match stroke.key {
+                KeyToken::Named(NamedKeyToken::PageUp) => b"\x1b[5~",
+                KeyToken::Named(NamedKeyToken::PageDown) => b"\x1b[6~",
+                KeyToken::Named(NamedKeyToken::Home) => b"\x1b[H",
+                KeyToken::Named(NamedKeyToken::End) => b"\x1b[F",
+                _ => return false,
+            };
+            return terminal.send_bytes(bytes).is_ok_and(|sent| sent);
+        }
         match stroke.key {
             KeyToken::Named(NamedKeyToken::PageUp) => {
                 let page = i32::from(terminal.screen().size().0.saturating_sub(2).max(1));
@@ -724,10 +748,11 @@ impl HarnessCore {
         self.mark_terminals_dirty();
         self.ensure_terminals_synced();
 
-        if let Some((project_index, session_index)) =
-            self.workspace.selected_terminal_restart_target()
-        {
-            self.restart_terminal_for_session(project_index, session_index);
+        if let Some(session_index) = self.workspace.selected_session_index() {
+            self.restart_terminal_for_session(
+                self.workspace.selected_project_index(),
+                session_index,
+            );
         }
     }
 
@@ -747,6 +772,10 @@ impl HarnessCore {
     ) -> bool {
         if !snapshot.is_valid() {
             return false;
+        }
+
+        if let Some(parent_session_file) = snapshot.parent_session_file.as_ref() {
+            return self.apply_child_sidecar_snapshot(&snapshot, parent_session_file, locator);
         }
 
         let Some((project_index, session_index)) = locator.locate(&snapshot) else {
@@ -794,6 +823,71 @@ impl HarnessCore {
                 prev_pi_session_id,
                 prev_session_file,
             );
+        }
+
+        true
+    }
+
+    /// Route a subagent snapshot to its parent session's project. Task
+    /// subagents run in-process under the parent's PTY, so the child row
+    /// inherits the parent's project association; the main session row never
+    /// absorbs subagent identity from these snapshots.
+    fn apply_child_sidecar_snapshot(
+        &mut self,
+        snapshot: &PiSidecarSnapshot,
+        parent_session_file: &Path,
+        locator: &mut SessionLocator,
+    ) -> bool {
+        if !snapshot.is_valid() {
+            return false;
+        }
+
+        // The parent row owns the PTY and the project: match its stable
+        // session file first, falling back to the harness session key the
+        // subagent inherited for the window before the parent's file binds.
+        let parent_location = locator
+            .by_session_file
+            .get(parent_session_file)
+            .copied()
+            .or_else(|| {
+                let harness_id = snapshot.harness_session_id.as_deref()?;
+                locator.by_harness_session_id.get(harness_id).copied()
+            });
+        let Some((project_index, _)) = parent_location else {
+            return false;
+        };
+
+        let selected_key = self
+            .workspace
+            .current_session()
+            .map(|session| session.local_id.clone());
+        let outcome = {
+            let project = &mut self.workspace.projects_mut()[project_index];
+            apply_child_snapshot_to_project(
+                project,
+                snapshot,
+                parent_session_file,
+                selected_key.as_deref(),
+                now_millis(),
+            )
+        };
+        let Some(outcome) = outcome else {
+            return false;
+        };
+
+        if outcome.promote_project {
+            self.promote_project_to_front(project_index);
+        }
+        if outcome.inserted {
+            *locator = SessionLocator::rebuild(self.workspace.projects());
+            self.mark_terminals_dirty();
+        } else if let Some(session) = self
+            .workspace
+            .projects()
+            .get(project_index)
+            .and_then(|project| project.sessions.get(outcome.child_index))
+        {
+            locator.refresh_session(project_index, outcome.child_index, session, None, None);
         }
 
         true

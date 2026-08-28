@@ -1,8 +1,8 @@
+pub mod agent;
 #[path = "app/mod.rs"]
 pub mod app;
 pub mod config;
 pub mod notify;
-pub mod agent;
 #[path = "render/mod.rs"]
 pub mod render;
 pub mod sidecar;

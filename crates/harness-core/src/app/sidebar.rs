@@ -2,6 +2,7 @@ use crate::render::Color;
 use crate::state::{Project, Session};
 
 use super::glyphs::GlyphSet;
+use super::selection::sidebar_session_order;
 use super::theme::Role;
 
 pub(super) const SIDEBAR_ANIMATION_FRAME_MS: u64 = 10;
@@ -38,6 +39,9 @@ pub(super) enum SidebarStatusKind {
 #[derive(Clone, Debug)]
 pub(super) struct SidebarRow {
     pub(super) kind: SidebarRowKind,
+    /// Nesting level: 0 for projects and top-level sessions, 1+ for
+    /// subagent rows rendered under their parent.
+    pub(super) depth: usize,
     pub(super) text: String,
     pub(super) fg: Role,
     pub(super) bg: Option<Color>,
@@ -304,6 +308,7 @@ pub(super) fn build_sidebar_rows(
         let status = project_sidebar_status(project);
         rows.push(SidebarRow {
             kind: SidebarRowKind::Project(project_index),
+            depth: 0,
             text: project.name.clone(),
             fg: if project_focused {
                 Role::Text
@@ -317,10 +322,8 @@ pub(super) fn build_sidebar_rows(
             status,
         });
 
-        for (session_index, session) in project.sessions.iter().enumerate() {
-            if !session.should_render_in_sidebar() {
-                continue;
-            }
+        for (session_index, depth) in sidebar_session_order(project) {
+            let session = &project.sessions[session_index];
             let selected = project_selected
                 && selected_session_visible
                 && Some(session_index) == selected_session;
@@ -330,6 +333,7 @@ pub(super) fn build_sidebar_rows(
                     project_index,
                     session_index,
                 },
+                depth,
                 text: session.name.clone(),
                 fg: if selected { Role::Text } else { Role::Muted },
                 bg: None,
@@ -342,6 +346,7 @@ pub(super) fn build_sidebar_rows(
 
         rows.push(SidebarRow {
             kind: SidebarRowKind::Label,
+            depth: 0,
             text: String::new(),
             fg: Role::Muted,
             bg: None,
@@ -670,6 +675,7 @@ mod tests {
         let rows: Vec<_> = (0..20)
             .map(|index| SidebarRow {
                 kind: SidebarRowKind::Label,
+                depth: 0,
                 text: index.to_string(),
                 fg: Role::Text,
                 bg: None,

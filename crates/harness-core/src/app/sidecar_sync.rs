@@ -8,22 +8,26 @@ pub(super) use super::sidecar_reducer::{
 #[cfg(test)]
 use crate::agent::PiSidecarSnapshot;
 #[cfg(test)]
-use crate::state::Session;
-#[cfg(test)]
 use crate::terminal::TerminalStatus;
+
+#[cfg(test)]
+use super::sidecar_reducer::apply_child_snapshot_to_project;
+#[cfg(test)]
+use std::path::Path;
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     use super::*;
-
+    use crate::state::{Project, Session};
     fn snapshot(stage: crate::agent::PiSessionStage, ts_ms: u64) -> PiSidecarSnapshot {
         PiSidecarSnapshot {
             kind: Some("snapshot".into()),
             session_id: "pi-session-1".into(),
             harness_session_id: Some("local-session-1".into()),
             session_file: Some(PathBuf::from("/tmp/pi-session-1.jsonl")),
+            parent_session_file: None,
             session_name: Some("Imported session".into()),
             stage,
             queued: false,
@@ -42,6 +46,7 @@ mod tests {
             session_id: "pi-session-2".into(),
             harness_session_id: None,
             session_file: None,
+            parent_session_file: None,
             session_name: None,
             stage: crate::agent::PiSessionStage::Idle,
             queued: false,
@@ -61,6 +66,7 @@ mod tests {
             session_id: "pi-session-1".into(),
             harness_session_id: None,
             session_file: None,
+            parent_session_file: None,
             session_name: None,
             stage: crate::agent::PiSessionStage::Tool,
             queued: false,
@@ -90,6 +96,7 @@ mod tests {
             session_id: "pi-session-1".into(),
             harness_session_id: None,
             session_file: None,
+            parent_session_file: None,
             session_name: None,
             stage: crate::agent::PiSessionStage::Idle,
             queued: false,
@@ -442,6 +449,7 @@ mod tests {
                 session_id: "pi-session-1".into(),
                 harness_session_id: Some("local-session-1".into()),
                 session_file: Some(PathBuf::from("/tmp/pi-session-1.jsonl")),
+                parent_session_file: None,
                 session_name: Some("Imported session".into()),
                 stage: crate::agent::PiSessionStage::Idle,
                 queued: true,
@@ -456,5 +464,113 @@ mod tests {
         assert_eq!(applied, SidecarApplyResult::default());
         assert!(session.runtime.queued);
         assert!(!session.runtime.unread);
+    }
+
+    fn child_snapshot(
+        session_id: &str,
+        _parent: &str,
+        stage: crate::agent::PiSessionStage,
+    ) -> PiSidecarSnapshot {
+        PiSidecarSnapshot {
+            kind: Some("snapshot".into()),
+            session_id: session_id.into(),
+            harness_session_id: Some("local-session-1".into()),
+            session_file: Some(PathBuf::from(format!(
+                "/sessions/parent-session/{session_id}.jsonl"
+            ))),
+            parent_session_file: Some(PathBuf::from("/sessions/parent.jsonl")),
+            session_name: Some(session_id.into()),
+            stage,
+            queued: false,
+            interrupted: false,
+            tool_name: None,
+            ts_ms: 10,
+        }
+    }
+
+    #[test]
+    fn child_snapshot_creates_row_after_parent_and_binds_runtime() {
+        let mut project = Project::new(PathBuf::from("/tmp/project"));
+        let mut parent = Session::new_draft();
+        parent.pi_session_id = Some("parent-omp-1".into());
+        parent.session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
+        parent.draft = false;
+        parent.runtime.running = true;
+        project.sessions.push(parent);
+
+        let outcome = apply_child_snapshot_to_project(
+            &mut project,
+            &child_snapshot(
+                "scout-1",
+                "/sessions/parent.jsonl",
+                crate::agent::PiSessionStage::Tool,
+            ),
+            Path::new("/sessions/parent.jsonl"),
+            Some("unselected"),
+            300,
+        )
+        .unwrap();
+
+        // Child row inserted directly after the parent, bound to the
+        // subagent's own identity.
+        assert_eq!(outcome.child_index, 1);
+        assert!(outcome.inserted);
+        assert_eq!(project.sessions.len(), 2);
+        assert_eq!(
+            project.sessions[1].pi_session_id.as_deref(),
+            Some("scout-1")
+        );
+        assert_eq!(project.sessions[1].name, "scout-1");
+        assert!(project.sessions[1].runtime.running);
+        // The parent keeps its own identity and running state.
+        assert_eq!(
+            project.sessions[0].pi_session_id.as_deref(),
+            Some("parent-omp-1")
+        );
+        assert!(project.sessions[0].runtime.running);
+    }
+
+    #[test]
+    fn child_snapshot_matches_existing_child_row_without_rebinding_parent() {
+        let mut project = Project::new(PathBuf::from("/tmp/project"));
+        let mut parent = Session::new_draft();
+        parent.pi_session_id = Some("parent-omp-1".into());
+        parent.session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
+        parent.draft = false;
+        project.sessions.push(parent);
+
+        let first = apply_child_snapshot_to_project(
+            &mut project,
+            &child_snapshot(
+                "scout-1",
+                "/sessions/parent.jsonl",
+                crate::agent::PiSessionStage::Thinking,
+            ),
+            Path::new("/sessions/parent.jsonl"),
+            None,
+            300,
+        )
+        .unwrap();
+        let second = apply_child_snapshot_to_project(
+            &mut project,
+            &child_snapshot(
+                "scout-1",
+                "/sessions/parent.jsonl",
+                crate::agent::PiSessionStage::Idle,
+            ),
+            Path::new("/sessions/parent.jsonl"),
+            None,
+            400,
+        )
+        .map(|o| o.child_index);
+
+        assert_eq!(first.child_index, 1);
+        assert_eq!(second, Some(1));
+        // Still exactly one child row; parent identity untouched.
+        assert_eq!(project.sessions.len(), 2);
+        assert_eq!(
+            project.sessions[0].pi_session_id.as_deref(),
+            Some("parent-omp-1")
+        );
     }
 }

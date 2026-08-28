@@ -172,7 +172,9 @@ pub(super) fn fade_toward(c: Color, t: Color, m: u8) -> Color {
     }
     let (r1, g1, b1) = c.rgb_components();
     let (r2, g2, b2) = t.rgb_components();
-    let f = |a: u8, b: u8| ((u16::from(a) * u16::from(255 - m) + u16::from(b) * u16::from(m)) / 255) as u8;
+    let f = |a: u8, b: u8| {
+        ((u16::from(a) * u16::from(255 - m) + u16::from(b) * u16::from(m)) / 255) as u8
+    };
     Color::rgb(f(r1, r2), f(g1, g2), f(b1, b2))
 }
 

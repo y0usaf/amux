@@ -35,6 +35,8 @@ pub struct PersistedSession {
     pub name: String,
     pub pi_session_id: Option<String>,
     pub session_file: Option<PathBuf>,
+    #[serde(default)]
+    pub parent_session_file: Option<PathBuf>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
     #[serde(default)]

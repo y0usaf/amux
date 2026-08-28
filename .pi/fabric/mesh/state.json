@@ -5,27 +5,150 @@
       "key": "topology/peer-seq",
       "value": {
         "format": 1,
-        "next": 1
+        "next": 12
       },
-      "version": 1,
-      "updatedAt": 1787842053141,
+      "version": 12,
+      "updatedAt": 1787945087165,
       "updatedBy": {
-        "id": "session:01a043b0-92dd-7b0b-b6c5-c9db468e0d5c",
+        "id": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
         "name": "main",
         "kind": "main",
-        "sessionId": "01a043b0-92dd-7b0b-b6c5-c9db468e0d5c"
+        "sessionId": "01a04927-95d3-73ac-8992-045d7ddd2d6c"
+      }
+    },
+    "topology/hosts/27d924e18da7cb69afe2e7afdc2ae86e59f844b2be65572f1ac6456fb8406071": {
+      "key": "topology/hosts/27d924e18da7cb69afe2e7afdc2ae86e59f844b2be65572f1ac6456fb8406071",
+      "value": {
+        "format": 1,
+        "id": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "rootId": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "identity": {
+          "id": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+          "name": "main",
+          "kind": "main",
+          "sessionId": "01a04927-95d3-73ac-8992-045d7ddd2d6c"
+        },
+        "startedAt": 1787945087157,
+        "updatedAt": 1787945087443,
+        "expiresAt": 1787945102443
+      },
+      "version": 859,
+      "updatedAt": 1787945087443,
+      "updatedBy": {
+        "id": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "01a04927-95d3-73ac-8992-045d7ddd2d6c"
+      }
+    },
+    "sessions/01a04927-95d3-73ac-8992-045d7ddd2d6c": {
+      "key": "sessions/01a04927-95d3-73ac-8992-045d7ddd2d6c",
+      "value": {
+        "id": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "name": "AMU-12",
+        "label": "AMU-12",
+        "kind": "peer",
+        "status": "running",
+        "runner": "pi",
+        "transport": "host",
+        "cwd": "/home/y0usaf/dev/maintaining/amux",
+        "sessionId": "01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "model": "vercel-ai-gateway/zai/glm-5.3-flash@wafer",
+        "thinking": "high",
+        "startedAt": 1787945087157,
+        "updatedAt": 1787945087443,
+        "pendingMessages": false,
+        "local": false
+      },
+      "version": 857,
+      "updatedAt": 1787945087445,
+      "updatedBy": {
+        "id": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "01a04927-95d3-73ac-8992-045d7ddd2d6c"
+      }
+    },
+    "topology/participants/27d924e18da7cb69afe2e7afdc2ae86e59f844b2be65572f1ac6456fb8406071": {
+      "key": "topology/participants/27d924e18da7cb69afe2e7afdc2ae86e59f844b2be65572f1ac6456fb8406071",
+      "value": {
+        "format": 1,
+        "id": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "kind": "root",
+        "rootId": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "ownerHostId": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "ownerIdentityId": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "name": "main",
+        "status": "running",
+        "runner": "pi",
+        "transport": "host",
+        "capabilities": [
+          "steer",
+          "followUp",
+          "fabric"
+        ],
+        "cwd": "/home/y0usaf/dev/maintaining/amux",
+        "sessionId": "01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "model": "vercel-ai-gateway/zai/glm-5.3-flash@wafer",
+        "thinking": "high",
+        "startedAt": 1787945087157,
+        "updatedAt": 1787945087443,
+        "pendingMessages": false,
+        "controlProtocol": "v1",
+        "label": "AMU-12"
+      },
+      "version": 859,
+      "updatedAt": 1787945087446,
+      "updatedBy": {
+        "id": "session:01a04927-95d3-73ac-8992-045d7ddd2d6c",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "01a04927-95d3-73ac-8992-045d7ddd2d6c"
       }
     }
   },
   "versions": {
-    "topology/peer-seq": 1,
+    "topology/peer-seq": 12,
     "topology/hosts/c172a2e350184790c8622f7f1b7e10d1e15ec072c37e75e6a604cc17aaeeb264": 256,
     "sessions/01a043b0-92dd-7b0b-b6c5-c9db468e0d5c": 255,
-    "topology/participants/c172a2e350184790c8622f7f1b7e10d1e15ec072c37e75e6a604cc17aaeeb264": 256
+    "topology/participants/c172a2e350184790c8622f7f1b7e10d1e15ec072c37e75e6a604cc17aaeeb264": 256,
+    "topology/hosts/4b2409b2d43e6b2ca4082ae56977dd621cdfa51ca4569e8004052edb1eb49088": 481,
+    "sessions/01a04621-0dee-732c-ba2c-2db26b94e9cf": 480,
+    "topology/participants/4b2409b2d43e6b2ca4082ae56977dd621cdfa51ca4569e8004052edb1eb49088": 481,
+    "topology/hosts/902995ce875bb448d64e9d4c17b1540b4542eb039af733e445a61907781df3f3": 232,
+    "sessions/01a04641-8412-7548-9fc2-8f434749e3d9": 231,
+    "topology/participants/902995ce875bb448d64e9d4c17b1540b4542eb039af733e445a61907781df3f3": 232,
+    "topology/hosts/9777051c3c14c1532a8b2f6a5a5b65a8fd2cd8670cc8ba7513caa751fd8906ee": 1017,
+    "sessions/01a04647-5912-7749-84e9-14d39f8f76f0": 1015,
+    "topology/participants/9777051c3c14c1532a8b2f6a5a5b65a8fd2cd8670cc8ba7513caa751fd8906ee": 1017,
+    "topology/hosts/a3117c389ea44d94736b450e8f118e13b171ae46c7f575e5fbd4eec5d4dccc05": 868,
+    "sessions/01a04655-f859-7e78-8414-236c0f8f4842": 865,
+    "topology/participants/a3117c389ea44d94736b450e8f118e13b171ae46c7f575e5fbd4eec5d4dccc05": 868,
+    "topology/hosts/4515c5e0bacf77369716a01d2cf64aba0362bfacd0f1a95e21fb7ab5a4c957eb": 340,
+    "sessions/01a046b8-8bc7-7989-9611-6ca9b93e1003": 339,
+    "topology/participants/4515c5e0bacf77369716a01d2cf64aba0362bfacd0f1a95e21fb7ab5a4c957eb": 340,
+    "topology/hosts/27d924e18da7cb69afe2e7afdc2ae86e59f844b2be65572f1ac6456fb8406071": 859,
+    "sessions/01a04927-95d3-73ac-8992-045d7ddd2d6c": 857,
+    "topology/participants/27d924e18da7cb69afe2e7afdc2ae86e59f844b2be65572f1ac6456fb8406071": 859
   },
   "tombstoneOrder": [
     "sessions/01a043b0-92dd-7b0b-b6c5-c9db468e0d5c",
     "topology/participants/c172a2e350184790c8622f7f1b7e10d1e15ec072c37e75e6a604cc17aaeeb264",
-    "topology/hosts/c172a2e350184790c8622f7f1b7e10d1e15ec072c37e75e6a604cc17aaeeb264"
+    "topology/hosts/c172a2e350184790c8622f7f1b7e10d1e15ec072c37e75e6a604cc17aaeeb264",
+    "sessions/01a04621-0dee-732c-ba2c-2db26b94e9cf",
+    "topology/participants/4b2409b2d43e6b2ca4082ae56977dd621cdfa51ca4569e8004052edb1eb49088",
+    "topology/hosts/4b2409b2d43e6b2ca4082ae56977dd621cdfa51ca4569e8004052edb1eb49088",
+    "sessions/01a04641-8412-7548-9fc2-8f434749e3d9",
+    "topology/participants/902995ce875bb448d64e9d4c17b1540b4542eb039af733e445a61907781df3f3",
+    "topology/hosts/902995ce875bb448d64e9d4c17b1540b4542eb039af733e445a61907781df3f3",
+    "sessions/01a04655-f859-7e78-8414-236c0f8f4842",
+    "topology/participants/a3117c389ea44d94736b450e8f118e13b171ae46c7f575e5fbd4eec5d4dccc05",
+    "topology/hosts/a3117c389ea44d94736b450e8f118e13b171ae46c7f575e5fbd4eec5d4dccc05",
+    "sessions/01a04647-5912-7749-84e9-14d39f8f76f0",
+    "topology/participants/9777051c3c14c1532a8b2f6a5a5b65a8fd2cd8670cc8ba7513caa751fd8906ee",
+    "topology/hosts/9777051c3c14c1532a8b2f6a5a5b65a8fd2cd8670cc8ba7513caa751fd8906ee",
+    "sessions/01a046b8-8bc7-7989-9611-6ca9b93e1003",
+    "topology/participants/4515c5e0bacf77369716a01d2cf64aba0362bfacd0f1a95e21fb7ab5a4c957eb",
+    "topology/hosts/4515c5e0bacf77369716a01d2cf64aba0362bfacd0f1a95e21fb7ab5a4c957eb"
   ]
 }
