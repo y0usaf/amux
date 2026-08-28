@@ -201,6 +201,7 @@ dependencies = [
 [[package]]
 name = "cordis"
 version = "0.1.0"
+source = "git+https://github.com/y0usaf/cordis-rs?rev=cf63158e1dca7f75848ee09d0c583a86fd741f80#cf63158e1dca7f75848ee09d0c583a86fd741f80"
 dependencies = [
  "wasmtime",
 ]
@@ -1146,13 +1147,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "omp-harness"
-version = "0.1.0"
-dependencies = [
- "harness-core",
-]
-
-[[package]]
 name = "omp-harness-tui"
 version = "0.1.0"
 dependencies = [
@@ -1226,13 +1220,6 @@ dependencies = [
  "fixedbitset 0.5.7",
  "hashbrown 0.15.5",
  "indexmap",
-]
-
-[[package]]
-name = "pi-harness"
-version = "0.1.0"
-dependencies = [
- "harness-core",
 ]
 
 [[package]]

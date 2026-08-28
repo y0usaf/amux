@@ -1,6 +1,9 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { parseThemeAnsi, resolveTheme } from "./sidechannel.js"
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { parseThemeAnsi, resolveTheme, parentSessionFileFromSessionFile } from "./sidechannel.js"
 
 test("parseThemeAnsi decodes foreground truecolor", () => {
   assert.deepEqual(parseThemeAnsi("\x1b[38;2;1;23;255m"), { kind: "rgb", r: 1, g: 23, b: 255 })
@@ -49,4 +52,37 @@ test("resolveTheme dispatches foreground and background roles independently", ()
   for (const [i, role] of roles.entries()) {
     if (![2, 6, 7, 8, 10].includes(i)) assert.ok(role.kind === "ansi", `role ${i} should be coloured`)
   }
+})
+
+test("parentSessionFileFromSessionFile derives the parent session file from the artifacts dir", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sidechannel-test-"))
+  try {
+    writeFileSync(join(dir, "2026-08-27T17-00-00Z_parent-uuid.jsonl"), "")
+    const child = join(dir, "2026-08-27T17-00-00Z_parent-uuid", "Scout.jsonl")
+    mkdirSync(join(dir, "2026-08-27T17-00-00Z_parent-uuid"))
+    writeFileSync(child, "")
+    assert.equal(
+      parentSessionFileFromSessionFile(child),
+      join(dir, "2026-08-27T17-00-00Z_parent-uuid.jsonl"),
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("parentSessionFileFromSessionFile is undefined for top-level session files", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sidechannel-test-"))
+  try {
+    const top = join(dir, "2026-08-27T17-00-00Z_root-uuid.jsonl")
+    writeFileSync(top, "")
+    assert.equal(parentSessionFileFromSessionFile(top), undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("parentSessionFileFromSessionFile is undefined for missing or empty paths", () => {
+  assert.equal(parentSessionFileFromSessionFile(undefined), undefined)
+  assert.equal(parentSessionFileFromSessionFile(""), undefined)
+  assert.equal(parentSessionFileFromSessionFile(join(tmpdir(), "sidechannel-missing", "root.jsonl")), undefined)
 })

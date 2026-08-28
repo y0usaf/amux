@@ -1,10 +1,10 @@
+use crate::agent::{self, PiUsageDay, PiUsageModelBreakdown, PiUsageReport, PiUsageTotals};
 use crate::app::cell_surface::{
     display_cell_width, draw_box, render_cell_scrollbar, truncate_to_cells, CellSurface,
 };
 use crate::app::glyphs::GlyphSet;
 use crate::app::layout::CellRect as Rect;
 use crate::app::theme::{self, DerivedTheme};
-use crate::agent::{self, PiUsageDay, PiUsageModelBreakdown, PiUsageReport, PiUsageTotals};
 
 use super::super::raw::terminal_size;
 use super::dialog::render_dialog_title_line;

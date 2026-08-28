@@ -1,4 +1,7 @@
+use std::path::Path;
+
 use crate::agent::PiSidecarSnapshot;
+use crate::state::Project;
 use crate::state::Session;
 use crate::terminal::TerminalStatus;
 
@@ -166,4 +169,98 @@ pub(super) fn apply_snapshot_to_session(
     }
 
     result
+}
+
+/// Outcome of routing a subagent snapshot into a project.
+pub(super) struct ChildApplyOutcome {
+    pub(super) child_index: usize,
+    pub(super) inserted: bool,
+    pub(super) promote_project: bool,
+}
+
+/// Apply a subagent snapshot to its project: match or create the child row,
+/// then bind runtime state through the shared snapshot reducer. The parent
+/// row is never touched — subagent identity stays on child rows only.
+pub(super) fn apply_child_snapshot_to_project(
+    project: &mut Project,
+    snapshot: &PiSidecarSnapshot,
+    parent_session_file: &Path,
+    selected_key: Option<&str>,
+    now_ms: u64,
+) -> Option<ChildApplyOutcome> {
+    let parent_index = project.sessions.iter().position(|session| {
+        !session.is_child() && session.session_file.as_deref() == Some(parent_session_file)
+    });
+
+    let existing_index = project.sessions.iter().position(|session| {
+        session.is_child()
+            && (session.pi_session_id.as_deref() == Some(snapshot.session_id.as_str())
+                || snapshot
+                    .session_file
+                    .as_ref()
+                    .is_some_and(|file| session.session_file.as_deref() == Some(file.as_path())))
+    });
+
+    let child_index = match existing_index {
+        Some(index) => index,
+        None => {
+            let insert_at = match parent_index {
+                Some(parent_index) => {
+                    let mut at = parent_index + 1;
+                    while at < project.sessions.len() && project.sessions[at].is_child() {
+                        at += 1;
+                    }
+                    at
+                }
+                None => project.sessions.len(),
+            };
+            project.sessions.insert(
+                insert_at,
+                child_session_from_snapshot(snapshot, parent_session_file, now_ms),
+            );
+            insert_at
+        }
+    };
+
+    let selected =
+        selected_key.is_some_and(|key| project.sessions[child_index].local_id.as_str() == key);
+    let outcome = {
+        let session = &mut project.sessions[child_index];
+        apply_snapshot_to_session(session, snapshot, selected, now_ms)
+    };
+    Some(ChildApplyOutcome {
+        child_index,
+        inserted: existing_index.is_none(),
+        promote_project: outcome.promote_project,
+    })
+}
+
+fn child_session_from_snapshot(
+    snapshot: &PiSidecarSnapshot,
+    parent_session_file: &Path,
+    now_ms: u64,
+) -> Session {
+    let mut child = Session::new_draft();
+    child.pi_session_id = Some(snapshot.session_id.clone());
+    child.session_file = snapshot.session_file.clone();
+    child.parent_session_file = Some(parent_session_file.to_path_buf());
+    child.created_at_ms = now_ms;
+    child.updated_at_ms = now_ms;
+    child.draft = false;
+    child.name = snapshot
+        .session_name
+        .as_ref()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            snapshot
+                .session_file
+                .as_ref()
+                .and_then(|path| path.file_stem())
+                .and_then(|stem| stem.to_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| "Subagent".to_string())
+        });
+    child
 }

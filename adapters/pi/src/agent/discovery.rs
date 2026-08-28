@@ -3,10 +3,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
-use crate::agent::PI_EXTENSION_PATH_ENV;
+use crate::agent::EXTENSION_PATH_ENV;
 
 pub const PACKAGED_EXTENSION_REL: &str = "share/pi-harness/pi-extension/index.js";
-pub const DEV_EXTENSION_REL: &str = "pi-extension/index.js";
 
 #[derive(Clone, Debug)]
 pub enum PiLaunch {
@@ -104,7 +103,7 @@ pub fn launch_argv(
 }
 
 pub fn extension_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var(PI_EXTENSION_PATH_ENV) {
+    if let Ok(path) = std::env::var(EXTENSION_PATH_ENV) {
         let path = PathBuf::from(path);
         if path.exists() {
             return Some(path);
@@ -120,7 +119,7 @@ pub fn extension_path() -> Option<PathBuf> {
         }
     }
 
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEV_EXTENSION_REL);
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../adapters/pi/extension");
     dev.exists().then_some(dev)
 }
 
@@ -406,7 +405,7 @@ mod tests {
         let dir = TestDir::new();
         let extension = dir.path().join("harness-sidechannel.js");
         fs::write(&extension, "// test extension\n").unwrap();
-        let _guard = EnvGuard::set(PI_EXTENSION_PATH_ENV, extension.as_os_str());
+        let _guard = EnvGuard::set(EXTENSION_PATH_ENV, extension.as_os_str());
 
         assert_eq!(extension_path(), Some(extension));
     }

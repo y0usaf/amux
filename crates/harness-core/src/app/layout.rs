@@ -150,6 +150,7 @@ mod tests {
         assert_eq!(layout.sidebar.row, 0);
         assert_eq!(layout.sidebar.rows, 39);
         assert_eq!(layout.terminal_card.col, layout.sidebar.cols);
+        assert_eq!(layout.terminal_card.cols, 120 - layout.sidebar.cols);
         assert_eq!(layout.terminal_card.rows, 39);
         assert_eq!(layout.terminal.row, 0);
         assert_eq!(layout.statusbar, CellRect::new(0, 39, 120, 1));

@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-harness-core = { path = "../../crates/harness-core" }
+harness-core = { path = "../../crates/harness-core", features = ["omp"] }

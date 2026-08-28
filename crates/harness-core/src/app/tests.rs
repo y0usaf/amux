@@ -21,6 +21,7 @@ fn snapshot(stage: PiSessionStage, queued: bool) -> PiSidecarSnapshot {
         session_id: "pi-session-1".into(),
         harness_session_id: Some("local-session-1".into()),
         session_file: Some(PathBuf::from("/tmp/pi-session-1.jsonl")),
+        parent_session_file: None,
         session_name: Some("Test session".into()),
         stage,
         queued,
@@ -51,6 +52,7 @@ fn render_project_title_with_current(
     let mut surface = CellSurface::new(24, 3, palette.fg, palette.bg);
     let rows = [SidebarRow {
         kind: SidebarRowKind::Project(0),
+        depth: 0,
         text: "Project".into(),
         fg: theme::Role::Heading,
         bg: None,
@@ -189,6 +191,7 @@ fn notification_status_tints_session_title() {
             project_index: 0,
             session_index: 0,
         },
+        depth: 0,
         text: "Unread session".into(),
         fg: theme::Role::Text,
         bg: None,
@@ -228,6 +231,7 @@ fn interrupted_status_tints_session_title_sriracha() {
             project_index: 0,
             session_index: 0,
         },
+        depth: 0,
         text: "Interrupted session".into(),
         fg: theme::Role::Text,
         bg: None,
@@ -327,6 +331,7 @@ fn sidebar_divider_colors_only_the_glyph() {
     let mut surface = CellSurface::new(6, 2, palette.fg, palette.bg);
     let rows = [SidebarRow {
         kind: SidebarRowKind::Label,
+        depth: 0,
         text: "sidebar".into(),
         fg: theme::Role::Text,
         bg: None,
@@ -431,6 +436,7 @@ fn selected_empty_project_draws_accent_crown_jewel() {
     let mut surface = CellSurface::new(24, 3, palette.fg, palette.bg);
     let rows = [SidebarRow {
         kind: SidebarRowKind::Project(0),
+        depth: 0,
         text: "PROJECT".into(),
         fg: theme::Role::Text,
         bg: None,

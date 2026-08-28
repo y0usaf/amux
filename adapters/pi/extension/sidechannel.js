@@ -5,8 +5,9 @@
 // Downstream (harness → extension): `hello` (rail width) and
 // `digest` (cross-session summary) lines consumed into the shared store.
 
-import { readFileSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import net from "node:net"
+import { dirname } from "node:path"
 
 const SOCKET_PATH = process.env.AGENT_HARNESS_PI_SIDECAR_SOCKET
 const HARNESS_SESSION_ID = process.env.AGENT_HARNESS_PI_SESSION_KEY
@@ -38,6 +39,19 @@ export function resolveTheme(ctx) {
 		return parsed || { kind: "default" }
 	})
 }
+// Subagent sessions live inside the parent session's artifacts dir
+// (`<parent>.jsonl` strips its `.jsonl` suffix to `<parent>/`, and a child
+// writes `<parent>/<agentId>.jsonl`). Detecting that sibling file identifies
+// this runner as a subagent and names its parent row.
+export function parentSessionFileFromSessionFile(file) {
+	if (!file) return undefined
+	const parent = `${dirname(file)}.jsonl`
+	try {
+		return statSync(parent).isFile() ? parent : undefined
+	} catch {
+		return undefined
+	}
+}
 
 function firstNonEmptyLine(text) {
 	for (const line of `${text || ""}`.split("\n")) {
@@ -68,6 +82,7 @@ export function registerSidechannel(pi, store) {
 	let destroyed = false
 	let sessionId = undefined
 	let sessionFile = undefined
+	let parentSessionFile = undefined
 	let lastCtx
 	let stage = "idle"
 	let queued = false
@@ -78,6 +93,9 @@ export function registerSidechannel(pi, store) {
 	const activeTools = new Map()
 	let lastThemeKey
 	const emitTheme = (ctx) => {
+		// Subagent runners do not own the terminal chrome; the main runner's
+		// theme line is authoritative.
+		if (parentSessionFile) return
 		if (!socket || socket.destroyed || !ctx?.ui?.theme) return
 		const roles = resolveTheme(ctx), key = JSON.stringify(roles)
 		if (key === lastThemeKey) return
@@ -153,6 +171,7 @@ export function registerSidechannel(pi, store) {
 		lastCtx = ctx
 		sessionId = ctx.sessionManager.getSessionId()
 		sessionFile = ctx.sessionManager.getSessionFile()
+		parentSessionFile = parentSessionFileFromSessionFile(sessionFile)
 		queued = ctx.hasPendingMessages()
 	}
 
@@ -248,6 +267,7 @@ export function registerSidechannel(pi, store) {
 			sessionId,
 			harnessSessionId: HARNESS_SESSION_ID,
 			sessionFile,
+			parentSessionFile,
 			sessionName: currentName(),
 			stage,
 			queued,

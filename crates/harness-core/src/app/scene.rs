@@ -605,6 +605,21 @@ pub(super) fn render_sidebar(
                 if inner_cols <= 0 {
                     continue;
                 }
+                // Subagent rows nest under their parent: two cells of quiet
+                // indent per depth level before the selector branch glyph.
+                let depth_cols = inner_cols.min((row.depth * 2) as i32);
+                let depth_text = "  ".repeat(row.depth);
+                surface.put_text_styled(
+                    inner_col,
+                    row_y,
+                    depth_cols,
+                    row_fg,
+                    row_bg,
+                    &depth_text,
+                    reverse,
+                );
+                let inner_col = inner_col + depth_cols;
+                let inner_cols = inner_cols.saturating_sub(depth_cols);
                 let branch = if row.selector || hovered {
                     SIDEBAR_SELECTOR_GLYPH
                 } else {

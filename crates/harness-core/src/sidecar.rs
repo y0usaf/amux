@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 
-use crate::notify::Notify;
 use crate::agent::PiSidecarSnapshot;
+use crate::notify::Notify;
 use stream::read_sidecar_stream;
 
 #[derive(Debug)]
