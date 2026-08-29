@@ -111,20 +111,32 @@ pub(crate) fn spawn_process(
     rows: u16,
     notify: Notify,
 ) -> Result<HostProcess, String> {
+    // Agent launch flags are pi-shaped: `-e <extension>`, `--session <file>`,
+    // `--tui-mode <mode>`. fx accepts none of them (it has no extension host
+    // and resumes with `--resume <id>`), so under feature = "fx" the harness
+    // launches a bare `fx` in the workspace directory and fx starts a fresh
+    // session; row-to-session correlation then happens via the scan instead
+    // of at spawn time.
+    #[cfg(not(feature = "fx"))]
+    let mut args = {
+        let mut args = Vec::new();
+        if let Some(ref extension_path) = target.sidecar_extension_path {
+            args.push("-e".to_string());
+            args.push(extension_path.display().to_string());
+        }
+        if let Some(ref session_file) = target.session_file {
+            args.push("--session".to_string());
+            args.push(session_file.display().to_string());
+        }
+        #[cfg(not(feature = "omp"))]
+        if let Some(tui_mode) = &target.tui_mode {
+            args.push("--tui-mode".to_string());
+            args.push(tui_mode.clone());
+        }
+        args
+    };
+    #[cfg(feature = "fx")]
     let mut args = Vec::new();
-    if let Some(ref extension_path) = target.sidecar_extension_path {
-        args.push("-e".to_string());
-        args.push(extension_path.display().to_string());
-    }
-    if let Some(ref session_file) = target.session_file {
-        args.push("--session".to_string());
-        args.push(session_file.display().to_string());
-    }
-    #[cfg(not(feature = "omp"))]
-    if let Some(tui_mode) = &target.tui_mode {
-        args.push("--tui-mode".to_string());
-        args.push(tui_mode.clone());
-    }
     let argv = agent::launch_argv(target.pi_binary.as_deref(), &args)?;
 
     let pty_system = native_pty_system();
