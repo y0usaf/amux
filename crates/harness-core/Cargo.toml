@@ -21,6 +21,7 @@ vt100 = "0.16"
 
 [features]
 omp = []
+fx = []
 
 [build-dependencies]
 wat = "1"
