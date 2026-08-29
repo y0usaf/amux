@@ -1,0 +1,18 @@
+[package]
+name = "fx-harness-tui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "fx-harness"
+path = "src/main.rs"
+
+[[bin]]
+name = "fx-harness-tui"
+path = "src/main_tui.rs"
+
+[dependencies]
+anyhow = "1"
+env_logger = { version = "0.11", default-features = false }
+log = "0.4"
+harness-core = { path = "../harness-core", features = ["fx"] }
