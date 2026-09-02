@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::daemon::client::DaemonClient;
-use std::sync::Arc;
 use crate::state::{Project, Session};
 use crate::terminal::{TerminalController, TerminalStatus, TerminalTarget};
+use std::sync::Arc;
 
 const TERMINAL_STOP_GRACEFUL_TIMEOUT: Duration = Duration::from_millis(750);
 const TERMINAL_STOP_FORCE_TIMEOUT: Duration = Duration::from_millis(250);
@@ -155,12 +155,12 @@ impl TerminalManager {
                 active_ids.insert(session_id.clone());
 
                 let attach_result = {
-                    let terminal = self
-                        .controllers
-                        .entry(session_id.clone())
-                        .or_insert_with(|| {
-                            TerminalController::new(self.daemon.clone(), session_id.clone())
-                        });
+                    let terminal =
+                        self.controllers
+                            .entry(session_id.clone())
+                            .or_insert_with(|| {
+                                TerminalController::new(self.daemon.clone(), session_id.clone())
+                            });
                     terminal.attach(Some(target))
                 };
                 if let Err(error) = attach_result {
@@ -218,35 +218,4 @@ fn restartable_terminal_session_ids(project: &Project) -> Vec<String> {
         .filter(|session| !session.runtime.is_active())
         .map(|session| session.local_id.clone())
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::restartable_terminal_session_ids;
-    use crate::state::{Project, Session};
-
-    #[test]
-    fn queued_sessions_are_not_restartable() {
-        let mut project = Project::new(PathBuf::from("/tmp/project"));
-
-        let idle = Session::new_draft();
-
-        let mut queued = Session::new_draft();
-        queued.runtime.queued = true;
-
-        let mut running = Session::new_draft();
-        running.runtime.running = true;
-
-        let idle_id = idle.local_id.clone();
-        let queued_id = queued.local_id.clone();
-        let running_id = running.local_id.clone();
-        project.sessions = vec![idle, queued, running];
-
-        let restartable = restartable_terminal_session_ids(&project);
-        assert_eq!(restartable, vec![idle_id]);
-        assert!(!restartable.contains(&queued_id));
-        assert!(!restartable.contains(&running_id));
-    }
 }

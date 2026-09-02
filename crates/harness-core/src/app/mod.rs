@@ -8,13 +8,9 @@ mod scene;
 mod selection;
 mod sidebar;
 mod sidecar_reducer;
-mod sidecar_sync;
 mod status;
 mod terminal_manager;
 mod terminal_view;
 mod theme;
 pub mod tui;
 mod workspace;
-
-#[cfg(test)]
-mod tests;

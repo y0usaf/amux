@@ -7,9 +7,9 @@ pub mod client;
 pub mod proto;
 pub mod server;
 
-use std::path::PathBuf;
 use crate::agent::SOCKET_PREFIX;
 use crate::util::app_runtime_dir;
+use std::path::PathBuf;
 
 /// Socket directory leaf encodes the wire version: bumping
 /// [`proto::WIRE_VERSION`] renames the directory so old and new binaries

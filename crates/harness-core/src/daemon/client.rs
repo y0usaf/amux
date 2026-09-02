@@ -304,18 +304,13 @@ impl DaemonClient {
                                 }
                                 DaemonToClient::SessionOpened { id, pid } => {
                                     if let Ok(mut events) = session_events.lock() {
-                                        events.push(DaemonSessionEvent::SessionOpened {
-                                            id,
-                                            pid,
-                                        });
+                                        events.push(DaemonSessionEvent::SessionOpened { id, pid });
                                     }
                                     notify();
                                 }
                                 DaemonToClient::SessionClosed { id } => {
                                     if let Ok(mut events) = session_events.lock() {
-                                        events.push(DaemonSessionEvent::SessionClosed {
-                                            id,
-                                        });
+                                        events.push(DaemonSessionEvent::SessionClosed { id });
                                     }
                                     notify();
                                 }

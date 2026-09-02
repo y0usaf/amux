@@ -17,6 +17,16 @@ pub fn merge_scanned_sessions(current: &mut Vec<Session>, scanned: Vec<ScannedSe
         if let Some(session_file) = session.session_file.as_ref() {
             old_by_session_file.insert(session_file.clone(), index);
         }
+        // Daemon-adopted rows (from `Session::from_daemon`) carry the
+        // daemon's canonical key as their `local_id` and have no
+        // `session_file` of their own; alias them into the session-file map
+        // under that identity so a later scan of the same file matches the
+        // existing row instead of orphaning it.
+        if session.session_file.is_none()
+            && session.pi_session_id.as_deref() == Some(session.local_id.as_str())
+        {
+            old_by_session_file.insert(PathBuf::from(&session.local_id), index);
+        }
     }
 
     let mut next: Vec<Session> = Vec::with_capacity(scanned.len() + old.len());

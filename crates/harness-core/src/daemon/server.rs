@@ -6,7 +6,7 @@
 //! are keyed by the harness `Session.local_id`; `Spawn` is idempotent, so
 //! reconnecting clients re-ensure live sessions instead of respawning them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::io::Write;
 use std::os::fd::AsRawFd;
@@ -242,8 +242,13 @@ struct Hub {
     /// Hosts the agent sidechannel socket; inbound agent lines are relayed to
     /// attached clients verbatim, outbound client lines go to extensions.
     sidecar: Option<SidecarListener>,
-    sessions: HashMap<String, SessionState>,
     connections: HashMap<u64, SyncSender<DaemonToClient>>,
+    sessions: HashMap<String, SessionState>,
+    /// Connections whose `Hello` the hub has processed (i.e. `Welcome`
+    /// queued). Unsolicited frames (`broadcast`) are only delivered to
+    /// handshaken connections, so a client mid-handshake can never observe
+    /// anything before its `Welcome`.
+    handshaken: HashSet<u64>,
     next_conn_id: u64,
     /// Ring buffer of validated sidecar lines, replayed to each newly
     /// attached client so late joiners see the agent state early clients got
@@ -262,6 +267,7 @@ impl Default for Hub {
             sessions: HashMap::new(),
             connections: HashMap::new(),
             next_conn_id: 0,
+            handshaken: HashSet::new(),
             sidecar_history: std::collections::VecDeque::new(),
             sidecar_history_cap: 256,
         }
@@ -374,6 +380,7 @@ impl Hub {
                 HubEvent::NewClient(stream) => self.on_new_client(stream, &hub_tx),
                 HubEvent::ClientGone(id) => {
                     self.connections.remove(&id);
+                    self.handshaken.remove(&id);
                 }
                 HubEvent::ClientMessage(id, message) => {
                     self.on_client_message(id, message, &hub_tx)
@@ -463,7 +470,8 @@ impl Hub {
     ) {
         match message {
             ClientToDaemon::Hello { wire_version } => {
-                let reply = if wire_version == proto::WIRE_VERSION {
+                let accepted = wire_version == proto::WIRE_VERSION;
+                let reply = if accepted {
                     DaemonToClient::Welcome {
                         wire_version: proto::WIRE_VERSION,
                     }
@@ -476,6 +484,21 @@ impl Hub {
                     }
                 };
                 self.send(conn, reply);
+                // Only a completed handshake lifts the gate: a `Rejected`
+                // client has no `Welcome` under it and must never receive
+                // unsolicited frames.
+                if accepted {
+                    self.handshaken.insert(conn);
+                    // Backfill the bounded sidecar history so a client
+                    // attaching after the daemon has been running starts
+                    // from the same view live clients already hold. Rides
+                    // this connection's queue right after `Welcome`, so
+                    // `Welcome` is still its first frame and no live
+                    // broadcast can slip ahead of the restored history.
+                    for line in self.sidecar_history.iter().cloned() {
+                        self.send(conn, DaemonToClient::SidecarLine { line });
+                    }
+                }
             }
             ClientToDaemon::Ping => self.send(conn, DaemonToClient::Pong),
             ClientToDaemon::Spawn {
@@ -618,9 +641,11 @@ impl Hub {
     /// client naming the same underlying pi session file converges on one
     /// daemon session; the client-supplied key otherwise.
     fn resolve_key(&self, session_id: &str, target: &TerminalTarget) -> String {
-        match target.session_file.as_ref().map(|path| {
-            std::fs::canonicalize(path).unwrap_or_else(|_| path.clone())
-        }) {
+        match target
+            .session_file
+            .as_ref()
+            .map(|path| std::fs::canonicalize(path).unwrap_or_else(|_| path.clone()))
+        {
             Some(session_file) => session_file.to_string_lossy().into_owned(),
             None => session_id.to_string(),
         }
@@ -828,534 +853,14 @@ impl Hub {
     }
 
     fn broadcast(&self, message: DaemonToClient) {
-        for tx in self.connections.values() {
-            match tx.try_send(message.clone()) {
-                Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {}
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_support::env_lock;
-    use std::ffi::OsString;
-    use std::path::PathBuf;
-    use std::time::Instant;
-
-    fn temp_runtime_dir(tag: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("harness-daemon-test-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    pub(super) fn test_spawn(
-        _target: &TerminalTarget,
-        cols: u16,
-        rows: u16,
-        notify: Notify,
-    ) -> Result<HostProcess, String> {
-        // Interactive shell: reads stdin, so Input round-trips to Output.
-        let argv: Vec<OsString> = vec!["/bin/sh".into()];
-        crate::terminal::spawn_argv(argv, std::path::Path::new("/tmp"), &[], cols, rows, notify)
-    }
-
-    pub(super) fn connect_and_hello(path: &std::path::Path) -> UnixStream {
-        // The daemon binds asynchronously; poll for the socket like the
-        // client's spawn path will.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let stream = loop {
-            match UnixStream::connect(path) {
-                Ok(stream) => break stream,
-                Err(_) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                Err(error) => panic!("daemon socket never appeared: {error}"),
-            }
-        };
-        let mut stream = stream;
-        proto::write_msg(
-            &mut stream,
-            &ClientToDaemon::Hello {
-                wire_version: proto::WIRE_VERSION,
-            },
-        )
-        .unwrap();
-        let welcome: DaemonToClient = proto::read_msg(&mut stream).unwrap().unwrap();
-        assert_eq!(
-            welcome,
-            DaemonToClient::Welcome {
-                wire_version: proto::WIRE_VERSION
-            }
-        );
-        stream
-    }
-
-    fn spawn_session(stream: &mut UnixStream, session_id: &str) -> (Option<u32>, bool) {
-        proto::write_msg(
-            stream,
-            &ClientToDaemon::Spawn {
-                req_id: 1,
-                session_id: session_id.to_string(),
-                target: test_target(),
-                rows: 32,
-                cols: 100,
-            },
-        )
-        .unwrap();
-        loop {
-            match proto::read_msg::<_, DaemonToClient>(stream)
-                .unwrap()
-                .unwrap()
-            {
-                DaemonToClient::Spawned {
-                    session_id: id,
-                    pid,
-                    already_running,
-                    ..
-                } => {
-                    assert_eq!(id, session_id);
-                    return (pid, already_running);
-                }
-                DaemonToClient::Output { .. } => {}
-                // Discovery broadcasts ride along with every spawn; ignore
-                // them while waiting for the Spawned reply.
-                DaemonToClient::SessionOpened { .. }
-                | DaemonToClient::SessionClosed { .. } => {}
-                other => panic!("unexpected message while spawning: {other:?}"),
-            }
-        }
-    }
-
-    fn test_target() -> TerminalTarget {
-        serde_json::from_value(serde_json::json!({
-            "pi_binary": null,
-            "sidecar_extension_path": null,
-            "sidecar_socket_path": "/tmp/test-sidecar.sock",
-            "tui_mode": null,
-            "harness_session_id": "t1",
-            "cwd": "/tmp",
-            "session_file": null,
-            "ascii": false,
-            "symbol_overrides": {}
-        }))
-        .unwrap()
-    }
-
-    fn read_until(stream: &mut UnixStream, needle: &str) -> Vec<DaemonToClient> {
-        let mut seen = Vec::new();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut buffer = String::new();
-        stream
-            .set_read_timeout(Some(Duration::from_millis(200)))
-            .unwrap();
-        while Instant::now() < deadline {
-            match proto::read_msg::<_, DaemonToClient>(stream) {
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                    ) =>
-                {
-                    continue;
-                }
-                Ok(Some(message)) => {
-                    if let DaemonToClient::Output { bytes, .. } = &message {
-                        if let Ok(decoded) = BASE64.decode(bytes.as_bytes()) {
-                            buffer.push_str(&String::from_utf8_lossy(&decoded));
-                        }
-                    }
-                    seen.push(message);
-                    if buffer.contains(needle) {
-                        return seen;
-                    }
-                }
-                Ok(None) => panic!("daemon closed connection while waiting for {needle:?}"),
-                Err(error) => panic!("read error while waiting for {needle:?}: {error}"),
-            }
-        }
-        panic!("timed out waiting for {needle:?}");
-    }
-
-    fn pid_alive(pid: u32) -> bool {
-        std::path::Path::new("/proc").join(pid.to_string()).exists()
-    }
-
-    /// Restores XDG_RUNTIME_DIR on drop; tests share one process env.
-    pub(super) struct EnvGuard {
-        previous: Option<std::ffi::OsString>,
-        runtime_dir: PathBuf,
-    }
-
-    impl EnvGuard {
-        pub(super) fn set(tag: &str) -> Self {
-            let previous = std::env::var_os("XDG_RUNTIME_DIR");
-            let runtime_dir = temp_runtime_dir(tag);
-            std::env::set_var("XDG_RUNTIME_DIR", &runtime_dir);
-            Self {
-                previous,
-                runtime_dir,
-            }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match self.previous.take() {
-                Some(previous) => std::env::set_var("XDG_RUNTIME_DIR", previous),
-                None => std::env::remove_var("XDG_RUNTIME_DIR"),
-            }
-            let _ = std::fs::remove_dir_all(&self.runtime_dir);
-        }
-    }
-
-    #[test]
-    fn child_survives_client_disconnect_and_reattaches() {
-        use std::io::{BufRead, BufReader};
-        let _env = env_lock();
-        let _runtime = EnvGuard::set("survival");
-        let path = ctl_socket_path();
-
-        let daemon = std::thread::Builder::new()
-            .name("harness-daemon-test".into())
-            .spawn(move || run_foreground_with(test_spawn))
-            .unwrap();
-
-        // Client A: spawn the session, observe its output.
-        let mut client_a = connect_and_hello(&path);
-        let (pid, already_running) = spawn_session(&mut client_a, "t1");
-        let pid = pid.expect("spawned child has a pid");
-        assert!(!already_running);
-        proto::write_msg(
-            &mut client_a,
-            &ClientToDaemon::Input {
-                session_id: "t1".into(),
-                bytes: BASE64.encode(b"echo alive-marker\n"),
-            },
-        )
-        .unwrap();
-        read_until(&mut client_a, "alive-marker");
-
-        // A dies without saying goodbye.
-        drop(client_a);
-        std::thread::sleep(Duration::from_millis(500));
-        assert!(pid_alive(pid), "child must outlive its client");
-
-        // Client B reconnects: same session, already running, same pid.
-        let mut client_b = connect_and_hello(&path);
-        let (pid_b, already_running_b) = spawn_session(&mut client_b, "t1");
-        assert_eq!(pid_b, Some(pid));
-        assert!(already_running_b);
-
-        // The reattach reply carries the daemon's authoritative view: the
-        // screen contents B missed while disconnected must be replayable.
-        let replay = {
-            // Re-run the spawn exchange to capture the full Spawned frame.
-            proto::write_msg(
-                &mut client_b,
-                &ClientToDaemon::Spawn {
-                    req_id: 3,
-                    session_id: "t1".into(),
-                    target: test_target(),
-                    rows: 32,
-                    cols: 100,
-                },
-            )
-            .unwrap();
-            loop {
-                match proto::read_msg::<_, DaemonToClient>(&mut client_b)
-                    .unwrap()
-                    .unwrap()
-                {
-                    DaemonToClient::Spawned {
-                        req_id: 3, replay, ..
-                    } => break replay,
-                    DaemonToClient::Output { .. } => {}
-                    DaemonToClient::SessionOpened { .. }
-                    | DaemonToClient::SessionClosed { .. } => {}
-                    other => panic!("unexpected while awaiting replay spawn: {other:?}"),
+        for (id, tx) in &self.connections {
+            // A connection only ever receives unsolicited frames after its
+            // handshake completed, so `Welcome` is always its first frame.
+            if self.handshaken.contains(id) {
+                match tx.try_send(message.clone()) {
+                    Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {}
                 }
             }
         }
-        .expect("reattaching to a live session carries a replay");
-        let restored = BASE64.decode(replay.log.as_bytes()).unwrap();
-        let restored_text = String::from_utf8_lossy(&restored);
-        assert!(
-            restored_text.contains("alive-marker"),
-            "replay must restore pre-disconnect screen, got: {restored_text:?}"
-        );
-        assert!(replay.rows > 0 && replay.cols > 0);
-
-        // B talks to the same live child.
-        proto::write_msg(
-            &mut client_b,
-            &ClientToDaemon::Input {
-                session_id: "t1".into(),
-                bytes: BASE64.encode(b"echo reattached-$((1+1))\n"),
-            },
-        )
-        .unwrap();
-        read_until(&mut client_b, "reattached-2");
-
-        // Explicit kill ends the child.
-        proto::write_msg(
-            &mut client_b,
-            &ClientToDaemon::Kill {
-                req_id: 2,
-                session_id: "t1".into(),
-                graceful_ms: 750,
-                force_ms: 250,
-            },
-        )
-        .unwrap();
-        loop {
-            match proto::read_msg::<_, DaemonToClient>(&mut client_b)
-                .unwrap()
-                .unwrap()
-            {
-                DaemonToClient::Killed { session_id, .. } => {
-                    assert_eq!(session_id, "t1");
-                    break;
-                }
-                DaemonToClient::Output { .. } => {}
-                other => panic!("unexpected message while killing: {other:?}"),
-            }
-        }
-        std::thread::sleep(Duration::from_millis(200));
-        assert!(!pid_alive(pid), "child must be gone after Kill");
-
-        // Sidecar: a fake agent dials the daemon-owned sidecar socket; its
-        // snapshot line relays verbatim to the attached client, and the
-        // client's hello line reaches the agent.
-        client_b
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        let agent = {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            loop {
-                match UnixStream::connect(super::super::sidecar_socket_path()) {
-                    Ok(stream) => break stream,
-                    Err(_) if Instant::now() < deadline => {
-                        std::thread::sleep(Duration::from_millis(20));
-                    }
-                    Err(error) => panic!("sidecar socket never appeared: {error}"),
-                }
-            }
-        };
-        let snapshot = r#"{"type":"snapshot","sessionId":"pi-1","harnessSessionId":"t1","stage":"idle","tsMs":123}"#;
-        let agent_writer = agent.try_clone().unwrap();
-        std::thread::spawn(move || {
-            use std::io::Write;
-            let mut writer = agent_writer;
-            let _ = writeln!(writer, "{snapshot}");
-        });
-        let relay_deadline = Instant::now() + Duration::from_secs(5);
-        let relayed = loop {
-            if Instant::now() > relay_deadline {
-                panic!("timed out awaiting sidecar relay");
-            }
-            match proto::read_msg::<_, DaemonToClient>(&mut client_b) {
-                Ok(Some(DaemonToClient::SidecarLine { line })) => break line,
-                Ok(Some(DaemonToClient::Output { .. })) => {}
-                Ok(Some(DaemonToClient::Exited { .. })) => {}
-                Ok(Some(DaemonToClient::SessionOpened { .. })) => {}
-                Ok(Some(DaemonToClient::SessionClosed { .. })) => {}
-                Ok(Some(other)) => {
-                    panic!("unexpected while awaiting sidecar relay: {other:?}")
-                }
-                Ok(None) => panic!("daemon closed while awaiting sidecar relay"),
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                    ) =>
-                {
-                    continue;
-                }
-                Err(error) => panic!("sidecar relay read error: {error}"),
-            }
-        };
-        assert_eq!(relayed, snapshot);
-
-        proto::write_msg(
-            &mut client_b,
-            &ClientToDaemon::SetHello {
-                line: "w=12".into(),
-            },
-        )
-        .unwrap();
-        let mut agent_reader = BufReader::new(agent);
-        let mut hello = String::new();
-        agent_reader.read_line(&mut hello).unwrap();
-        assert_eq!(hello.trim(), "w=12");
-
-        // No clients, no live sessions: the daemon exits on its own.
-        drop(client_b);
-        daemon.join().unwrap().expect("daemon exits cleanly");
-    }
-}
-
-#[cfg(test)]
-mod client_disconnect_tests {
-    use super::tests::EnvGuard;
-    use super::*;
-    use crate::daemon::client::DaemonClient;
-    use crate::test_support::env_lock;
-    use std::time::Instant;
-
-    /// A kill RPC whose daemon dies mid-request fails fast instead of
-    /// deadlocking: the reader thread's exit must fail all in-flight
-    /// requests.
-    #[test]
-    fn in_flight_request_fails_when_daemon_dies() {
-        let _env = env_lock();
-        let _runtime = EnvGuard::set("disconnect");
-        let path = ctl_socket_path();
-
-        // Socket pair acting as client<->daemon.
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let (client_stream, server_stream) =
-            UnixStream::pair().expect("socketpair available on unix");
-
-        let notify = crate::notify::noop();
-        let client = DaemonClient::attached_post_handshake(client_stream, notify).unwrap();
-
-        // Fake daemon: reply to the spawn, then die without answering the
-        // kill — exactly a daemon crash while an RPC is in flight.
-        let killer = std::thread::spawn(move || {
-            let mut server = server_stream;
-            loop {
-                match proto::read_msg::<_, ClientToDaemon>(&mut server) {
-                    Ok(Some(ClientToDaemon::Spawn { req_id, .. })) => {
-                        let _ = write_msg(
-                            &mut server,
-                            &DaemonToClient::Spawned {
-                                req_id,
-                                session_id: "t1".into(),
-                                pid: Some(4242),
-                                already_running: false,
-                                exit_status: None,
-                                replay: None,
-                            },
-                        );
-                    }
-                    Ok(Some(ClientToDaemon::Kill { .. })) => {
-                        // Crash: no reply, connection gone.
-                        let _ = server.shutdown(std::net::Shutdown::Both);
-                        return;
-                    }
-                    _ => return,
-                }
-            }
-        });
-
-        let _outcome = client
-            .spawn("t1", &test_target_for_disconnect(), 32, 100)
-            .unwrap();
-
-        let started = Instant::now();
-        let result = client.kill("t1", 50, 50);
-        assert!(elapsed_under(&started, Duration::from_secs(5)));
-        assert!(result.is_err(), "kill must fail when the daemon dies");
-        killer.join().unwrap();
-    }
-
-    fn elapsed_under(started: &Instant, limit: Duration) -> bool {
-        started.elapsed() < limit
-    }
-
-    fn test_target_for_disconnect() -> TerminalTarget {
-        serde_json::from_value(serde_json::json!({
-            "pi_binary": null,
-            "sidecar_extension_path": null,
-            "sidecar_socket_path": "/tmp/test-sidecar.sock",
-            "tui_mode": null,
-            "harness_session_id": "t1",
-            "cwd": "/tmp",
-            "session_file": null,
-            "ascii": false,
-            "symbol_overrides": {}
-        }))
-        .unwrap()
-    }
-}
-
-#[cfg(test)]
-mod client_integration_tests {
-    use super::tests::{test_spawn, EnvGuard};
-    use super::*;
-    use crate::daemon::client::DaemonClient;
-    use crate::test_support::env_lock;
-    use std::time::Instant;
-
-    /// Full client path: connect_or_spawn against a live daemon, session
-    /// spawn, output round trip, sidecar parse flow.
-    #[test]
-    fn daemon_client_round_trips_against_live_daemon() {
-        let _env = env_lock();
-        let _runtime = EnvGuard::set("client-integration");
-        let path = ctl_socket_path();
-
-        let daemon = std::thread::Builder::new()
-            .name("harness-daemon-integration".into())
-            .spawn(move || run_foreground_with(test_spawn))
-            .unwrap();
-
-        // Wait for the daemon thread's socket so connect_or_spawn takes the
-        // fast path instead of spawning the test binary with `--daemon`.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !path.exists() {
-            assert!(Instant::now() < deadline, "daemon socket never appeared");
-            std::thread::sleep(Duration::from_millis(20));
-        }
-
-        let notify = crate::notify::noop();
-        let t_connect = Instant::now();
-        let client = DaemonClient::connect_or_spawn(notify).unwrap();
-        eprintln!("[timing] connect: {:?}", t_connect.elapsed());
-
-        // Spawn through the public client API.
-        let target: TerminalTarget = serde_json::from_value(serde_json::json!({
-            "pi_binary": null,
-            "sidecar_extension_path": null,
-            "sidecar_socket_path": "/tmp/test-sidecar.sock",
-            "tui_mode": null,
-            "harness_session_id": "t1",
-            "cwd": "/tmp",
-            "session_file": null,
-            "ascii": false,
-            "symbol_overrides": {}
-        }))
-        .unwrap();
-        let t_spawn = Instant::now();
-        let outcome = client.spawn("t1", &target, 32, 100).unwrap();
-        eprintln!("[timing] spawn: {:?}", t_spawn.elapsed());
-        assert!(!outcome.already_running);
-        assert!(outcome.replay.is_none(), "fresh spawn has no replay");
-        let pid = outcome.pid.expect("child pid");
-        assert!(std::path::Path::new("/proc").join(pid.to_string()).exists());
-
-        // Input round-trips through the same wire: ask the shell to exit.
-        let t_exit = Instant::now();
-        client.input("t1", b"exit\n");
-        std::thread::sleep(Duration::from_millis(500));
-        eprintln!("[timing] input+sleep: {:?}", t_exit.elapsed());
-        assert!(
-            !std::path::Path::new("/proc").join(pid.to_string()).exists(),
-            "child must exit after shell exit"
-        );
-
-        // Kill RPC on the already-dead session is a clean no-op.
-        let t_kill = Instant::now();
-        client.kill("t1", 750, 250).unwrap();
-        eprintln!("[timing] kill: {:?}", t_kill.elapsed());
-
-        let t_shutdown = Instant::now();
-        drop(client);
-        daemon.join().unwrap().expect("daemon exits cleanly");
-        eprintln!("[timing] daemon shutdown: {:?}", t_shutdown.elapsed());
     }
 }

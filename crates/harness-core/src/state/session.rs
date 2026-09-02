@@ -67,7 +67,7 @@ impl Session {
         let now = now_millis();
         Self {
             local_id: daemon_key.to_string(),
-            name: daemon_key.to_string(),
+            name: "Session".to_string(),
             pi_session_id: Some(daemon_key.to_string()),
             session_file: None,
             parent_session_file: None,
