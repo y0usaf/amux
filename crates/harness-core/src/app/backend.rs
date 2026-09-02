@@ -14,8 +14,9 @@ use crate::config::{
     AppAction, AppConfig, KeyChordState, KeyStroke, KeyToken, Keymap, KeymapMatch, NamedKeyToken,
 };
 use crate::notify::Notify;
-use crate::sidecar::SidecarListener;
+use crate::daemon::client::DaemonClient;
 use crate::sidecar::SidecarMessage;
+use std::sync::Arc;
 use crate::state::{PersistedState, Project, ScannedSession, Session};
 use crate::terminal::{
     TerminalController, TerminalSelectionPoint, TerminalSelectionRange, TerminalStatus,
@@ -168,7 +169,8 @@ pub(super) struct HarnessCore {
     pub(super) config: AppConfig,
     keymap: Keymap,
     key_chord_state: KeyChordState,
-    sidecar: SidecarListener,
+    /// Client handle to the session daemon; sidecar methods proxy to it.
+    sidecar: Arc<DaemonClient>,
     terminal_manager: TerminalManager,
     workspace: Workspace,
     sidebar_scroll: usize,
@@ -184,11 +186,14 @@ pub(super) struct HarnessCore {
 
 impl HarnessCore {
     pub(super) fn new(notify: Notify, initial_project_paths: Vec<PathBuf>) -> anyhow::Result<Self> {
-        let sidecar_socket_path = agent::socket_path();
-        let sidecar = SidecarListener::start(notify.clone(), sidecar_socket_path.clone())?;
+        // The daemon owns both sockets; the client never binds one. The
+        // sidecar path is the daemon's stable socket, baked into agent env at
+        // spawn time.
+        let sidecar_socket_path = crate::daemon::sidecar_socket_path();
+        let sidecar = Arc::new(DaemonClient::connect_or_spawn(notify.clone())?);
         let config = AppConfig::load_default().unwrap_or_default();
         let terminal_manager = TerminalManager::new(
-            notify,
+            sidecar.clone(),
             agent::extension_path(),
             #[cfg(not(feature = "omp"))]
             config.pi_tui_mode().map(ToOwned::to_owned),
@@ -896,7 +901,7 @@ impl HarnessCore {
     pub(super) fn process_background_events(&mut self) -> bool {
         let mut changed = self.drain_terminal_events();
         let mut snapshots = Vec::new();
-        while let Some(message) = { self.sidecar.try_recv() } {
+        while let Some(message) = { self.sidecar.try_recv_sidecar() } {
             match message {
                 SidecarMessage::Snapshot(snapshot) => snapshots.push(snapshot),
                 SidecarMessage::Theme(theme) => self.pending_theme = Some(theme),
@@ -947,7 +952,7 @@ impl HarnessCore {
             self.workspace.selected_session_index(),
         );
         if self.rail_digest.as_deref() != Some(digest.as_str()) {
-            self.sidecar.broadcast(&digest);
+            self.sidecar.broadcast_line(digest.clone());
             self.rail_digest = Some(digest);
         }
     }
@@ -962,7 +967,8 @@ impl HarnessCore {
             return;
         }
         self.rail_width_cells = Some(width);
-        self.sidecar.set_hello(rail_bridge::rail_hello_line(width));
+        self.sidecar
+            .set_hello(rail_bridge::rail_hello_line(width));
     }
 
     pub(super) fn run_action(&mut self, action: AppAction) {

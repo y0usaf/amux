@@ -68,7 +68,7 @@ pub use scan::{evict_old_archived_sessions, scan_archived_sessions, scan_live_se
 pub use types::{PiSessionStage, PiSidecarSnapshot};
 
 pub(crate) use implementation::store::{
-    ASCII_ENV, EXTENSION_PATH_ENV, SIDECAR_SESSION_KEY_ENV, SIDECAR_SOCKET_ENV,
+    ASCII_ENV, EXTENSION_PATH_ENV, SIDECAR_SESSION_KEY_ENV, SIDECAR_SOCKET_ENV, SOCKET_PREFIX,
 };
 #[cfg(all(feature = "omp", not(feature = "fx")))]
 pub use implementation::OmpLaunch;

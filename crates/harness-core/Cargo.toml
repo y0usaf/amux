@@ -7,6 +7,7 @@ build = "build.rs"
 [dependencies]
 arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
 anyhow = "1"
+base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 cordis = { git = "https://github.com/y0usaf/cordis-rs", rev = "cf63158e1dca7f75848ee09d0c583a86fd741f80" }
 image = { version = "0.25", default-features = false, features = ["png"] }

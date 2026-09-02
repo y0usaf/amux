@@ -9,6 +9,7 @@ use std::sync::mpsc;
 pub(super) fn read_sidecar_stream(
     stream: UnixStream,
     tx: mpsc::Sender<SidecarMessage>,
+    raw_tx: Option<mpsc::Sender<String>>,
     notify: Notify,
 ) {
     let reader = BufReader::new(stream);
@@ -17,18 +18,35 @@ pub(super) fn read_sidecar_stream(
         if trimmed.is_empty() {
             continue;
         }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
-            log::warn!("malformed sidecar line: {trimmed}");
+        let Some((message, raw)) = parse_sidecar_line(trimmed) else {
             continue;
+        };
+        let _ = tx.send(message);
+        if let Some(raw_tx) = &raw_tx {
+            let _ = raw_tx.send(raw);
+        }
+        notify();
+    }
+}
+
+/// Parse one validated sidecar NDJSON line into its message and raw form.
+/// Returns `None` for empty or invalid lines (logged, never fatal).
+pub fn parse_sidecar_line(trimmed: &str) -> Option<(SidecarMessage, String)> {
+    let value = match serde_json::from_str::<serde_json::Value>(trimmed) {
+            Ok(value) => value,
+            Err(_) => {
+                log::warn!("malformed sidecar line: {trimmed}");
+                return None;
+            }
         };
         if value.get("type").and_then(|v| v.as_str()) == Some("theme") {
             let Some(roles) = value.get("roles").and_then(|v| v.as_array()) else {
                 log::warn!("malformed theme sidecar line: {trimmed}");
-                continue;
+                return None;
             };
             if roles.len() != 15 {
                 log::warn!("malformed theme sidecar line (expected 15 roles): {trimmed}");
-                continue;
+                return None;
             }
             let mut out = [Color::rgba(0, 0, 0, 0); 15];
             let mut valid = true;
@@ -54,20 +72,17 @@ pub(super) fn read_sidecar_stream(
                     Color::rgba(0, 0, 0, 0)
                 });
             }
-            if valid {
-                let _ = tx.send(SidecarMessage::Theme(out));
-                notify();
-            } else {
+            if !valid {
                 log::warn!("malformed theme sidecar line: {trimmed}");
+                return None;
             }
-            continue;
+            return Some((SidecarMessage::Theme(out), trimmed.to_string()));
         }
         let Ok(snapshot) = serde_json::from_value::<PiSidecarSnapshot>(value) else {
-            continue;
+            return None;
         };
-        if snapshot.is_valid() {
-            let _ = tx.send(SidecarMessage::Snapshot(snapshot));
-            notify();
+        if !snapshot.is_valid() {
+            return None;
         }
-    }
+        Some((SidecarMessage::Snapshot(snapshot), trimmed.to_string()))
 }

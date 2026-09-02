@@ -6,13 +6,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use serde::{Deserialize, Serialize};
 
 use crate::agent;
 use crate::notify::Notify;
 
 const READ_BUFFER_SIZE: usize = 8 * 1024;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalTarget {
     pub pi_binary: Option<String>,
     pub sidecar_extension_path: Option<PathBuf>,
@@ -29,25 +30,20 @@ pub struct TerminalTarget {
     pub symbol_overrides: BTreeMap<String, String>,
 }
 
+/// Process identity: the sidecar socket the daemon owns plus the harness
+/// session the process was launched for. Everything else on a target
+/// (cwd, session file, launch flags) can drift without changing which
+/// process is live, and the daemon keys sessions by harness session id — so
+/// this check must agree with that keying or an adopt is misread as a
+/// restart and the client view resets.
 pub(crate) fn targets_share_process(
     current: Option<&TerminalTarget>,
     next: Option<&TerminalTarget>,
 ) -> bool {
     matches!((current, next),
         (Some(current), Some(next))
-            if current.pi_binary == next.pi_binary
-                && current.sidecar_extension_path == next.sidecar_extension_path
-                && current.sidecar_socket_path == next.sidecar_socket_path
-                && current.harness_session_id == next.harness_session_id
-                && current.cwd == next.cwd
-                && session_files_share_process(current.session_file.as_deref(), next.session_file.as_deref()))
-}
-
-fn session_files_share_process(
-    current: Option<&std::path::Path>,
-    next: Option<&std::path::Path>,
-) -> bool {
-    current == next || current.is_none() || next.is_none()
+            if current.sidecar_socket_path == next.sidecar_socket_path
+                && current.harness_session_id == next.harness_session_id)
 }
 
 pub(crate) struct HostProcess {
@@ -105,6 +101,15 @@ impl HostProcess {
     }
 }
 
+impl HostProcess {
+    /// Hand the event stream to a sole consumer. The daemon forwarder thread
+    /// takes it; after this, `wait_for_exit` must not be used (a second
+    /// consumer would race `Exited` delivery).
+    pub(crate) fn take_events(&mut self) -> Receiver<HostEvent> {
+        std::mem::replace(&mut self.rx, mpsc::channel().1)
+    }
+}
+
 pub(crate) fn spawn_process(
     target: &TerminalTarget,
     cols: u16,
@@ -139,6 +144,46 @@ pub(crate) fn spawn_process(
     let mut args = Vec::new();
     let argv = agent::launch_argv(target.pi_binary.as_deref(), &args)?;
 
+    let env = spawn_env(target);
+    spawn_argv(argv, &target.cwd, &env, cols, rows, notify)
+}
+
+/// Adapter- and target-specific environment for spawned agents.
+fn spawn_env(target: &TerminalTarget) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    env.push((
+        agent::SIDECAR_SOCKET_ENV.to_string(),
+        target.sidecar_socket_path.display().to_string(),
+    ));
+    env.push((
+        agent::SIDECAR_SESSION_KEY_ENV.to_string(),
+        target.harness_session_id.clone(),
+    ));
+    if target.ascii {
+        env.push((agent::ASCII_ENV.to_string(), "1".to_string()));
+    }
+    if !target.symbol_overrides.is_empty() {
+        match serde_json::to_string(&target.symbol_overrides) {
+            Ok(json) => env.push(("AGENT_HARNESS_SYMBOL_OVERRIDES".to_string(), json)),
+            Err(error) => {
+                log::warn!("failed to serialize rail symbol overrides: {error}");
+            }
+        }
+    }
+    env
+}
+
+/// Spawn an arbitrary argv on a fresh PTY with the harness terminal
+/// environment. Split from [`spawn_process`] so daemon tests can drive plain
+/// argv without an agent binary.
+pub(crate) fn spawn_argv(
+    argv: Vec<std::ffi::OsString>,
+    cwd: &std::path::Path,
+    extra_env: &[(String, String)],
+    cols: u16,
+    rows: u16,
+    notify: Notify,
+) -> Result<HostProcess, String> {
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -154,25 +199,11 @@ pub(crate) fn spawn_process(
     for (key, value) in std::env::vars_os() {
         cmd.env(key, value);
     }
-    cmd.cwd(&target.cwd);
+    cmd.cwd(cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    cmd.env(
-        agent::SIDECAR_SOCKET_ENV,
-        target.sidecar_socket_path.display().to_string(),
-    );
-    cmd.env(agent::SIDECAR_SESSION_KEY_ENV, &target.harness_session_id);
-
-    if target.ascii {
-        cmd.env(agent::ASCII_ENV, "1");
-    }
-    if !target.symbol_overrides.is_empty() {
-        match serde_json::to_string(&target.symbol_overrides) {
-            Ok(json) => cmd.env("AGENT_HARNESS_SYMBOL_OVERRIDES", json),
-            Err(error) => {
-                log::warn!("failed to serialize rail symbol overrides: {error}");
-            }
-        }
+    for (key, value) in extra_env {
+        cmd.env(key, value);
     }
 
     let mut child = pair

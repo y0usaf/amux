@@ -1,6 +1,8 @@
 #[path = "sidecar/stream.rs"]
 mod stream;
 
+pub use stream::parse_sidecar_line;
+
 use std::fs;
 use std::io::Write;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -60,6 +62,9 @@ impl Downstream {
 pub struct SidecarListener {
     socket_path: PathBuf,
     rx: Receiver<SidecarMessage>,
+    /// Raw validated NDJSON lines, for relays that forward the sidecar wire
+    /// verbatim (the daemon) instead of reducing it in-process.
+    raw_rx: Receiver<String>,
     downstream: Arc<Mutex<Downstream>>,
 }
 
@@ -75,6 +80,7 @@ impl SidecarListener {
 
         let listener = UnixListener::bind(&socket_path)?;
         let (tx, rx) = mpsc::channel();
+        let (raw_tx, raw_rx) = mpsc::channel();
         let downstream = Arc::new(Mutex::new(Downstream::default()));
         let accept_downstream = Arc::clone(&downstream);
 
@@ -91,10 +97,13 @@ impl SidecarListener {
                                 downstream.attach(writer);
                             }
                             let tx = tx.clone();
+                            let raw_tx = raw_tx.clone();
                             let notify = notify.clone();
                             let _ = std::thread::Builder::new()
                                 .name("pi-harness-sidecar-stream".into())
-                                .spawn(move || read_sidecar_stream(stream, tx, notify));
+                                .spawn(move || {
+                                    read_sidecar_stream(stream, tx, Some(raw_tx), notify)
+                                });
                         }
                         Err(_) => break,
                     }
@@ -104,12 +113,19 @@ impl SidecarListener {
         Ok(Self {
             socket_path,
             rx,
+            raw_rx,
             downstream,
         })
     }
 
     pub fn try_recv(&self) -> Option<SidecarMessage> {
         self.rx.try_recv().ok()
+    }
+
+    /// Next raw validated sidecar line, if any. Validated = it parsed as a
+    /// snapshot or theme message, so relays forward it without re-checking.
+    pub fn try_recv_raw(&self) -> Option<String> {
+        self.raw_rx.try_recv().ok()
     }
 
     /// Sticky line replayed to every future connection and broadcast to the

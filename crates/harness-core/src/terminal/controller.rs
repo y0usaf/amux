@@ -1,20 +1,22 @@
-use std::io::Write;
-use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::{self, TryRecvError};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use portable_pty::PtySize;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use vt100::Parser;
 
-use super::process::{
-    spawn_process, targets_share_process, HostEvent, HostProcess, TerminalTarget,
-};
+use super::process::{targets_share_process, HostEvent, TerminalTarget};
 use super::selection::{TerminalSelection, TerminalSelectionPoint, TerminalSelectionRange};
-use crate::notify::Notify;
+use crate::daemon::client::DaemonClient;
+use crate::daemon::proto::{SelectionPoint, SelectionSpan};
 
 const DEFAULT_TERMINAL_COLS: u16 = 100;
 const DEFAULT_TERMINAL_ROWS: u16 = 32;
-const TERMINAL_SCROLLBACK: usize = 5_000;
+/// Scrollback cap shared with the daemon's authoritative parser, so replayed
+/// history positions line up between the two.
+pub(crate) const TERMINAL_SCROLLBACK: usize = 5_000;
 const BRACKETED_PASTE_START: &[u8] = b"[200~";
 const BRACKETED_PASTE_END: &[u8] = b"[201~";
 
@@ -37,10 +39,12 @@ pub(crate) fn disconnected_terminal_status(status: &TerminalStatus) -> Option<Te
 }
 
 pub struct TerminalController {
-    notify: Notify,
+    /// Shared daemon connection; the controller owns one session of it.
+    daemon: Arc<DaemonClient>,
+    session_id: String,
+    events: Option<mpsc::Receiver<HostEvent>>,
     parser: Parser,
     target: Option<TerminalTarget>,
-    process: Option<HostProcess>,
     status: TerminalStatus,
     rows: u16,
     cols: u16,
@@ -49,16 +53,17 @@ pub struct TerminalController {
 }
 
 impl TerminalController {
-    pub fn new(notify: Notify) -> Self {
+    pub fn new(daemon: Arc<DaemonClient>, session_id: String) -> Self {
         Self {
-            notify,
+            daemon,
+            session_id,
+            events: None,
             parser: Parser::new(
                 DEFAULT_TERMINAL_ROWS,
                 DEFAULT_TERMINAL_COLS,
                 TERMINAL_SCROLLBACK,
             ),
             target: None,
-            process: None,
             status: TerminalStatus::Empty,
             rows: DEFAULT_TERMINAL_ROWS,
             cols: DEFAULT_TERMINAL_COLS,
@@ -83,21 +88,34 @@ impl TerminalController {
         self.selection.clear();
         self.parser = Parser::new(self.rows, self.cols, TERMINAL_SCROLLBACK);
 
-        match self.target.clone() {
-            Some(target) => {
-                self.status = TerminalStatus::Launching;
-                match spawn_process(&target, self.cols, self.rows, self.notify.clone()) {
-                    Ok(process) => {
-                        self.process = Some(process);
+        if let Some(target) = self.target.clone() {
+            // Route this session's wire events into a fresh channel.
+            let (tx, rx) = mpsc::channel();
+            self.daemon.register(&self.session_id, tx);
+            self.events = Some(rx);
+
+            self.status = TerminalStatus::Launching;
+            match self
+                .daemon
+                .spawn(&self.session_id, &target, self.rows, self.cols)
+            {
+                Ok(outcome) => {
+                    if let Some(replay) = outcome.replay {
+                        // Adopt the live process by restoring the daemon's
+                        // authoritative view: screen, scrollback history,
+                        // selection, and the live PTY size.
+                        self.restore_replay(replay);
+                    } else if let Some(status) = outcome.exit_status {
+                        self.status = TerminalStatus::Exited(status);
+                    } else {
+                        // Freshly spawned, or the daemon had no view to hand
+                        // back; its ongoing output flows in from here.
                         self.status = TerminalStatus::Running;
                     }
-                    Err(error) => {
-                        self.status = TerminalStatus::Error(error);
-                    }
                 }
-            }
-            None => {
-                self.status = TerminalStatus::Empty;
+                Err(error) => {
+                    self.status = TerminalStatus::Error(error.to_string());
+                }
             }
         }
 
@@ -106,18 +124,17 @@ impl TerminalController {
 
     pub fn restart(&mut self) -> anyhow::Result<()> {
         let target = self.target.clone();
-        let _ = self.attach(None)?;
+        // Kill daemon-side (stop_and_wait semantics), then respawn.
+        self.stop_and_wait(Duration::from_millis(750), Duration::from_millis(250))?;
         let _ = self.attach(target)?;
         Ok(())
     }
 
+    /// Drop the client-side view. The daemon-side process (if any) keeps
+    /// running — detach, not kill.
     pub fn stop(&mut self) {
         self.selection.clear();
-        if let Some(process) = self.process.take() {
-            if let Ok(mut killer) = process.killer.lock() {
-                let _ = killer.kill();
-            }
-        }
+        self.detach();
         self.status = TerminalStatus::Empty;
     }
 
@@ -127,40 +144,19 @@ impl TerminalController {
         force_timeout: Duration,
     ) -> anyhow::Result<bool> {
         self.selection.clear();
-        if self.process.is_none() {
+        self.detach();
+        if self.target.is_none() {
             self.status = TerminalStatus::Empty;
             return Ok(false);
         }
-
-        let exited = {
-            let process = self.process.as_mut().expect("process checked above");
-            process
-                .terminate()
-                .map_err(anyhow::Error::msg)
-                .context("signalling terminal process")?;
-            if process
-                .wait_for_exit(graceful_timeout)
-                .map_err(anyhow::Error::msg)
-                .context("waiting for terminal process to exit")?
-            {
-                true
-            } else {
-                process
-                    .force_kill()
-                    .map_err(anyhow::Error::msg)
-                    .context("force killing terminal process")?;
-                process
-                    .wait_for_exit(force_timeout)
-                    .map_err(anyhow::Error::msg)
-                    .context("waiting for terminal process to exit after force kill")?
-            }
-        };
-
-        if !exited {
-            anyhow::bail!("timed out waiting for terminal process to exit");
-        }
-
-        self.process = None;
+        self.daemon
+            .kill(
+                &self.session_id,
+                graceful_timeout.as_millis() as u64,
+                force_timeout.as_millis() as u64,
+            )
+            .map_err(anyhow::Error::msg)
+            .context("stopping terminal process")?;
         self.status = TerminalStatus::Empty;
         Ok(true)
     }
@@ -178,22 +174,17 @@ impl TerminalController {
         self.clear_selection();
         self.set_scrollback(self.scrollback);
 
-        if let Some(process) = self.process.as_ref() {
-            let _ = process.master.resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            });
-        }
+        self.daemon.resize(&self.session_id, rows, cols);
     }
 
     pub fn drain_events(&mut self) -> bool {
         let mut changed = false;
-        let mut drop_process = false;
+        let Some(events) = self.events.as_ref() else {
+            return false;
+        };
 
-        while let Some(process) = self.process.as_ref() {
-            match process.rx.try_recv() {
+        loop {
+            match events.try_recv() {
                 Ok(HostEvent::Output(bytes)) => {
                     self.parser.process(&bytes);
                     self.scrollback = self.parser.screen().scrollback();
@@ -205,7 +196,6 @@ impl TerminalController {
                 }
                 Ok(HostEvent::Exited(status)) => {
                     self.status = TerminalStatus::Exited(status);
-                    drop_process = true;
                     changed = true;
                     break;
                 }
@@ -219,14 +209,10 @@ impl TerminalController {
                         self.status = status;
                         changed = true;
                     }
-                    drop_process = true;
+                    self.events = None;
                     break;
                 }
             }
-        }
-
-        if drop_process {
-            self.process = None;
         }
 
         changed
@@ -260,11 +246,60 @@ impl TerminalController {
         snapshot.scrollback()
     }
 
+    /// Adopt the daemon's authoritative view state after attaching to an
+    /// already-running session.
+    fn restore_replay(&mut self, replay: crate::daemon::proto::TerminalReplay) {
+        let (rows, cols) = (replay.rows.max(1), replay.cols.max(1));
+        self.rows = rows;
+        self.cols = cols;
+        self.parser = Parser::new(rows, cols, TERMINAL_SCROLLBACK);
+        if let Ok(bytes) = BASE64.decode(replay.log.as_bytes()) {
+            self.parser.process(&bytes);
+        }
+        // Reattach lands at the live bottom edge, matching the daemon's own
+        // follow-end position.
+        self.scrollback = 0;
+        self.parser.screen_mut().set_scrollback(0);
+        self.selection = replay
+            .selection
+            .map(|span| {
+                let mut selection = TerminalSelection::default();
+                selection.set(TerminalSelectionPoint {
+                    row: span.start.row,
+                    col: span.start.col,
+                });
+                selection.update_focus(TerminalSelectionPoint {
+                    row: span.end.row,
+                    col: span.end.col,
+                });
+                selection
+            })
+            .unwrap_or_default();
+        self.status = TerminalStatus::Running;
+    }
+
+    /// Publish the current selection span to the daemon so future attaching
+    /// clients restore it.
+    fn publish_selection(&self) {
+        let selection = self.selection.normalized().map(|range| SelectionSpan {
+            start: SelectionPoint {
+                row: range.start.row,
+                col: range.start.col,
+            },
+            end: SelectionPoint {
+                row: range.end.row,
+                col: range.end.col,
+            },
+        });
+        self.daemon.set_selection(&self.session_id, selection);
+    }
+
     pub fn begin_selection(&mut self, point: TerminalSelectionPoint) -> bool {
         if self.selection.anchor() == Some(point) && self.selection.focus() == Some(point) {
             return false;
         }
         self.selection.set(point);
+        self.publish_selection();
         true
     }
 
@@ -273,12 +308,16 @@ impl TerminalController {
             return false;
         }
         self.selection.update_focus(point);
+        self.publish_selection();
         true
     }
 
     pub fn clear_selection(&mut self) -> bool {
         let had_selection = self.selection.anchor().is_some() || self.selection.focus().is_some();
         self.selection.clear();
+        if had_selection {
+            self.publish_selection();
+        }
         had_selection
     }
 
@@ -339,15 +378,15 @@ impl TerminalController {
         if self.scrollback > 0 {
             self.scroll_to_bottom();
         }
-        let Some(process) = self.process.as_ref() else {
-            return Ok(());
-        };
-        let Ok(mut writer) = process.writer.lock() else {
-            anyhow::bail!("terminal writer lock poisoned");
-        };
-        writer.write_all(bytes)?;
-        writer.flush()?;
+        self.daemon.input(&self.session_id, bytes);
         Ok(())
+    }
+
+    /// Unregister from the daemon's event routing without touching the
+    /// daemon-side process.
+    fn detach(&mut self) {
+        self.events = None;
+        self.daemon.unregister(&self.session_id);
     }
 }
 
@@ -366,7 +405,10 @@ fn encoded_paste_bytes(paste: &[u8], bracketed_paste: bool) -> Vec<u8> {
 
 impl Drop for TerminalController {
     fn drop(&mut self) {
-        self.stop();
+        // Detach only: agent processes outlive their client
+        // ([[principle:daemon-thin-client]]). Explicit kills go through
+        // `stop_and_wait`.
+        self.detach();
     }
 }
 

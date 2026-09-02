@@ -2,6 +2,7 @@ pub mod agent;
 #[path = "app/mod.rs"]
 pub mod app;
 pub mod config;
+pub mod daemon;
 pub mod notify;
 #[path = "render/mod.rs"]
 pub mod render;
