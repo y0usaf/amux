@@ -11,7 +11,6 @@ pub mod state;
 pub mod terminal;
 pub mod util;
 
-#[cfg(test)]
 pub(crate) mod test_support {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 

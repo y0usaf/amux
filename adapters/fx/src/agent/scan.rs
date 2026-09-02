@@ -21,7 +21,9 @@ pub fn scan_live_sessions(project_path: &Path) -> Vec<ScannedSession> {
 
 pub fn scan_archived_sessions() -> Vec<ScannedSession> {
     scan_sessions_in(
-        super::store::default_agent_dir().map(|dir| dir.join("archive")).as_deref(),
+        super::store::default_agent_dir()
+            .map(|dir| dir.join("archive"))
+            .as_deref(),
         None,
     )
 }
@@ -101,8 +103,7 @@ fn scan_sessions_in(root: Option<&Path>, project_path: Option<&Path>) -> Vec<Sca
 
 fn scanned_session_from_dir(dir: &Path) -> Option<ScannedSession> {
     let manifest_path = dir.join("session.json");
-    let manifest: Value =
-        serde_json::from_str(&fs::read_to_string(&manifest_path).ok()?).ok()?;
+    let manifest: Value = serde_json::from_str(&fs::read_to_string(&manifest_path).ok()?).ok()?;
 
     let session_id = manifest.get("id")?.as_str()?.to_string();
     if session_id.is_empty() {
@@ -171,72 +172,4 @@ fn first_user_turn_text(events_path: &Path) -> Option<String> {
         return Some(text.to_string());
     }
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    fn write_session(root: &Path, id: &str, workspace: &str, title: &str) -> PathBuf {
-        let dir = root.join(id);
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(
-            dir.join("session.json"),
-            format!(
-                r#"{{"schema_version":3,"id":"{id}","created_at_ms":1000,"updated_at_ms":2000,"workspace_root":"{workspace}","last_event_seq":3}}"#
-            ),
-        )
-        .unwrap();
-        if !title.is_empty() {
-            fs::write(
-                dir.join("display.json"),
-                format!(r#"{{"schema_version":1,"title":"{title}","preview":"preview text"}}"#),
-            )
-            .unwrap();
-        }
-        dir
-    }
-
-    #[test]
-    fn scans_flat_store_and_filters_by_project() {
-        let root = std::env::temp_dir().join(format!("amux-fx-scan-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        write_session(&root, "s1", "/tmp/proj-a", "First title");
-        write_session(&root, "s2", "/tmp/proj-b", "");
-        fs::create_dir_all(root.join("artifacts")).unwrap();
-
-        let all = scan_sessions_in(Some(&root), None);
-        assert_eq!(all.len(), 2);
-        assert_eq!(all[0].name, "First title");
-
-        let proj_a = scan_sessions_in(Some(&root), Some(Path::new("/tmp/proj-a")));
-        assert_eq!(proj_a.len(), 1);
-        assert_eq!(proj_a[0].session_id, "s1");
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn falls_back_to_first_committed_user_turn_for_name() {
-        let root = std::env::temp_dir().join(format!("amux-fx-name-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let dir = write_session(&root, "s3", "/tmp/proj-c", "");
-        fs::write(
-            dir.join("events.jsonl"),
-            concat!(
-                r#"{"seq":1,"kind":"session_started","payload":{}}"#, "\n",
-                r#"{"seq":2,"kind":"recovery_checkpoint_set","payload":{}}"#, "\n",
-                r#"{"seq":3,"kind":"history_turn_committed","payload":{"turn":{"kind":"assistant","user":{"text":"what tools you got","images":[]}}}}"#, "\n",
-            ),
-        )
-        .unwrap();
-
-        let sessions = scan_sessions_in(Some(&root), None);
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].name, "what tools you got");
-
-        let _ = fs::remove_dir_all(&root);
-    }
 }

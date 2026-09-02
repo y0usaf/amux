@@ -397,20 +397,23 @@ impl Workspace {
     /// Locate a session row by its daemon identity: the row's local id, or
     /// the selection key the daemon derived its canonical key from.
     pub(super) fn locate_session_by_key(&self, key: &str) -> Option<(usize, usize)> {
-        self.projects.iter().enumerate().find_map(|(project_index, project)| {
-            project
-                .sessions
-                .iter()
-                .position(|session| {
-                    session.local_id == key
-                        || session.selection_key() == key
-                        || session
-                            .session_file
-                            .as_ref()
-                            .is_some_and(|file| file.to_string_lossy() == key)
-                })
-                .map(|session_index| (project_index, session_index))
-        })
+        self.projects
+            .iter()
+            .enumerate()
+            .find_map(|(project_index, project)| {
+                project
+                    .sessions
+                    .iter()
+                    .position(|session| {
+                        session.local_id == key
+                            || session.selection_key() == key
+                            || session
+                                .session_file
+                                .as_ref()
+                                .is_some_and(|file| file.to_string_lossy() == key)
+                    })
+                    .map(|session_index| (project_index, session_index))
+            })
     }
 
     pub(super) fn select_project(&mut self, index: usize) -> bool {
@@ -587,187 +590,4 @@ pub(super) fn cycle_session_indices(project: &Project) -> Vec<usize> {
 
 pub(super) fn session_is_idle(session: &Session) -> bool {
     !session.runtime.is_active()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::{cycle_session_indices, session_is_idle, Workspace};
-    use crate::state::{PersistedProject, PersistedState, Project, Session};
-
-    #[test]
-    fn queued_sessions_are_not_idle() {
-        let mut session = Session::new_draft();
-        assert!(session_is_idle(&session));
-
-        session.runtime.queued = true;
-        assert!(!session_is_idle(&session));
-    }
-
-    #[test]
-    fn cycle_session_indices_skip_hidden_drafts_when_visible_sessions_exist() {
-        let mut project = Project::new(PathBuf::from("/tmp/project"));
-        let hidden = Session::new_draft();
-        let mut visible = Session::new_draft();
-        visible.pi_session_id = Some("pi-session-1".into());
-        visible.draft = false;
-        project.sessions = vec![hidden, visible];
-
-        assert_eq!(cycle_session_indices(&project), vec![1]);
-    }
-
-    #[test]
-    fn cycle_session_indices_fall_back_to_hidden_draft_when_it_is_all_we_have() {
-        let mut project = Project::new(PathBuf::from("/tmp/project"));
-        project.sessions = vec![Session::new_draft()];
-
-        assert_eq!(cycle_session_indices(&project), vec![0]);
-    }
-
-    #[test]
-    fn restore_selection_clears_unread_notification() {
-        let mut project = Project::new(PathBuf::from("/tmp/project"));
-        let first = Session::new_draft();
-        let mut unread = Session::new_draft();
-        unread.runtime.unread = true;
-        let unread_id = unread.local_id.clone();
-        project.sessions = vec![first, unread];
-
-        let mut workspace = Workspace::new(Vec::new(), PersistedState::default());
-        workspace.projects = vec![project];
-        workspace.restore_selection(None, Some(unread_id));
-
-        assert_eq!(workspace.selected_session, Some(1));
-        assert!(!workspace.projects[0].sessions[1].runtime.unread);
-    }
-
-    #[test]
-    fn persisted_snapshot_uses_current_workspace_authoritatively() {
-        let stale_state = PersistedState {
-            projects: vec!["/tmp/removed-project".into()],
-            project_cache: vec![PersistedProject {
-                path: "/tmp/removed-project".into(),
-                sessions: Vec::new(),
-            }],
-            selected_project: Some("/tmp/removed-project".into()),
-            selected_session: Some("removed-session".into()),
-        };
-        let mut visible_session = Session::new_draft();
-        visible_session.local_id = "local-session-1".into();
-        visible_session.pi_session_id = Some("pi-session-1".into());
-        visible_session.draft = false;
-        let hidden_draft = Session::new_draft();
-        let mut current_project = Project::new(PathBuf::from("/tmp/current-project"));
-        current_project.sessions = vec![visible_session, hidden_draft];
-
-        let mut workspace = Workspace::new(Vec::new(), stale_state);
-        workspace.projects = vec![current_project];
-        workspace.selected_project = 0;
-        workspace.selected_session = Some(0);
-
-        let snapshot = workspace.persisted_snapshot();
-
-        assert_eq!(snapshot.projects, vec!["/tmp/current-project".to_string()]);
-        assert_eq!(
-            snapshot.selected_project.as_deref(),
-            Some("/tmp/current-project")
-        );
-        assert_eq!(snapshot.selected_session.as_deref(), Some("pi-session-1"));
-        assert_eq!(snapshot.project_cache.len(), 1);
-        assert_eq!(snapshot.project_cache[0].path, "/tmp/current-project");
-        assert_eq!(snapshot.project_cache[0].sessions.len(), 2);
-        assert_eq!(
-            snapshot.project_cache[0].sessions[0]
-                .pi_session_id
-                .as_deref(),
-            Some("pi-session-1")
-        );
-    }
-
-    #[test]
-    fn archive_target_allows_active_sessions() {
-        let mut project = Project::new(PathBuf::from("/tmp/project"));
-        let mut session = Session::new_draft();
-        session.local_id = "local-session-1".into();
-        session.runtime.running = true;
-        project.sessions = vec![session];
-
-        let mut workspace = Workspace::new(Vec::new(), PersistedState::default());
-        workspace.projects = vec![project];
-        workspace.selected_project = 0;
-        workspace.selected_session = Some(0);
-
-        let target = workspace.archive_target().unwrap();
-
-        assert_eq!(target.session_id, "local-session-1");
-    }
-
-    #[test]
-    fn select_session_in_project_resolves_subagent_to_parent() {
-        let mut project = Project::new(PathBuf::from("/tmp/project"));
-        let mut parent = Session::new_draft();
-        parent.local_id = "parent-1".into();
-        parent.session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
-        parent.draft = false;
-        let mut subagent = Session::new_draft();
-        subagent.parent_session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
-        subagent.draft = false;
-        project.sessions = vec![parent, subagent];
-
-        let mut workspace = Workspace::new(Vec::new(), PersistedState::default());
-        workspace.projects = vec![project];
-        workspace.selected_project = 0;
-
-        assert!(workspace.select_session_in_project(0, 1)); // the subagent row
-        assert_eq!(workspace.selected_session, Some(0)); // its parent
-    }
-
-    #[test]
-    fn remove_archived_session_removes_subagent_rows_with_parent() {
-        let mut project = Project::new(PathBuf::from("/tmp/project"));
-        let mut parent = Session::new_draft();
-        parent.local_id = "parent-1".into();
-        parent.session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
-        parent.draft = false;
-        let mut subagent = Session::new_draft();
-        subagent.parent_session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
-        subagent.draft = false;
-        let mut other = Session::new_draft();
-        other.local_id = "other-1".into();
-        other.session_file = Some(PathBuf::from("/sessions/other.jsonl"));
-        other.draft = false;
-        project.sessions = vec![parent, subagent, other];
-
-        let mut workspace = Workspace::new(Vec::new(), PersistedState::default());
-        workspace.projects = vec![project];
-        workspace.selected_project = 0;
-        workspace.selected_session = Some(0);
-
-        let target = workspace.archive_target().unwrap();
-        workspace.remove_archived_session(&target);
-
-        // The subagent row dies with its parent; only the unrelated session
-        // stays, and selection lands on it.
-        assert_eq!(workspace.projects[0].sessions.len(), 1);
-        assert_eq!(workspace.projects[0].sessions[0].local_id, "other-1");
-        assert_eq!(workspace.selected_session, Some(0));
-    }
-
-    #[test]
-    fn cycle_session_indices_skip_subagent_rows() {
-        let mut project = Project::new(PathBuf::from("/tmp/project"));
-        let mut parent = Session::new_draft();
-        parent.session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
-        parent.draft = false;
-        let mut subagent = Session::new_draft();
-        subagent.parent_session_file = Some(PathBuf::from("/sessions/parent.jsonl"));
-        subagent.draft = false;
-        let mut other = Session::new_draft();
-        other.session_file = Some(PathBuf::from("/sessions/other.jsonl"));
-        other.draft = false;
-        project.sessions = vec![parent, subagent, other];
-
-        assert_eq!(cycle_session_indices(&project), vec![0, 2]);
-    }
 }

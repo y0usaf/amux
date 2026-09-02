@@ -31,8 +31,9 @@ pub fn launch_argv(
     config_override: Option<&str>,
     extra_args: &[String],
 ) -> Result<Vec<OsString>, String> {
-    let discovered = discover(config_override)
-        .ok_or_else(|| "Could not find fx. Install with: curl -fsSL https://fx.sh/setup.sh | bash".to_string())?;
+    let discovered = discover(config_override).ok_or_else(|| {
+        "Could not find fx. Install with: curl -fsSL https://fx.sh/setup.sh | bash".to_string()
+    })?;
     let mut argv = vec![discovered.launch.0.into_os_string()];
     argv.extend(extra_args.iter().map(OsString::from));
     Ok(argv)
@@ -57,10 +58,7 @@ fn discover_inner(config_override: Option<&str>) -> Option<DiscoverResult> {
         }
     }
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        for candidate in [
-            home.join(".fx/bin/fx"),
-            home.join(".local/bin/fx"),
-        ] {
+        for candidate in [home.join(".fx/bin/fx"), home.join(".local/bin/fx")] {
             if let Some(result) = try_binary(&candidate) {
                 return Some(result);
             }

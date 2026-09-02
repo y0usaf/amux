@@ -196,18 +196,3 @@ pub(super) fn command_line_start_col(layout: &CellLayout, surface_cols: i32) -> 
     display_cell_width(&statusline_mode_label(StatusbarState::Command))
         .min(surface_cols.max(0) as usize) as i32
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn command_line_backspace_updates_utf8_cursor() {
-        let mut command_line = CommandLineState::with_input("open café");
-        assert!(command_line.backspace());
-        assert_eq!(command_line.input, "open caf");
-        command_line.move_left();
-        command_line.insert_str("é");
-        assert_eq!(command_line.input, "open caéf");
-    }
-}

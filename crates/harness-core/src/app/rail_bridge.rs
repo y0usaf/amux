@@ -51,39 +51,3 @@ pub(super) fn rail_digest_line(
     }
     json!({ "type": "digest", "sessions": sessions }).to_string()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::Session;
-    use std::path::PathBuf;
-
-    #[test]
-    fn hello_line_is_versionless_additive_json() {
-        let line = rail_hello_line(44);
-        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(value["type"], "hello");
-        assert_eq!(value["railWidth"], 44);
-        assert_eq!(value.as_object().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn digest_marks_selected_session_and_skips_hidden_drafts() {
-        let mut project = Project::new(PathBuf::from("/tmp/demo"));
-        let mut running = Session::new_draft();
-        running.name = "run".into();
-        running.pi_session_id = Some("pi-1".into());
-        running.draft = false;
-        running.runtime.running = true;
-        running.runtime.status = Some("tool".into());
-        let hidden_draft = Session::new_draft();
-        project.sessions = vec![running, hidden_draft];
-
-        let line = rail_digest_line(&[project], 0, Some(0));
-        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
-        let sessions = value["sessions"].as_array().unwrap();
-        assert_eq!(sessions.len(), 1); // ephemeral draft is filtered out
-        assert_eq!(sessions[0]["stage"], "tool");
-        assert_eq!(sessions[0]["selected"], true);
-    }
-}

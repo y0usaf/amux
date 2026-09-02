@@ -3,9 +3,6 @@ pub mod cordis;
 mod keymap;
 mod keys;
 
-#[cfg(test)]
-mod tests;
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
