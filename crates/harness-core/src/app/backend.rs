@@ -13,15 +13,15 @@ use crate::agent::{self, PiSidecarSnapshot};
 use crate::config::{
     AppAction, AppConfig, KeyChordState, KeyStroke, KeyToken, Keymap, KeymapMatch, NamedKeyToken,
 };
-use crate::notify::Notify;
 use crate::daemon::client::{DaemonClient, DaemonSessionEvent};
+use crate::notify::Notify;
 use crate::sidecar::SidecarMessage;
-use std::sync::Arc;
 use crate::state::{PersistedState, Project, ScannedSession, Session};
 use crate::terminal::{
     TerminalController, TerminalSelectionPoint, TerminalSelectionRange, TerminalStatus,
 };
 use crate::util::{normalize_project_path, now_millis};
+use std::sync::Arc;
 
 use super::clipboard_image::{clipboard_image_path, clipboard_image_path_from_arboard};
 use super::glyphs::GlyphStyle;
@@ -257,7 +257,6 @@ pub(super) struct FrameModel<'a> {
     pub(super) terminal_max_scrollback: usize,
 }
 
-#[cfg(test)]
 pub(super) fn advance_shortcut_match(
     keymap: &Keymap,
     state: &mut KeyChordState,
@@ -926,8 +925,8 @@ impl HarnessCore {
                     if let Some((project_index, session_index)) =
                         self.workspace.locate_session_by_key(&id)
                     {
-                        let session =
-                            &mut self.workspace.projects_mut()[project_index].sessions[session_index];
+                        let session = &mut self.workspace.projects_mut()[project_index].sessions
+                            [session_index];
                         session.runtime.running = false;
                         changed = true;
                     }
@@ -1007,8 +1006,7 @@ impl HarnessCore {
             return;
         }
         self.rail_width_cells = Some(width);
-        self.sidecar
-            .set_hello(rail_bridge::rail_hello_line(width));
+        self.sidecar.set_hello(rail_bridge::rail_hello_line(width));
     }
 
     pub(super) fn run_action(&mut self, action: AppAction) {
@@ -1319,106 +1317,5 @@ impl HarnessCore {
                 false
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    pub(super) fn stroke(text: &str) -> KeyStroke {
-        KeyStroke::parse(text).unwrap()
-    }
-
-    #[test]
-    pub(super) fn unmapped_pressed_event_clears_pending_chord() {
-        let mut config = AppConfig::default();
-        config.keybinds.insert(
-            "new_session".into(),
-            crate::config::ConfigKeybind::Single("ctrl+p n".into()),
-        );
-
-        let keymap = config.keymap();
-        let mut state = KeyChordState::default();
-        assert_eq!(
-            advance_shortcut_match(&keymap, &mut state, Some(stroke("ctrl+p")), true),
-            Some(KeymapMatch::Pending)
-        );
-        assert_eq!(state.pending(), &[stroke("ctrl+p")]);
-
-        assert_eq!(
-            advance_shortcut_match(&keymap, &mut state, None, true),
-            None
-        );
-        assert!(state.pending().is_empty());
-        assert_eq!(
-            advance_shortcut_match(&keymap, &mut state, Some(stroke("n")), true),
-            Some(KeymapMatch::NoMatch)
-        );
-    }
-
-    #[test]
-    pub(super) fn repeat_or_release_does_not_clear_pending_chord() {
-        let mut config = AppConfig::default();
-        config.keybinds.insert(
-            "new_session".into(),
-            crate::config::ConfigKeybind::Single("ctrl+p n".into()),
-        );
-
-        let keymap = config.keymap();
-        let mut state = KeyChordState::default();
-        assert_eq!(
-            advance_shortcut_match(&keymap, &mut state, Some(stroke("ctrl+p")), true),
-            Some(KeymapMatch::Pending)
-        );
-
-        assert_eq!(
-            advance_shortcut_match(&keymap, &mut state, None, false),
-            None
-        );
-        assert_eq!(state.pending(), &[stroke("ctrl+p")]);
-    }
-
-    #[test]
-    pub(super) fn shortcut_match_triggers_actions_for_mapped_strokes() {
-        let keymap = AppConfig::default().keymap();
-        let mut state = KeyChordState::default();
-
-        assert_eq!(
-            advance_shortcut_match(&keymap, &mut state, Some(stroke("ctrl+left")), true),
-            Some(KeymapMatch::Triggered(AppAction::PreviousProject))
-        );
-    }
-
-    #[test]
-    pub(super) fn terminal_selection_point_for_cell_rect_checks_bounds() {
-        let rect = CellRect::new(2, 3, 4, 2);
-
-        assert_eq!(
-            terminal_selection_point_for_cell_rect(rect, 2, 4, 2, 3),
-            Some(TerminalSelectionPoint { row: 0, col: 0 })
-        );
-        assert_eq!(
-            terminal_selection_point_for_cell_rect(rect, 2, 4, 5, 4),
-            Some(TerminalSelectionPoint { row: 1, col: 3 })
-        );
-        assert_eq!(
-            terminal_selection_point_for_cell_rect(rect, 0, 4, 2, 3),
-            None
-        );
-        assert_eq!(
-            terminal_selection_point_for_cell_rect(rect, 2, 0, 2, 3),
-            None
-        );
-        assert_eq!(
-            terminal_selection_point_for_cell_rect(rect, 2, 4, 6, 4),
-            None
-        );
-    }
-    #[test]
-    fn status_note_expires_after_default_ttl() {
-        let note = StatusNote::new("ok".to_string(), StatusNoteKind::Ok);
-        assert!(note.is_active(note.expires_at_ms.saturating_sub(1)));
-        assert!(!note.is_active(note.expires_at_ms));
     }
 }

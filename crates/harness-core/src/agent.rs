@@ -23,10 +23,10 @@ mod types;
 // The pi/omp reader module, compiled out under fx; the shared report types
 // it re-exports live in usage_types.rs, which both paths include.
 #[cfg(not(feature = "fx"))]
+mod usage;
+#[cfg(not(feature = "fx"))]
 #[path = "agent/usage_types.rs"]
 pub(crate) mod usage_types;
-#[cfg(not(feature = "fx"))]
-mod usage;
 #[cfg(not(feature = "fx"))]
 pub use usage::{
     load_usage_report, load_usage_report_from_path, PiUsageDay, PiUsageModelBreakdown,
@@ -70,10 +70,10 @@ pub use types::{PiSessionStage, PiSidecarSnapshot};
 pub(crate) use implementation::store::{
     ASCII_ENV, EXTENSION_PATH_ENV, SIDECAR_SESSION_KEY_ENV, SIDECAR_SOCKET_ENV, SOCKET_PREFIX,
 };
-#[cfg(all(feature = "omp", not(feature = "fx")))]
-pub use implementation::OmpLaunch;
 #[cfg(feature = "fx")]
 pub use implementation::FxLaunch;
+#[cfg(all(feature = "omp", not(feature = "fx")))]
+pub use implementation::OmpLaunch;
 #[cfg(not(any(feature = "omp", feature = "fx")))]
 pub use implementation::PiLaunch;
 pub use implementation::{discover, discover_fresh, extension_path, launch_argv, DiscoverResult};

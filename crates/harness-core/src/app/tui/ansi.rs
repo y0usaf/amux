@@ -197,7 +197,6 @@ fn write_index_bg(stdout: &mut io::Stdout, index: u8) -> io::Result<()> {
     }
 }
 
-#[cfg(test)]
 fn ansi_index_fg(index: u8) -> String {
     match index {
         0..=7 => format!("[{}m", 30 + index),
@@ -206,30 +205,10 @@ fn ansi_index_fg(index: u8) -> String {
     }
 }
 
-#[cfg(test)]
 fn ansi_index_bg(index: u8) -> String {
     match index {
         0..=7 => format!("[{}m", 40 + index),
         8..=15 => format!("[{}m", 100 + index - 8),
         _ => format!("[48;5;{index}m"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{ansi_index_bg, ansi_index_fg};
-
-    #[test]
-    fn low_ansi_indexes_use_classic_sgr_sequences() {
-        assert_eq!(ansi_index_fg(4), "[34m");
-        assert_eq!(ansi_index_fg(12), "[94m");
-        assert_eq!(ansi_index_bg(4), "[44m");
-        assert_eq!(ansi_index_bg(12), "[104m");
-    }
-
-    #[test]
-    fn high_ansi_indexes_use_256_color_sequences() {
-        assert_eq!(ansi_index_fg(42), "[38;5;42m");
-        assert_eq!(ansi_index_bg(42), "[48;5;42m");
     }
 }

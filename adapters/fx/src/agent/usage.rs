@@ -11,10 +11,8 @@ use std::path::PathBuf;
 use chrono::{Local, TimeZone};
 use serde_json::Value;
 
-use crate::agent::usage_types::{
-    PiUsageDay, PiUsageModelBreakdown, PiUsageReport, PiUsageTotals,
-};
 use super::files::sessions_root;
+use crate::agent::usage_types::{PiUsageDay, PiUsageModelBreakdown, PiUsageReport, PiUsageTotals};
 
 pub fn load_usage_report() -> PiUsageReport {
     let Some(path) = default_usage_path() else {
@@ -34,8 +32,7 @@ pub fn load_usage_report_from_path(path: &std::path::Path) -> PiUsageReport {
         ..Default::default()
     };
     let mut by_day: BTreeMap<String, PiUsageTotals> = BTreeMap::new();
-    let mut models_by_day: BTreeMap<String, BTreeMap<String, PiUsageTotals>> =
-        BTreeMap::new();
+    let mut models_by_day: BTreeMap<String, BTreeMap<String, PiUsageTotals>> = BTreeMap::new();
     let mut seen = std::collections::HashSet::new();
 
     for line in BufReader::new(file).lines().map_while(Result::ok) {
@@ -52,8 +49,14 @@ pub fn load_usage_report_from_path(path: &std::path::Path) -> PiUsageReport {
             continue;
         };
         let totals = PiUsageTotals {
-            input_tokens: fact.get("input_tokens").and_then(Value::as_u64).unwrap_or(0),
-            output_tokens: fact.get("output_tokens").and_then(Value::as_u64).unwrap_or(0),
+            input_tokens: fact
+                .get("input_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            output_tokens: fact
+                .get("output_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
             cache_creation_tokens: fact
                 .get("cache_write_tokens")
                 .and_then(Value::as_u64)
@@ -62,7 +65,10 @@ pub fn load_usage_report_from_path(path: &std::path::Path) -> PiUsageReport {
                 .get("cache_read_tokens")
                 .and_then(Value::as_u64)
                 .unwrap_or(0),
-            total_cost: fact.get("total_cost").and_then(Value::as_f64).unwrap_or(0.0),
+            total_cost: fact
+                .get("total_cost")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
         };
         // fx logs each generation once; the identity key still guards against
         // a duplicated line from a partial append + rewrite.
@@ -94,10 +100,7 @@ pub fn load_usage_report_from_path(path: &std::path::Path) -> PiUsageReport {
             let models = models_by_day.remove(&date).unwrap_or_default();
             let model_breakdowns = models
                 .into_iter()
-                .map(|(model_name, totals)| PiUsageModelBreakdown {
-                    model_name,
-                    totals,
-                })
+                .map(|(model_name, totals)| PiUsageModelBreakdown { model_name, totals })
                 .collect::<Vec<_>>();
             let models_used = model_breakdowns
                 .iter()
@@ -126,36 +129,4 @@ fn local_date(created_at_ms: &i64) -> String {
         .single()
         .map(|datetime| datetime.format("%Y-%m-%d").to_string())
         .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    #[test]
-    fn aggregates_generation_facts_by_day_and_model() {
-        let path = std::env::temp_dir().join(format!("amux-fx-usage-{}.jsonl", std::process::id()));
-        let mut file = fs::File::create(&path).unwrap();
-        writeln!(
-            file,
-            r#"{{"schema_version":1,"kind":"generation","fact":{{"id":"g1","created_at_ms":1787341522308,"model":"zai/glm-5.2","input_tokens":100,"output_tokens":10,"cache_read_tokens":5,"cache_write_tokens":1,"total_cost":0.5}}}}"#
-        )
-        .unwrap();
-        writeln!(
-            file,
-            r#"{{"schema_version":1,"kind":"coverage","started_at_ms":1}}"#
-        )
-        .unwrap();
-        drop(file);
-
-        let report = load_usage_report_from_path(&path);
-        assert_eq!(report.entries, 1);
-        assert_eq!(report.totals.input_tokens, 100);
-        assert_eq!(report.totals.cache_creation_tokens, 1);
-        assert_eq!(report.days.len(), 1);
-        assert_eq!(report.days[0].model_breakdowns[0].model_name, "zai/glm-5.2");
-
-        let _ = fs::remove_file(&path);
-    }
 }

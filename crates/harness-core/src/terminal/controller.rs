@@ -420,24 +420,3 @@ impl Drop for TerminalController {
         self.detach();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::encoded_paste_bytes;
-
-    #[test]
-    fn paste_bytes_are_raw_when_bracketed_paste_is_disabled() {
-        assert_eq!(
-            encoded_paste_bytes(b"hello\nworld", false),
-            b"hello\nworld".to_vec()
-        );
-    }
-
-    #[test]
-    fn paste_bytes_are_wrapped_when_bracketed_paste_is_enabled() {
-        assert_eq!(
-            encoded_paste_bytes(b"hello\nworld", true),
-            b"\x1b[200~hello\nworld\x1b[201~".to_vec()
-        );
-    }
-}

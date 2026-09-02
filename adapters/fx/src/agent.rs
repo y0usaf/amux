@@ -20,4 +20,6 @@ pub mod usage;
 #[path = "agent/types.rs"]
 pub mod types;
 
-pub use discovery::{discover, discover_fresh, extension_path, launch_argv, DiscoverResult, FxLaunch};
+pub use discovery::{
+    discover, discover_fresh, extension_path, launch_argv, DiscoverResult, FxLaunch,
+};
