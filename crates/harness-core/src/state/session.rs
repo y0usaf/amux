@@ -60,6 +60,25 @@ impl Session {
         }
     }
 
+    /// Row for a daemon-known session this client did not spawn (adopted
+    /// from discovery). Keyed by the daemon's canonical identity; a later
+    /// disk scan renames and files it like any other scanned session.
+    pub fn from_daemon(daemon_key: &str) -> Self {
+        let now = now_millis();
+        Self {
+            local_id: daemon_key.to_string(),
+            name: daemon_key.to_string(),
+            pi_session_id: Some(daemon_key.to_string()),
+            session_file: None,
+            parent_session_file: None,
+            created_at_ms: now,
+            updated_at_ms: now,
+            promoted_at_ms: 0,
+            runtime: SessionRuntime::default(),
+            draft: false,
+        }
+    }
+
     pub fn new_draft() -> Self {
         let now = now_millis();
         Self {

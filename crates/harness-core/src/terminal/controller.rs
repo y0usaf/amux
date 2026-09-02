@@ -100,6 +100,10 @@ impl TerminalController {
                 .spawn(&self.session_id, &target, self.rows, self.cols)
             {
                 Ok(outcome) => {
+                    // The daemon keys the session by its canonical identity
+                    // (resolved session file); adopt that key so every
+                    // later input/resize/kill reaches the same session.
+                    self.session_id = outcome.session_id.clone();
                     if let Some(replay) = outcome.replay {
                         // Adopt the live process by restoring the daemon's
                         // authoritative view: screen, scrollback history,
@@ -124,7 +128,12 @@ impl TerminalController {
 
     pub fn restart(&mut self) -> anyhow::Result<()> {
         let target = self.target.clone();
-        // Kill daemon-side (stop_and_wait semantics), then respawn.
+        // Kill daemon-side (stop_and_wait semantics), then respawn. Clearing
+        // the target first matters: `attach` early-returns when the target
+        // is unchanged (and when targets share a process), so without this
+        // the re-attach after the kill would silently do nothing and the
+        // session would never respawn.
+        self.target = None;
         self.stop_and_wait(Duration::from_millis(750), Duration::from_millis(250))?;
         let _ = self.attach(target)?;
         Ok(())

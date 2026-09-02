@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::terminal::TerminalTarget;
 
-pub const WIRE_VERSION: u32 = 2;
+pub const WIRE_VERSION: u32 = 3;
 
 /// Hard frame cap (1 MiB). PTY output chunks are 8 KiB reads; base64 inflates
 /// them 4/3, so this bounds a single frame comfortably while keeping a
@@ -95,6 +95,11 @@ pub enum ClientToDaemon {
     BroadcastLine {
         line: String,
     },
+    /// Discovery: enumerate every daemon session. Synchronous: replies
+    /// exactly once with `Sessions` (same `req_id`).
+    ListSessions {
+        req_id: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -140,6 +145,31 @@ pub enum DaemonToClient {
         line: String,
     },
     Pong,
+    /// Unsolicited discovery broadcast: a new daemon session appeared
+    /// (fresh spawn). Carries the daemon's canonical session key.
+    SessionOpened {
+        id: String,
+        pid: Option<u32>,
+    },
+    /// Unsolicited discovery broadcast: a daemon session ended.
+    SessionClosed {
+        id: String,
+    },
+    /// Reply to [`ClientToDaemon::ListSessions`].
+    Sessions {
+        req_id: u64,
+        sessions: Vec<SessionInfo>,
+    },
+}
+
+/// One daemon session as reported by discovery (`ListSessions` /
+/// `SessionOpened`). `id` is the daemon's canonical session key.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionInfo {
+    pub id: String,
+    pub pid: Option<u32>,
+    pub running: bool,
+    pub exit_status: Option<String>,
 }
 
 pub fn write_msg<W: Write, T: Serialize>(writer: &mut W, message: &T) -> std::io::Result<()> {

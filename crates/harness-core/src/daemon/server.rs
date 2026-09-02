@@ -27,7 +27,7 @@ use crate::terminal::{spawn_process, HostEvent, HostProcess, TerminalTarget};
 use std::sync::Arc;
 
 use super::ctl_socket_path;
-use super::proto::{self, write_msg, ClientToDaemon, DaemonToClient};
+use super::proto::{self, write_msg, ClientToDaemon, DaemonToClient, SessionInfo};
 
 /// Bounded writer queue per connection; a stalled client cannot stall the hub.
 const WRITE_QUEUE_DEPTH: usize = 128;
@@ -245,6 +245,13 @@ struct Hub {
     sessions: HashMap<String, SessionState>,
     connections: HashMap<u64, SyncSender<DaemonToClient>>,
     next_conn_id: u64,
+    /// Ring buffer of validated sidecar lines, replayed to each newly
+    /// attached client so late joiners see the agent state early clients got
+    /// live.
+    sidecar_history: std::collections::VecDeque<String>,
+    /// Bounded sidecar history: at most this many raw lines are replayed to
+    /// a newly attached client.
+    sidecar_history_cap: usize,
 }
 
 impl Default for Hub {
@@ -255,6 +262,8 @@ impl Default for Hub {
             sessions: HashMap::new(),
             connections: HashMap::new(),
             next_conn_id: 0,
+            sidecar_history: std::collections::VecDeque::new(),
+            sidecar_history_cap: 256,
         }
     }
 }
@@ -527,6 +536,19 @@ impl Hub {
                     sidecar.broadcast(&line);
                 }
             }
+            ClientToDaemon::ListSessions { req_id } => {
+                let sessions = self
+                    .sessions
+                    .iter()
+                    .map(|(id, state)| SessionInfo {
+                        id: id.clone(),
+                        pid: state.process.as_ref().and_then(|process| process.pid),
+                        running: state.process.is_some(),
+                        exit_status: state.exit_status.clone(),
+                    })
+                    .collect();
+                self.send(conn, DaemonToClient::Sessions { req_id, sessions });
+            }
         }
     }
 
@@ -540,19 +562,24 @@ impl Hub {
         cols: u16,
         hub_tx: &mpsc::Sender<HubEvent>,
     ) {
+        // Canonical identity: sessions claiming the same resolved session
+        // file share one daemon session, so a second client attaching to the
+        // same underlying agent lands on the existing entry instead of
+        // double-spawning the pi session file.
+        let key = self.resolve_key(&session_id, &target);
         let already_running = self
             .sessions
-            .get(&session_id)
+            .get(&key)
             .is_some_and(|session| session.process.is_some());
         if !already_running {
-            match self.spawn_child(&session_id, target, rows, cols, hub_tx) {
+            match self.spawn_child(&key, target, rows, cols, hub_tx) {
                 Ok(()) => {}
                 Err(message) => {
                     self.send(
                         conn,
                         DaemonToClient::Error {
                             req_id,
-                            session_id: Some(session_id),
+                            session_id: Some(key),
                             message,
                         },
                     );
@@ -560,21 +587,43 @@ impl Hub {
                 }
             }
         }
-        let state = &self.sessions[&session_id];
+        let state = &self.sessions[&key];
+        // Discovery: announce the daemon's canonical identity for the session
+        // so every attached client can converge on one row.
+        self.broadcast(DaemonToClient::SessionOpened {
+            id: key.clone(),
+            pid: state.process.as_ref().and_then(|process| process.pid),
+        });
         // Replay rides the Spawned reply itself, so the ordering between
         // restored history and subsequent live output is atomic on the wire.
         let replay = already_running.then(|| state.view.replay());
+        // The canonical key rides every Spawned reply so a client that keyed
+        // the session differently (draft uuid, scan-discovered id) can rebind
+        // its workspace row to the daemon's stable identity.
         self.send(
             conn,
             DaemonToClient::Spawned {
                 req_id,
-                session_id,
+                session_id: key,
                 pid: state.process.as_ref().and_then(|process| process.pid),
                 already_running,
                 exit_status: state.exit_status.clone(),
                 replay,
             },
         );
+    }
+
+    /// Resolve a spawn request's canonical session key: the resolved
+    /// (canonicalized) session file when the target carries one, so every
+    /// client naming the same underlying pi session file converges on one
+    /// daemon session; the client-supplied key otherwise.
+    fn resolve_key(&self, session_id: &str, target: &TerminalTarget) -> String {
+        match target.session_file.as_ref().map(|path| {
+            std::fs::canonicalize(path).unwrap_or_else(|_| path.clone())
+        }) {
+            Some(session_file) => session_file.to_string_lossy().into_owned(),
+            None => session_id.to_string(),
+        }
     }
 
     fn spawn_child(
@@ -743,17 +792,28 @@ impl Hub {
                     state.process = None;
                     state.exit_status = Some(status.clone());
                 }
-                self.broadcast(DaemonToClient::Exited { session_id, status });
+                self.broadcast(DaemonToClient::Exited {
+                    session_id: session_id.clone(),
+                    status,
+                });
+                // Discovery: the daemon session is gone even though its
+                // retained entry (exit status, view) stays for reattach.
+                self.broadcast(DaemonToClient::SessionClosed { id: session_id });
             }
         }
     }
 
-    /// Relay validated agent lines to every attached client verbatim.
+    /// Relay validated agent lines to every attached client verbatim, and
+    /// keep a bounded ring so newly attached clients can be backfilled.
     fn drain_sidecar(&mut self) {
         while let Some(sidecar) = &self.sidecar {
             let Some(line) = sidecar.try_recv_raw() else {
                 break;
             };
+            self.sidecar_history.push_back(line.clone());
+            if self.sidecar_history.len() > self.sidecar_history_cap {
+                self.sidecar_history.pop_front();
+            }
             self.broadcast(DaemonToClient::SidecarLine { line });
         }
     }
@@ -861,6 +921,10 @@ mod tests {
                     return (pid, already_running);
                 }
                 DaemonToClient::Output { .. } => {}
+                // Discovery broadcasts ride along with every spawn; ignore
+                // them while waiting for the Spawned reply.
+                DaemonToClient::SessionOpened { .. }
+                | DaemonToClient::SessionClosed { .. } => {}
                 other => panic!("unexpected message while spawning: {other:?}"),
             }
         }
@@ -1010,6 +1074,8 @@ mod tests {
                         req_id: 3, replay, ..
                     } => break replay,
                     DaemonToClient::Output { .. } => {}
+                    DaemonToClient::SessionOpened { .. }
+                    | DaemonToClient::SessionClosed { .. } => {}
                     other => panic!("unexpected while awaiting replay spawn: {other:?}"),
                 }
             }
@@ -1095,6 +1161,8 @@ mod tests {
                 Ok(Some(DaemonToClient::SidecarLine { line })) => break line,
                 Ok(Some(DaemonToClient::Output { .. })) => {}
                 Ok(Some(DaemonToClient::Exited { .. })) => {}
+                Ok(Some(DaemonToClient::SessionOpened { .. })) => {}
+                Ok(Some(DaemonToClient::SessionClosed { .. })) => {}
                 Ok(Some(other)) => {
                     panic!("unexpected while awaiting sidecar relay: {other:?}")
                 }
