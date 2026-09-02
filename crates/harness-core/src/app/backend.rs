@@ -14,7 +14,7 @@ use crate::config::{
     AppAction, AppConfig, KeyChordState, KeyStroke, KeyToken, Keymap, KeymapMatch, NamedKeyToken,
 };
 use crate::notify::Notify;
-use crate::daemon::client::DaemonClient;
+use crate::daemon::client::{DaemonClient, DaemonSessionEvent};
 use crate::sidecar::SidecarMessage;
 use std::sync::Arc;
 use crate::state::{PersistedState, Project, ScannedSession, Session};
@@ -225,6 +225,9 @@ impl HarnessCore {
             pending_theme: None,
         };
         core.workspace.reload_projects_from_disk();
+        // Discovery: adopt sessions other clients spawned before this one
+        // connected; afterwards SessionOpened broadcasts keep the set fresh.
+        core.refresh_daemon_known_set();
 
         if !core.terminal_manager.has_sidecar_extension() {
             core.set_note_error("sidecar extension not found");
@@ -898,8 +901,45 @@ impl HarnessCore {
         true
     }
 
+    /// Adopt daemon-known sessions into the workspace so sessions other
+    /// clients spawned are visible without a disk rescan.
+    pub(super) fn refresh_daemon_known_set(&mut self) {
+        let Ok(infos) = self.sidecar.list_sessions() else {
+            return;
+        };
+        for info in infos {
+            self.workspace.ensure_daemon_session(&info.id);
+        }
+        self.mark_terminals_dirty();
+    }
+
+    /// Route daemon-initiated session lifecycle broadcasts into the
+    /// workspace: unknown sessions become rows, closed ones drop to idle.
+    fn drain_daemon_session_events(&mut self) -> bool {
+        let mut changed = false;
+        while let Some(event) = self.sidecar.try_recv_session_event() {
+            match event {
+                DaemonSessionEvent::SessionOpened { id, .. } => {
+                    changed |= self.workspace.ensure_daemon_session(&id);
+                }
+                DaemonSessionEvent::SessionClosed { id } => {
+                    if let Some((project_index, session_index)) =
+                        self.workspace.locate_session_by_key(&id)
+                    {
+                        let session =
+                            &mut self.workspace.projects_mut()[project_index].sessions[session_index];
+                        session.runtime.running = false;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        changed
+    }
+
     pub(super) fn process_background_events(&mut self) -> bool {
         let mut changed = self.drain_terminal_events();
+        changed |= self.drain_daemon_session_events();
         let mut snapshots = Vec::new();
         while let Some(message) = { self.sidecar.try_recv_sidecar() } {
             match message {

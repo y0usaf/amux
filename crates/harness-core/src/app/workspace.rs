@@ -364,6 +364,55 @@ impl Workspace {
         self.persist_selection();
     }
 
+    /// True when some row already maps this identity: a workspace selection
+    /// key, a row local id, or a resolved session file the daemon derived its
+    /// canonical key from.
+    pub(super) fn knows_session(&self, key: &str) -> bool {
+        self.projects.iter().any(|project| {
+            project.sessions.iter().any(|session| {
+                session.local_id == key
+                    || session.selection_key() == key
+                    || session
+                        .session_file
+                        .as_ref()
+                        .is_some_and(|file| file.to_string_lossy() == key)
+            })
+        })
+    }
+
+    /// Adopt a daemon-known session into the workspace so sessions other
+    /// clients spawned show up without a disk rescan. Rows are keyed by the
+    /// daemon's canonical identity, so adoption is idempotent.
+    pub(super) fn ensure_daemon_session(&mut self, key: &str) -> bool {
+        if self.knows_session(key) {
+            return false;
+        }
+        let Some(project) = self.projects.get_mut(self.selected_project) else {
+            return false;
+        };
+        project.sessions.push(Session::from_daemon(key));
+        true
+    }
+
+    /// Locate a session row by its daemon identity: the row's local id, or
+    /// the selection key the daemon derived its canonical key from.
+    pub(super) fn locate_session_by_key(&self, key: &str) -> Option<(usize, usize)> {
+        self.projects.iter().enumerate().find_map(|(project_index, project)| {
+            project
+                .sessions
+                .iter()
+                .position(|session| {
+                    session.local_id == key
+                        || session.selection_key() == key
+                        || session
+                            .session_file
+                            .as_ref()
+                            .is_some_and(|file| file.to_string_lossy() == key)
+                })
+                .map(|session_index| (project_index, session_index))
+        })
+    }
+
     pub(super) fn select_project(&mut self, index: usize) -> bool {
         if index >= self.projects.len() {
             return false;

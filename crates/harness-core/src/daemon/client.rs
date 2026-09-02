@@ -25,14 +25,27 @@ use crate::terminal::TerminalTarget;
 
 use super::ctl_socket_path;
 use super::proto::{
-    self, read_msg, write_msg, ClientToDaemon, DaemonToClient, SelectionSpan, TerminalReplay,
+    self, read_msg, write_msg, ClientToDaemon, DaemonToClient, SelectionSpan, SessionInfo,
+    TerminalReplay,
 };
+
+/// Daemon-initiated session lifecycle broadcast, surfaced to the app layer
+/// for workspace discovery (new sessions appearing elsewhere).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DaemonSessionEvent {
+    SessionOpened { id: String, pid: Option<u32> },
+    SessionClosed { id: String },
+}
 
 /// Reply to an idempotent ensure-spawn: whether the session was already
 /// running, plus its pid, exit status, and — when adopting a live session —
 /// the daemon's authoritative view state to restore from.
 #[derive(Debug, Clone)]
 pub struct SpawnOutcome {
+    /// The daemon's canonical session key: the resolved session file when
+    /// the target carries one, else the requested key. Adopting clients use
+    /// this for all subsequent wire traffic.
+    pub session_id: String,
     pub already_running: bool,
     pub pid: Option<u32>,
     pub exit_status: Option<String>,
@@ -64,6 +77,9 @@ pub struct DaemonClient {
     /// Single-consumer sidecar stream; shared behind a mutex so clones drain
     /// the same queue without duplication.
     sidecar_rx: Arc<Mutex<Receiver<crate::sidecar::SidecarMessage>>>,
+    /// Daemon-initiated session discovery events (opened/closed), drained by
+    /// the app layer for workspace adoption.
+    session_events: Arc<Mutex<Vec<DaemonSessionEvent>>>,
     notify: Notify,
 }
 
@@ -74,6 +90,7 @@ impl Clone for DaemonClient {
             pending: Arc::clone(&self.pending),
             routes: Arc::clone(&self.routes),
             sidecar_rx: Arc::clone(&self.sidecar_rx),
+            session_events: Arc::clone(&self.session_events),
             notify: self.notify.clone(),
         }
     }
@@ -114,6 +131,7 @@ impl DaemonClient {
             pending: Arc::new(Mutex::new(HashMap::new())),
             routes: Arc::new(Mutex::new(HashMap::new())),
             sidecar_rx: Arc::new(Mutex::new(sidecar_rx)),
+            session_events: Arc::new(Mutex::new(Vec::new())),
             notify: notify.clone(),
         };
         client.spawn_reader(sidecar_tx, notify)?;
@@ -225,6 +243,7 @@ impl DaemonClient {
             .try_clone()?;
         let pending = Arc::clone(&self.pending);
         let routes = Arc::clone(&self.routes);
+        let session_events = Arc::clone(&self.session_events);
         std::thread::Builder::new()
             .name("harness-daemon-client-reader".into())
             .spawn(move || {
@@ -234,6 +253,7 @@ impl DaemonClient {
                             let was_reply = match &message {
                                 DaemonToClient::Spawned { req_id, .. }
                                 | DaemonToClient::Killed { req_id, .. }
+                                | DaemonToClient::Sessions { req_id, .. }
                                 | DaemonToClient::Error { req_id, .. }
                                     if *req_id != 0 =>
                                 {
@@ -282,7 +302,25 @@ impl DaemonClient {
                                 DaemonToClient::Error { message, .. } => {
                                     log::warn!("harness daemon error: {message}");
                                 }
-                                DaemonToClient::Spawned { .. }
+                                DaemonToClient::SessionOpened { id, pid } => {
+                                    if let Ok(mut events) = session_events.lock() {
+                                        events.push(DaemonSessionEvent::SessionOpened {
+                                            id,
+                                            pid,
+                                        });
+                                    }
+                                    notify();
+                                }
+                                DaemonToClient::SessionClosed { id } => {
+                                    if let Ok(mut events) = session_events.lock() {
+                                        events.push(DaemonSessionEvent::SessionClosed {
+                                            id,
+                                        });
+                                    }
+                                    notify();
+                                }
+                                DaemonToClient::Sessions { .. }
+                                | DaemonToClient::Spawned { .. }
                                 | DaemonToClient::Killed { .. }
                                 | DaemonToClient::Welcome { .. }
                                 | DaemonToClient::Rejected { .. }
@@ -323,19 +361,43 @@ impl DaemonClient {
             cols,
         })? {
             DaemonToClient::Spawned {
+                session_id: canonical,
                 pid,
                 already_running,
                 exit_status,
                 replay,
                 ..
-            } => Ok(SpawnOutcome {
-                already_running,
-                pid,
-                exit_status,
-                replay,
-            }),
+            } => {
+                // The daemon keys sessions by their canonical identity
+                // (resolved session file); rebind this client's route so
+                // frames keyed canonically reach the controller that
+                // registered under the requested key.
+                if canonical != session_id {
+                    if let Ok(mut routes) = self.routes.lock() {
+                        if let Some(tx) = routes.remove(&session_id) {
+                            routes.insert(canonical.clone(), tx);
+                        }
+                    }
+                }
+                Ok(SpawnOutcome {
+                    session_id: canonical,
+                    already_running,
+                    pid,
+                    exit_status,
+                    replay,
+                })
+            }
             DaemonToClient::Error { message, .. } => Err(anyhow::anyhow!("{message}")),
             other => Err(anyhow::anyhow!("unexpected spawn reply: {other:?}")),
+        }
+    }
+
+    /// Discovery: enumerate the daemon's sessions so the workspace can adopt
+    /// rows this client did not spawn itself.
+    pub fn list_sessions(&self) -> anyhow::Result<Vec<SessionInfo>> {
+        match self.request(|req_id| ClientToDaemon::ListSessions { req_id })? {
+            DaemonToClient::Sessions { sessions, .. } => Ok(sessions),
+            other => Err(anyhow::anyhow!("unexpected list_sessions reply: {other:?}")),
         }
     }
 
@@ -432,6 +494,18 @@ impl DaemonClient {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .try_recv()
             .ok()
+    }
+
+    /// Drain the next daemon-initiated session discovery event, if any.
+    pub fn try_recv_session_event(&self) -> Option<DaemonSessionEvent> {
+        let mut events = self
+            .session_events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if events.is_empty() {
+            return None;
+        }
+        Some(events.remove(0))
     }
 }
 
