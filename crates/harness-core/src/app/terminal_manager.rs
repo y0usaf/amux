@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::notify::Notify;
+use crate::daemon::client::DaemonClient;
+use std::sync::Arc;
 use crate::state::{Project, Session};
 use crate::terminal::{TerminalController, TerminalStatus, TerminalTarget};
 
@@ -10,7 +11,7 @@ const TERMINAL_STOP_GRACEFUL_TIMEOUT: Duration = Duration::from_millis(750);
 const TERMINAL_STOP_FORCE_TIMEOUT: Duration = Duration::from_millis(250);
 
 pub(super) struct TerminalManager {
-    notify: Notify,
+    daemon: Arc<DaemonClient>,
     controllers: HashMap<String, TerminalController>,
     last_selected_session_id: Option<String>,
     sidecar_extension_path: Option<PathBuf>,
@@ -22,7 +23,7 @@ pub(super) struct TerminalManager {
 
 impl TerminalManager {
     pub(super) fn new(
-        notify: Notify,
+        daemon: Arc<DaemonClient>,
         sidecar_extension_path: Option<PathBuf>,
         tui_mode: Option<String>,
         sidecar_socket_path: PathBuf,
@@ -30,7 +31,7 @@ impl TerminalManager {
         symbol_overrides: BTreeMap<String, String>,
     ) -> Self {
         Self {
-            notify,
+            daemon,
             controllers: HashMap::new(),
             last_selected_session_id: None,
             sidecar_extension_path,
@@ -102,12 +103,13 @@ impl TerminalManager {
         }
 
         let (session_id, target) = self.terminal_target_for_session(project, session);
-        let notify = self.notify.clone();
         let restart_result: anyhow::Result<()> = (|| {
             let terminal = self
                 .controllers
-                .entry(session_id)
-                .or_insert_with(|| TerminalController::new(notify));
+                .entry(session_id.clone())
+                .or_insert_with(|| {
+                    TerminalController::new(self.daemon.clone(), session_id.clone())
+                });
             let _ = terminal.attach(None)?;
             let _ = terminal.attach(Some(target))?;
             Ok(())
@@ -141,7 +143,6 @@ impl TerminalManager {
         let mut active_ids =
             HashSet::with_capacity(projects.iter().map(|project| project.sessions.len()).sum());
         let mut errors = Vec::new();
-        let notify = self.notify.clone();
 
         for project in projects {
             for session in &project.sessions {
@@ -156,8 +157,10 @@ impl TerminalManager {
                 let attach_result = {
                     let terminal = self
                         .controllers
-                        .entry(session_id)
-                        .or_insert_with(|| TerminalController::new(notify.clone()));
+                        .entry(session_id.clone())
+                        .or_insert_with(|| {
+                            TerminalController::new(self.daemon.clone(), session_id.clone())
+                        });
                     terminal.attach(Some(target))
                 };
                 if let Err(error) = attach_result {

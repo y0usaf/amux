@@ -5,8 +5,10 @@ mod process;
 #[path = "terminal/selection.rs"]
 mod selection;
 
+pub(crate) use controller::TERMINAL_SCROLLBACK;
 pub use controller::{TerminalController, TerminalStatus};
 pub use process::TerminalTarget;
+pub(crate) use process::{spawn_argv, spawn_process, HostEvent, HostProcess};
 pub(crate) use selection::terminal_selection_span;
 pub use selection::{TerminalSelectionPoint, TerminalSelectionRange};
 
@@ -42,6 +44,36 @@ mod tests {
     }
 
     #[test]
+    fn same_sidecar_socket_and_harness_session_share_process() {
+        let current = target(Some("/tmp/session-a.jsonl"));
+        let mut next = target(Some("/tmp/session-b.jsonl"));
+        // Cosmetic drift that does not change process identity.
+        next.cwd = PathBuf::from("/tmp/other-project");
+        next.pi_binary = None;
+        next.ascii = true;
+
+        assert!(targets_share_process(Some(&current), Some(&next)));
+    }
+
+    #[test]
+    fn different_harness_session_forces_restart() {
+        let current = target(Some("/tmp/session.jsonl"));
+        let mut next = target(Some("/tmp/session.jsonl"));
+        next.harness_session_id = "other-session".into();
+
+        assert!(!targets_share_process(Some(&current), Some(&next)));
+    }
+
+    #[test]
+    fn different_sidecar_socket_forces_restart() {
+        let current = target(Some("/tmp/session.jsonl"));
+        let mut next = target(Some("/tmp/session.jsonl"));
+        next.sidecar_socket_path = PathBuf::from("/tmp/other.sock");
+
+        assert!(!targets_share_process(Some(&current), Some(&next)));
+    }
+
+    #[test]
     fn disconnected_terminal_status_promotes_active_states_to_error() {
         assert!(matches!(
             disconnected_terminal_status(&TerminalStatus::Launching),
@@ -58,15 +90,6 @@ mod tests {
         assert!(disconnected_terminal_status(&TerminalStatus::Empty).is_some());
         assert!(disconnected_terminal_status(&TerminalStatus::Exited("0".into())).is_none());
         assert!(disconnected_terminal_status(&TerminalStatus::Error("boom".into())).is_none());
-    }
-
-    #[test]
-    fn process_identity_change_forces_restart() {
-        let current = target(Some("/tmp/session-a.jsonl"));
-        let mut next = target(Some("/tmp/session-b.jsonl"));
-        next.cwd = PathBuf::from("/tmp/other-project");
-
-        assert!(!targets_share_process(Some(&current), Some(&next)));
     }
 
     #[test]
@@ -105,23 +128,6 @@ mod tests {
         let next = target(None);
 
         assert!(targets_share_process(Some(&current), Some(&next)));
-    }
-
-    #[test]
-    fn different_materialized_session_files_force_restart() {
-        let current = target(Some("/tmp/session-a.jsonl"));
-        let next = target(Some("/tmp/session-b.jsonl"));
-
-        assert!(!targets_share_process(Some(&current), Some(&next)));
-    }
-
-    #[test]
-    fn target_change_in_harness_session_forces_restart() {
-        let current = target(Some("/tmp/session.jsonl"));
-        let mut next = target(Some("/tmp/session.jsonl"));
-        next.harness_session_id = "local-session-2".into();
-
-        assert!(!targets_share_process(Some(&current), Some(&next)));
     }
 
     #[test]

@@ -37,6 +37,9 @@ enum TuiEvent {
 }
 
 pub fn run(initial_project_paths: Vec<PathBuf>) -> anyhow::Result<()> {
+    if let Some(mode) = daemon_mode() {
+        return mode.run();
+    }
     let (tx, rx) = mpsc::channel();
     let wake_pending = Arc::new(AtomicBool::new(false));
     let notify = tui_notify(tx.clone(), wake_pending.clone());
@@ -44,6 +47,32 @@ pub fn run(initial_project_paths: Vec<PathBuf>) -> anyhow::Result<()> {
     let _raw_terminal = RawTerminal::enter()?;
     spawn_stdin_reader(tx);
     app.run(rx)
+}
+
+/// `--daemon` daemonizes; `--daemon-foreground` runs in the current process.
+fn daemon_mode() -> Option<DaemonMode> {
+    if std::env::args().any(|arg| arg == "--daemon") {
+        Some(DaemonMode::Background)
+    } else if std::env::args().any(|arg| arg == "--daemon-foreground") {
+        Some(DaemonMode::Foreground)
+    } else {
+        None
+    }
+}
+
+enum DaemonMode {
+    Background,
+    Foreground,
+}
+
+impl DaemonMode {
+    fn run(self) -> anyhow::Result<()> {
+        let result = match self {
+            Self::Background => crate::daemon::server::run_daemonized(),
+            Self::Foreground => crate::daemon::server::run_foreground(),
+        };
+        result.map_err(|error| anyhow::anyhow!("harness daemon: {error}"))
+    }
 }
 
 fn tui_notify(tx: mpsc::Sender<TuiEvent>, wake_pending: Arc<AtomicBool>) -> Notify {
