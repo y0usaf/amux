@@ -751,6 +751,7 @@ impl HarnessCore {
             }
         };
 
+        self.refresh_daemon_known_set();
         self.refresh_project_from_scan(project_index);
         self.mark_terminals_dirty();
         self.ensure_terminals_synced();
@@ -764,6 +765,7 @@ impl HarnessCore {
     }
 
     pub(super) fn refresh_all_sessions(&mut self) {
+        self.refresh_daemon_known_set();
         self.reload_projects_from_disk();
         self.ensure_terminals_synced();
         let project_count = self.workspace.projects().len();
