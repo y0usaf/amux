@@ -198,7 +198,7 @@ pub(super) fn sidebar_viewport_items(
 }
 
 pub(super) fn session_sidebar_status(session: &Session) -> Option<SidebarStatusKind> {
-    if session.runtime.awaiting_interview() {
+    if session.runtime.awaiting_user() {
         Some(SidebarStatusKind::Input)
     } else if session.runtime.running {
         Some(SidebarStatusKind::Active)
@@ -210,16 +210,6 @@ pub(super) fn session_sidebar_status(session: &Session) -> Option<SidebarStatusK
         Some(SidebarStatusKind::Notification)
     } else {
         None
-    }
-}
-
-pub(super) fn sidebar_status_color(status: SidebarStatusKind) -> Role {
-    match status {
-        SidebarStatusKind::Active => Role::Running,
-        SidebarStatusKind::Queued => Role::Warning,
-        SidebarStatusKind::Interrupted => Role::Error,
-        SidebarStatusKind::Notification => Role::Success,
-        SidebarStatusKind::Input => Role::Accent2,
     }
 }
 
@@ -285,13 +275,6 @@ fn project_sidebar_status(project: &Project) -> Option<SidebarStatusKind> {
     } else {
         None
     }
-}
-
-pub(super) fn sidebar_has_spinner(projects: &[Project]) -> bool {
-    projects
-        .iter()
-        .flat_map(|project| project.sessions.iter())
-        .any(|session| session.runtime.running || session.runtime.queued)
 }
 
 pub(super) fn build_sidebar_rows(

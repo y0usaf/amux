@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -79,26 +78,6 @@ impl HostProcess {
             None => self.terminate(),
         }
     }
-
-    pub(crate) fn wait_for_exit(&mut self, timeout: Duration) -> Result<bool, String> {
-        if timeout.is_zero() {
-            return Ok(false);
-        }
-
-        let deadline = Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Ok(false);
-            }
-            match self.rx.recv_timeout(remaining) {
-                Ok(HostEvent::Exited(_)) => return Ok(true),
-                Ok(HostEvent::Output(_) | HostEvent::Error(_)) => {}
-                Err(RecvTimeoutError::Timeout) => return Ok(false),
-                Err(RecvTimeoutError::Disconnected) => return Ok(true),
-            }
-        }
-    }
 }
 
 impl HostProcess {
@@ -123,7 +102,7 @@ pub(crate) fn spawn_process(
     // session; row-to-session correlation then happens via the scan instead
     // of at spawn time.
     #[cfg(not(feature = "fx"))]
-    let mut args = {
+    let args = {
         let mut args = Vec::new();
         if let Some(ref extension_path) = target.sidecar_extension_path {
             args.push("-e".to_string());
@@ -141,7 +120,7 @@ pub(crate) fn spawn_process(
         args
     };
     #[cfg(feature = "fx")]
-    let mut args = Vec::new();
+    let args = Vec::new();
     let argv = agent::launch_argv(target.pi_binary.as_deref(), &args)?;
 
     let env = spawn_env(target);
@@ -295,7 +274,7 @@ fn process_is_missing_error(error: &std::io::Error) -> bool {
     }
     #[cfg(unix)]
     {
-        return error.raw_os_error() == Some(libc::ESRCH);
+        error.raw_os_error() == Some(libc::ESRCH)
     }
     #[cfg(not(unix))]
     {

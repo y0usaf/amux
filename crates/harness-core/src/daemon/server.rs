@@ -239,6 +239,9 @@ pub(crate) fn run_foreground_with(spawner: Spawner) -> std::io::Result<()> {
 
 struct Hub {
     spawner: Spawner,
+    /// Event sink for the hub loop; reader/forwarder threads clone it. Set
+    /// once `run` starts, before any event is dispatched.
+    hub_tx: mpsc::Sender<HubEvent>,
     /// Hosts the agent sidechannel socket; inbound agent lines are relayed to
     /// attached clients verbatim, outbound client lines go to extensions.
     sidecar: Option<SidecarListener>,
@@ -263,6 +266,9 @@ impl Default for Hub {
     fn default() -> Self {
         Self {
             spawner: spawn_process,
+            // Placeholder until `run` installs the live sender; the receiver
+            // here is dropped, so nothing should ever send through it.
+            hub_tx: mpsc::channel().0,
             sidecar: None,
             sessions: HashMap::new(),
             connections: HashMap::new(),
@@ -364,6 +370,7 @@ enum SessionEvent {
 
 impl Hub {
     fn run(mut self, hub_rx: mpsc::Receiver<HubEvent>, hub_tx: mpsc::Sender<HubEvent>) {
+        self.hub_tx = hub_tx;
         loop {
             let event = match hub_rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(event) => event,
@@ -377,14 +384,12 @@ impl Hub {
                 Err(RecvTimeoutError::Disconnected) => return,
             };
             match event {
-                HubEvent::NewClient(stream) => self.on_new_client(stream, &hub_tx),
+                HubEvent::NewClient(stream) => self.on_new_client(stream),
                 HubEvent::ClientGone(id) => {
                     self.connections.remove(&id);
                     self.handshaken.remove(&id);
                 }
-                HubEvent::ClientMessage(id, message) => {
-                    self.on_client_message(id, message, &hub_tx)
-                }
+                HubEvent::ClientMessage(id, message) => self.on_client_message(id, message),
                 HubEvent::SessionEvent { session_id, event } => {
                     self.on_session_event(session_id, event)
                 }
@@ -405,14 +410,14 @@ impl Hub {
         self.connections.is_empty() && !has_live
     }
 
-    fn on_new_client(&mut self, stream: UnixStream, hub_tx: &mpsc::Sender<HubEvent>) {
+    fn on_new_client(&mut self, stream: UnixStream) {
         let id = self.next_conn_id;
         self.next_conn_id += 1;
         let (tx, rx) = mpsc::sync_channel::<DaemonToClient>(WRITE_QUEUE_DEPTH);
         self.connections.insert(id, tx);
 
         // Reader thread: decodes frames into the hub.
-        let reader_hub_tx = hub_tx.clone();
+        let reader_hub_tx = self.hub_tx.clone();
         let reader_stream = match stream.try_clone() {
             Ok(reader) => reader,
             Err(_) => {
@@ -462,12 +467,7 @@ impl Hub {
             .expect("writer thread");
     }
 
-    fn on_client_message(
-        &mut self,
-        conn: u64,
-        message: ClientToDaemon,
-        hub_tx: &mpsc::Sender<HubEvent>,
-    ) {
+    fn on_client_message(&mut self, conn: u64, message: ClientToDaemon) {
         match message {
             ClientToDaemon::Hello { wire_version } => {
                 let accepted = wire_version == proto::WIRE_VERSION;
@@ -507,7 +507,7 @@ impl Hub {
                 target,
                 rows,
                 cols,
-            } => self.spawn_session(conn, req_id, session_id, target, rows, cols, hub_tx),
+            } => self.spawn_session(conn, req_id, session_id, target, rows, cols),
             ClientToDaemon::Input { session_id, bytes } => match BASE64.decode(bytes.as_bytes()) {
                 Ok(bytes) => self.write_input(&session_id, &bytes),
                 Err(error) => self.send(
@@ -583,7 +583,6 @@ impl Hub {
         target: TerminalTarget,
         rows: u16,
         cols: u16,
-        hub_tx: &mpsc::Sender<HubEvent>,
     ) {
         // Canonical identity: sessions claiming the same resolved session
         // file share one daemon session, so a second client attaching to the
@@ -595,7 +594,7 @@ impl Hub {
             .get(&key)
             .is_some_and(|session| session.process.is_some());
         if !already_running {
-            match self.spawn_child(&key, target, rows, cols, hub_tx) {
+            match self.spawn_child(&key, target, rows, cols) {
                 Ok(()) => {}
                 Err(message) => {
                     self.send(
@@ -657,7 +656,6 @@ impl Hub {
         target: TerminalTarget,
         rows: u16,
         cols: u16,
-        hub_tx: &mpsc::Sender<HubEvent>,
     ) -> Result<(), String> {
         let mut process = (self.spawner)(&target, cols, rows, noop())?;
         let (exit_signal_tx, exit_signal) = mpsc::channel();
@@ -665,7 +663,7 @@ impl Hub {
         // Forwarder thread: sole consumer of the PTY event stream; relays
         // events into the hub and signals exits for kill barriers.
         let rx = process.take_events();
-        let forward_hub_tx = hub_tx.clone();
+        let forward_hub_tx = self.hub_tx.clone();
         let forward_id = session_id.to_string();
         std::thread::Builder::new()
             .name("harness-daemon-forward".into())

@@ -12,6 +12,7 @@ pub struct SessionRuntime {
     pub queued: bool,
     pub interrupted: bool,
     pub tool_name: Option<String>,
+    pub awaiting_approval: bool,
     pub unread: bool,
     pub last_sidecar_ts_ms: u64,
 }
@@ -21,9 +22,10 @@ impl SessionRuntime {
         self.running || self.queued
     }
 
-    /// True while a pi-interview questionnaire is blocking the agent turn.
-    pub fn awaiting_interview(&self) -> bool {
-        self.running && self.tool_name.as_deref() == Some("interview_user")
+    /// True while the agent is blocked on a tool approval prompt (omp) —
+    /// waiting on the user, not working.
+    pub fn awaiting_user(&self) -> bool {
+        self.awaiting_approval || self.tool_name.as_deref() == Some("interview_user")
     }
 }
 
@@ -63,7 +65,10 @@ impl Session {
     /// Row for a daemon-known session this client did not spawn (adopted
     /// from discovery). Keyed by the daemon's canonical identity; a later
     /// disk scan renames and files it like any other scanned session.
-    pub fn from_daemon(daemon_key: &str) -> Self {
+    /// `running` comes from the daemon's process state and must survive the
+    /// scan merge: a session with no on-disk messages matches no scanned
+    /// row, so only the running flag keeps it from being dropped.
+    pub fn from_daemon(daemon_key: &str, running: bool) -> Self {
         let now = now_millis();
         Self {
             local_id: daemon_key.to_string(),
@@ -74,7 +79,10 @@ impl Session {
             created_at_ms: now,
             updated_at_ms: now,
             promoted_at_ms: 0,
-            runtime: SessionRuntime::default(),
+            runtime: SessionRuntime {
+                running,
+                ..SessionRuntime::default()
+            },
             draft: false,
         }
     }

@@ -469,7 +469,7 @@ impl DaemonClient {
     }
 
     /// Subscribe a session's event channel; called when a controller attaches.
-    pub fn register(&self, session_id: &str, tx: Sender<HostEvent>) {
+    pub(crate) fn register(&self, session_id: &str, tx: Sender<HostEvent>) {
         if let Ok(mut routes) = self.routes.lock() {
             routes.insert(session_id.to_string(), tx);
         }

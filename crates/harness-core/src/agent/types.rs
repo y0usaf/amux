@@ -48,6 +48,10 @@ pub struct PiSidecarSnapshot {
     pub queued: bool,
     #[serde(default)]
     pub interrupted: bool,
+    /// Agent is blocked on a tool approval prompt — waiting on the user, not
+    /// working. omp-only signal; pi never emits it (serde default covers pi).
+    #[serde(default)]
+    pub awaiting_approval: bool,
     #[serde(default)]
     pub tool_name: Option<String>,
     #[serde(default)]

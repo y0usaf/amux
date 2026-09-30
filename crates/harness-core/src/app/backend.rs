@@ -256,23 +256,6 @@ pub(super) struct FrameModel<'a> {
     pub(super) terminal_selection: Option<TerminalSelectionRange>,
     pub(super) terminal_max_scrollback: usize,
 }
-
-pub(super) fn advance_shortcut_match(
-    keymap: &Keymap,
-    state: &mut KeyChordState,
-    stroke: Option<KeyStroke>,
-    clear_on_unhandled_press: bool,
-) -> Option<KeymapMatch> {
-    match stroke {
-        Some(stroke) => Some(keymap.advance(state, stroke)),
-        None if clear_on_unhandled_press => {
-            state.clear();
-            None
-        }
-        None => None,
-    }
-}
-
 pub(super) fn terminal_selection_point_for_cell_rect(
     rect: CellRect,
     rows: u16,
@@ -909,7 +892,7 @@ impl HarnessCore {
             return;
         };
         for info in infos {
-            self.workspace.ensure_daemon_session(&info.id);
+            self.workspace.ensure_daemon_session(&info.id, info.running);
         }
         self.mark_terminals_dirty();
     }
@@ -921,7 +904,8 @@ impl HarnessCore {
         while let Some(event) = self.sidecar.try_recv_session_event() {
             match event {
                 DaemonSessionEvent::SessionOpened { id, .. } => {
-                    changed |= self.workspace.ensure_daemon_session(&id);
+                    // A SessionOpened broadcast announces a live process.
+                    changed |= self.workspace.ensure_daemon_session(&id, true);
                 }
                 DaemonSessionEvent::SessionClosed { id } => {
                     if let Some((project_index, session_index)) =

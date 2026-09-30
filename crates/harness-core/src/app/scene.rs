@@ -11,7 +11,7 @@ use super::sidebar::{
     crown_jewel_glyph, sidebar_status_glyph, SidebarRow, SidebarRowKind, SidebarStatusKind,
     SidebarViewportItem, SIDEBAR_ANIMATION_FRAME_MS,
 };
-use super::terminal_view::for_each_terminal_screen_cell;
+use super::terminal_view::{for_each_terminal_screen_cell, TerminalCellViewConfig};
 use super::theme::{self, DerivedTheme, Role};
 const STATUSLINE_MODE_LABEL_WIDTH: i32 = 9;
 const STATUS_NOTE_OK_FG: Color = Color::rgb(0, 0, 0);
@@ -160,7 +160,6 @@ pub(super) fn render_harness_scene(
     surface: &mut CellSurface,
     layout: HarnessSceneLayout,
     frame_model: &FrameModel<'_>,
-    hovered_sidebar_row: Option<usize>,
     palette: &ScenePalette,
     cursor_mode: TerminalCursorMode,
     mode: HarnessMode,
@@ -173,7 +172,7 @@ pub(super) fn render_harness_scene(
             layout.sidebar_content,
             &frame_model.sidebar_rows,
             &frame_model.sidebar_viewport,
-            hovered_sidebar_row,
+            None,
             palette,
             now_ms,
         );
@@ -655,15 +654,17 @@ pub(super) fn render_sidebar(
                 ) {
                     render_sidebar_gradient_text(
                         surface,
-                        CellRect::new(inner_col + indent_cols, row_y, text_cols, 1),
-                        &value,
-                        row_bg,
-                        reverse,
-                        palette.accent,
-                        palette.accent_2,
-                        row.status,
-                        now_ms,
-                        item.visible_row,
+                        SidebarGradient {
+                            rect: CellRect::new(inner_col + indent_cols, row_y, text_cols, 1),
+                            value: &value,
+                            bg: row_bg,
+                            reverse,
+                            from: palette.accent,
+                            to: palette.accent_2,
+                            status: row.status,
+                            now_ms,
+                            phase_slot: item.visible_row,
+                        },
                         palette,
                     );
                 } else {
@@ -702,10 +703,9 @@ pub(super) fn render_sidebar(
     }
 }
 
-fn render_sidebar_gradient_text(
-    surface: &mut CellSurface,
+struct SidebarGradient<'a> {
     rect: CellRect,
-    value: &str,
+    value: &'a str,
     bg: Color,
     reverse: bool,
     from: Color,
@@ -713,8 +713,24 @@ fn render_sidebar_gradient_text(
     status: Option<SidebarStatusKind>,
     now_ms: u64,
     phase_slot: usize,
+}
+
+fn render_sidebar_gradient_text(
+    surface: &mut CellSurface,
+    text: SidebarGradient<'_>,
     palette: &ScenePalette,
 ) {
+    let SidebarGradient {
+        rect,
+        value,
+        bg,
+        reverse,
+        from,
+        to,
+        status,
+        now_ms,
+        phase_slot,
+    } = text;
     if rect.cols <= 0 || value.is_empty() {
         return;
     }
@@ -919,18 +935,6 @@ fn palette_color(role: Role, palette: &ScenePalette) -> Color {
         Role::Text => palette.fg,
         Role::Muted => palette.muted,
         Role::Heading => palette.heading,
-        Role::Accent => palette.accent,
-        Role::Accent2 => palette.accent_2,
-        Role::Border => palette.border,
-        Role::Surface => palette.bg,
-        Role::SurfaceRaised => palette.bg,
-        Role::SidebarBg => palette.sidebar_bg,
-        Role::StatusbarFg => palette.statusbar_fg,
-        Role::StatusbarBg => palette.statusbar_bg,
-        Role::Running => palette.running,
-        Role::Success => palette.success,
-        Role::Warning => palette.warning,
-        Role::Error => palette.error,
     }
 }
 pub(super) fn render_terminal(
@@ -946,9 +950,7 @@ pub(super) fn render_terminal(
     if layout.terminal.rows <= 0 || layout.terminal.cols <= 0 {
         return None;
     }
-    let Some(screen) = screen else {
-        return None;
-    };
+    let screen = screen?;
 
     blit_terminal_screen(
         surface,
@@ -978,16 +980,18 @@ fn blit_terminal_screen(
 ) {
     for_each_terminal_screen_cell(
         screen,
-        rect.rows.max(0) as u16,
-        rect.cols.max(0) as u16,
-        (rect.cols - rail_cols).max(0) as u16,
-        selection,
-        palette.term_fg,
-        palette.term_bg,
-        palette.term_selection_fg,
-        palette.term_selection_bg,
-        &palette.ansi,
-        draw_cursor,
+        &TerminalCellViewConfig {
+            rows: rect.rows.max(0) as u16,
+            cols: rect.cols.max(0) as u16,
+            selection_cols: (rect.cols - rail_cols).max(0) as u16,
+            selection,
+            default_fg: palette.term_fg,
+            default_bg: palette.term_bg,
+            selection_fg: palette.term_selection_fg,
+            selection_bg: palette.term_selection_bg,
+            ansi_palette: &palette.ansi,
+            draw_cursor,
+        },
         |cell| {
             surface.put_cell_span_terminal(
                 rect.col + i32::from(cell.col),

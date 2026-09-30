@@ -8,18 +8,6 @@ pub(super) enum Role {
     Text,
     Muted,
     Heading,
-    Accent,
-    Accent2,
-    Border,
-    Surface,
-    SurfaceRaised,
-    SidebarBg,
-    StatusbarFg,
-    StatusbarBg,
-    Running,
-    Success,
-    Warning,
-    Error,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,18 +65,22 @@ impl DerivedTheme {
     }
 }
 
+pub(super) struct TerminalPalette<'a> {
+    pub(super) default_fg: Color,
+    pub(super) default_bg: Color,
+    pub(super) selection_fg: Color,
+    pub(super) selection_bg: Color,
+    pub(super) ansi: &'a [Color; 16],
+}
+
 pub(super) fn screen_cell_colors(
     cell: &vt100::Cell,
     cursor_here: bool,
     selected: bool,
-    default_fg: Color,
-    default_bg: Color,
-    selection_fg: Color,
-    selection_bg: Color,
-    ansi_palette: &[Color; 16],
+    palette: &TerminalPalette<'_>,
 ) -> (Color, Color) {
-    let mut fg = terminal_color(cell.fgcolor(), default_fg, ansi_palette);
-    let mut bg = terminal_color(cell.bgcolor(), default_bg, ansi_palette);
+    let mut fg = terminal_color(cell.fgcolor(), palette.default_fg, palette.ansi);
+    let mut bg = terminal_color(cell.bgcolor(), palette.default_bg, palette.ansi);
     if cell.inverse() {
         std::mem::swap(&mut fg, &mut bg)
     }
@@ -97,13 +89,14 @@ pub(super) fn screen_cell_colors(
         fg = fade_toward(fg, bg, 110)
     }
     if selected {
-        return (selection_fg, selection_bg);
+        return (palette.selection_fg, palette.selection_bg);
     }
     if cursor_here {
         return (Color::rgb(9, 12, 18), Color::ansi_index(0));
     }
     (fg, bg)
 }
+
 fn terminal_color(c: vt100::Color, d: Color, a: &[Color; 16]) -> Color {
     match c {
         vt100::Color::Default => d,

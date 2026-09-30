@@ -131,7 +131,10 @@ pub(super) fn apply_snapshot_to_session(
     session.runtime.status = snapshot.stage.as_runtime_status().map(ToOwned::to_owned);
     session.runtime.queued = snapshot.queued;
     session.runtime.interrupted = snapshot.interrupted;
-    session.runtime.tool_name = if matches!(snapshot.stage, crate::agent::PiSessionStage::Tool) {
+    session.runtime.awaiting_approval = snapshot.awaiting_approval;
+    session.runtime.tool_name = if matches!(snapshot.stage, crate::agent::PiSessionStage::Tool)
+        || snapshot.awaiting_approval
+    {
         snapshot.tool_name.clone()
     } else {
         None
@@ -140,9 +143,11 @@ pub(super) fn apply_snapshot_to_session(
         session.runtime.last_sidecar_ts_ms = session.runtime.last_sidecar_ts_ms.max(snapshot.ts_ms);
     }
 
-    let mut result = SidecarApplyResult::default();
-    result.identity_changed =
-        session.pi_session_id != prev_pi_session_id || session.session_file != prev_session_file;
+    let mut result = SidecarApplyResult {
+        identity_changed: session.pi_session_id != prev_pi_session_id
+            || session.session_file != prev_session_file,
+        ..SidecarApplyResult::default()
+    };
     let trackable = session.counts_for_activity_ordering();
     match sidecar_order_update(
         prev_running,

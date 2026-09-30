@@ -67,8 +67,10 @@ pub use files::{archive_session_file, live_project_dir, restore_session_file, so
 pub use scan::{evict_old_archived_sessions, scan_archived_sessions, scan_live_sessions};
 pub use types::{PiSessionStage, PiSidecarSnapshot};
 
+#[cfg(not(feature = "fx"))]
+pub(crate) use implementation::store::EXTENSION_PATH_ENV;
 pub(crate) use implementation::store::{
-    ASCII_ENV, EXTENSION_PATH_ENV, SIDECAR_SESSION_KEY_ENV, SIDECAR_SOCKET_ENV, SOCKET_PREFIX,
+    ASCII_ENV, SIDECAR_SESSION_KEY_ENV, SIDECAR_SOCKET_ENV, SOCKET_PREFIX,
 };
 #[cfg(feature = "fx")]
 pub use implementation::FxLaunch;

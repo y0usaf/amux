@@ -37,6 +37,7 @@ enum TuiEvent {
 }
 
 pub fn run(initial_project_paths: Vec<PathBuf>) -> anyhow::Result<()> {
+    crate::util::set_process_name(process_name());
     if let Some(mode) = daemon_mode() {
         return mode.run();
     }
@@ -47,6 +48,24 @@ pub fn run(initial_project_paths: Vec<PathBuf>) -> anyhow::Result<()> {
     let _raw_terminal = RawTerminal::enter()?;
     spawn_stdin_reader(tx);
     app.run(rx)
+}
+
+/// Process title: `comm`/`ps` pick this up so each adapter's harness shows as
+/// `amux-{adapter}` instead of the TUI binary's own name. Feature selection
+/// mirrors `agent.rs`: fx wins if both fx and omp features are enabled.
+#[cfg(feature = "fx")]
+fn process_name() -> &'static str {
+    "amux-fx"
+}
+
+#[cfg(all(feature = "omp", not(feature = "fx")))]
+fn process_name() -> &'static str {
+    "amux-omp"
+}
+
+#[cfg(not(any(feature = "omp", feature = "fx")))]
+fn process_name() -> &'static str {
+    "amux-pi"
 }
 
 /// `--daemon` daemonizes; `--daemon-foreground` runs in the current process.
@@ -77,10 +96,8 @@ impl DaemonMode {
 
 fn tui_notify(tx: mpsc::Sender<TuiEvent>, wake_pending: Arc<AtomicBool>) -> Notify {
     Arc::new(move || {
-        if !wake_pending.swap(true, Ordering::AcqRel) {
-            if tx.send(TuiEvent::Wake).is_err() {
-                wake_pending.store(false, Ordering::Release);
-            }
+        if !wake_pending.swap(true, Ordering::AcqRel) && tx.send(TuiEvent::Wake).is_err() {
+            wake_pending.store(false, Ordering::Release);
         }
     })
 }
@@ -295,7 +312,6 @@ impl TuiApp {
             &mut surface,
             harness_scene_layout(&layout, rail_cols),
             &frame_model,
-            None,
             &palette,
             TerminalCursorMode::Hardware,
             mode,

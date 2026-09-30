@@ -49,6 +49,9 @@ pub struct PiSidecarSnapshot {
     pub queued: bool,
     #[serde(default)]
     pub interrupted: bool,
+    /// omp-only signal; fx never emits it (serde default covers absence).
+    #[serde(default)]
+    pub awaiting_approval: bool,
     #[serde(default)]
     pub tool_name: Option<String>,
     #[serde(default)]

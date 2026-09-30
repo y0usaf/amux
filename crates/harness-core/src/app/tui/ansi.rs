@@ -8,18 +8,10 @@ use super::super::scene::HardwareCursor;
 pub(super) const DEFAULT_FG: Color = Color::rgba(0, 0, 0, 0);
 pub(super) const DEFAULT_BG: Color = Color::rgba(0, 0, 0, 0);
 
+#[derive(Default)]
 pub(super) struct AnsiRenderer {
     previous: Option<CellSurface>,
     scratch: String,
-}
-
-impl Default for AnsiRenderer {
-    fn default() -> Self {
-        Self {
-            previous: None,
-            scratch: String::new(),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,21 +186,5 @@ fn write_index_bg(stdout: &mut io::Stdout, index: u8) -> io::Result<()> {
         0..=7 => write!(stdout, "[{}m", 40 + index),
         8..=15 => write!(stdout, "[{}m", 100 + index - 8),
         _ => write!(stdout, "[48;5;{index}m"),
-    }
-}
-
-fn ansi_index_fg(index: u8) -> String {
-    match index {
-        0..=7 => format!("[{}m", 30 + index),
-        8..=15 => format!("[{}m", 90 + index - 8),
-        _ => format!("[38;5;{index}m"),
-    }
-}
-
-fn ansi_index_bg(index: u8) -> String {
-    match index {
-        0..=7 => format!("[{}m", 40 + index),
-        8..=15 => format!("[{}m", 100 + index - 8),
-        _ => format!("[48;5;{index}m"),
     }
 }

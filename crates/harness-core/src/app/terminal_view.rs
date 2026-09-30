@@ -1,7 +1,7 @@
 use crate::render::Color;
 use crate::terminal::{terminal_selection_span, TerminalSelectionRange};
 
-use super::theme::screen_cell_colors;
+use super::theme::{screen_cell_colors, TerminalPalette};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TerminalCellView<'a> {
@@ -15,29 +15,40 @@ pub(super) struct TerminalCellView<'a> {
     pub(super) bold: bool,
 }
 
+pub(super) struct TerminalCellViewConfig<'a> {
+    pub(super) rows: u16,
+    pub(super) cols: u16,
+    pub(super) selection_cols: u16,
+    pub(super) selection: Option<TerminalSelectionRange>,
+    pub(super) default_fg: Color,
+    pub(super) default_bg: Color,
+    pub(super) selection_fg: Color,
+    pub(super) selection_bg: Color,
+    pub(super) ansi_palette: &'a [Color; 16],
+    pub(super) draw_cursor: bool,
+}
+
 pub(super) fn for_each_terminal_screen_cell<F>(
     screen: &vt100::Screen,
-    rows: u16,
-    cols: u16,
-    selection_cols: u16,
-    selection: Option<TerminalSelectionRange>,
-    default_fg: Color,
-    default_bg: Color,
-    selection_fg: Color,
-    selection_bg: Color,
-    ansi_palette: &[Color; 16],
-    draw_cursor: bool,
+    config: &TerminalCellViewConfig<'_>,
     mut visit: F,
 ) where
     F: FnMut(TerminalCellView<'_>),
 {
     let (screen_rows, screen_cols) = screen.size();
+    let palette = TerminalPalette {
+        default_fg: config.default_fg,
+        default_bg: config.default_bg,
+        selection_fg: config.selection_fg,
+        selection_bg: config.selection_bg,
+        ansi: config.ansi_palette,
+    };
     let (cursor_row, cursor_col) = screen.cursor_position();
-    let cursor_visible = draw_cursor && screen.scrollback() == 0 && !screen.hide_cursor();
+    let cursor_visible = config.draw_cursor && screen.scrollback() == 0 && !screen.hide_cursor();
 
-    for row in 0..screen_rows.min(rows) {
-        let row_selection = terminal_selection_span(selection, row, selection_cols);
-        for col in 0..screen_cols.min(cols) {
+    for row in 0..screen_rows.min(config.rows) {
+        let row_selection = terminal_selection_span(config.selection, row, config.selection_cols);
+        for col in 0..screen_cols.min(config.cols) {
             let Some(cell) = screen.cell(row, col) else {
                 continue;
             };
@@ -60,16 +71,7 @@ pub(super) fn for_each_terminal_screen_cell<F>(
                 end > col && start < cell_end
             });
             let cursor_here = cursor_visible && row == cursor_row && col == cursor_col;
-            let (fg, bg) = screen_cell_colors(
-                cell,
-                cursor_here,
-                selected,
-                default_fg,
-                default_bg,
-                selection_fg,
-                selection_bg,
-                ansi_palette,
-            );
+            let (fg, bg) = screen_cell_colors(cell, cursor_here, selected, &palette);
 
             visit(TerminalCellView {
                 row,

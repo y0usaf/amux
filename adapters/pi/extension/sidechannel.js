@@ -91,6 +91,7 @@ export function registerSidechannel(pi, store) {
 	let lastSnapshotKey = undefined
 	let downstreamBuffer = ""
 	const activeTools = new Map()
+	const pendingApprovals = new Map()
 	let lastThemeKey
 	const emitTheme = (ctx) => {
 		// Subagent runners do not own the terminal chrome; the main runner's
@@ -272,7 +273,8 @@ export function registerSidechannel(pi, store) {
 			stage,
 			queued,
 			interrupted,
-			toolName,
+		toolName,
+		awaitingApproval: pendingApprovals.size > 0,
 		}
 		const snapshotKey = JSON.stringify(snapshot)
 		if (!force && snapshotKey === lastSnapshotKey) return
@@ -292,6 +294,7 @@ export function registerSidechannel(pi, store) {
 	function clearRuntimeState() {
 		activeTools.clear()
 		toolName = undefined
+		pendingApprovals.clear()
 		queued = false
 		stage = "idle"
 	}
@@ -392,6 +395,18 @@ export function registerSidechannel(pi, store) {
 			toolName = undefined
 			stage = ctx.isIdle() ? "idle" : "thinking"
 		}
+		emitSnapshot(ctx, true)
+	})
+
+	pi.on("tool_approval_requested", async (event, ctx) => {
+		pendingApprovals.set(event.toolCallId, event.toolName)
+		toolName = event.toolName
+		emitSnapshot(ctx, true)
+	})
+
+	pi.on("tool_approval_resolved", async (event, ctx) => {
+		if (!pendingApprovals.delete(event.toolCallId)) return
+		toolName = pendingApprovals.values().next().value ?? anyToolName()
 		emitSnapshot(ctx, true)
 	})
 

@@ -18,12 +18,11 @@ pub const SESSION_DIR_ENV: &str = "AGENT_HARNESS_FX_SESSION_DIR";
 /// fx keeps its state under `$HOME/.fx`.
 pub const DEFAULT_AGENT_DIR_REL: &str = ".fx";
 
-/// Sidecar wire env vars. fx has no extension host yet, so nothing consumes
-/// these today; they keep the harness-sidecar plumbing uniform across
-/// adapters and become live when fx gains an extension surface.
+/// Sidecar wire env vars, consumed by harness-core when it launches the
+/// agent's sidecar (`terminal::process`). fx has no extension host, so
+/// `extension_path()` stays None and there is no extension-path override.
 pub const SIDECAR_SOCKET_ENV: &str = "AGENT_HARNESS_FX_SIDECAR_SOCKET";
 pub const SIDECAR_SESSION_KEY_ENV: &str = "AGENT_HARNESS_FX_SESSION_KEY";
-pub const EXTENSION_PATH_ENV: &str = "AGENT_HARNESS_FX_EXTENSION";
 pub const ASCII_ENV: &str = "AGENT_HARNESS_FX_ASCII";
 
 /// Prefix for the harness sidecar socket under the runtime dir.

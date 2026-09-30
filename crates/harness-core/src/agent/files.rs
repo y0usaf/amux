@@ -84,9 +84,32 @@ fn move_file_into_dir_with_fallback(source: &Path, dest_dir: &Path) -> Result<()
 
     let dest = dest_dir.join(file_name);
     if path_exists(&dest)? {
-        if path_exists(source)? {
+        if !path_exists(source)? {
+            return Ok(());
+        }
+        // A live agent keeps appending to (or re-creates) its session file
+        // after an earlier archive, so a same-named archive copy can be a
+        // stale snapshot. The live file is authoritative: identical content
+        // means drop the duplicate source; otherwise overwrite the archive.
+        if files_identical(source, &dest)? {
+            std::fs::remove_file(source).map_err(|error| {
+                format!(
+                    "cannot remove duplicated source {}: {error}",
+                    source.display()
+                )
+            })?;
+            return Ok(());
+        }
+        std::fs::copy(source, &dest).map_err(|copy_error| {
+            format!(
+                "cannot move {} -> {}: overwrite failed ({copy_error})",
+                source.display(),
+                dest.display()
+            )
+        })?;
+        if let Err(remove_error) = std::fs::remove_file(source) {
             return Err(format!(
-                "cannot move {} -> {}: destination exists",
+                "copied {} -> {} but failed to remove source; leaving both files in place: {remove_error}",
                 source.display(),
                 dest.display()
             ));
@@ -124,6 +147,19 @@ fn move_file_into_dir_with_fallback(source: &Path, dest_dir: &Path) -> Result<()
             Ok(())
         }
     }
+}
+
+fn files_identical(a: &Path, b: &Path) -> Result<bool, String> {
+    let same = std::fs::read(a)
+        .and_then(|left| std::fs::read(b).map(|right| left == right))
+        .map_err(|error| {
+            format!(
+                "cannot compare {} and {}: {error}",
+                a.display(),
+                b.display()
+            )
+        })?;
+    Ok(same)
 }
 
 fn path_exists(path: &Path) -> Result<bool, String> {

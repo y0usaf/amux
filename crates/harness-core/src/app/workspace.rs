@@ -383,14 +383,14 @@ impl Workspace {
     /// Adopt a daemon-known session into the workspace so sessions other
     /// clients spawned show up without a disk rescan. Rows are keyed by the
     /// daemon's canonical identity, so adoption is idempotent.
-    pub(super) fn ensure_daemon_session(&mut self, key: &str) -> bool {
+    pub(super) fn ensure_daemon_session(&mut self, key: &str, running: bool) -> bool {
         if self.knows_session(key) {
             return false;
         }
         let Some(project) = self.projects.get_mut(self.selected_project) else {
             return false;
         };
-        project.sessions.push(Session::from_daemon(key));
+        project.sessions.push(Session::from_daemon(key, running));
         true
     }
 

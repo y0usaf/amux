@@ -18,6 +18,9 @@ pub(super) fn status_text_for_session(
             } else {
                 status.to_string()
             };
+            if session.runtime.awaiting_user() {
+                status.push_str(" · needs approval");
+            }
             if session.runtime.queued {
                 status.push_str(" · queued");
             }
