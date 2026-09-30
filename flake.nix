@@ -21,7 +21,7 @@
   }: let
     system = "x86_64-linux";
     pkgs = nixpkgs.legacyPackages.${system};
-    pi = "${pi-flake.packages.${system}.pi}/bin/pi";
+    pi = "${pi-flake.packages.${system}.pi-full}/bin/pi";
     env = "${pkgs.coreutils}/bin/env";
     pi-harness = pkgs.runCommand "pi-harness" {meta.mainProgram = "pi-harness";} ''
       mkdir -p $out/bin $out/libexec $out/share/pi-harness
