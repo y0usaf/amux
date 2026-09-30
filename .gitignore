@@ -1,4 +1,2 @@
-target/
-result
-ref/
-@ref/
+result*
+.pi/

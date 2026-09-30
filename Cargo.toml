@@ -1,3 +1,0 @@
-[workspace]
-members = ["crates/harness-core", "crates/pi-harness-tui", "crates/omp-harness-tui", "crates/fx-harness-tui"]
-resolver = "2"

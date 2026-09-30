@@ -1,26 +1,62 @@
 {
-  description = "Pi and omp terminal harnesses with shared amux workspace";
+  description = "pi sessions in a focused, bare ekko instance";
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    crane.url = "github:ipetkov/crane";
-    rust-overlay = { url = "github:oxalica/rust-overlay"; inputs.nixpkgs.follows = "nixpkgs"; };
-    oh-my-pi.url = "github:can1357/oh-my-pi";
-  };
-  outputs = { self, nixpkgs, crane, rust-overlay, oh-my-pi, ... }:
-    let
-      systems = [ "x86_64-linux" "aarch64-linux" ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f (import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; }));
-    in {
-      packages = forAllSystems (pkgs: {
-        pi-harness = pkgs.callPackage ./nix/build.nix { crane = crane.mkLib pkgs; pname = "pi-harness"; cargoPackage = "pi-harness-tui"; binaryName = "pi-harness"; };
-        omp-harness = pkgs.callPackage ./nix/build.nix { crane = crane.mkLib pkgs; pname = "omp-harness"; cargoPackage = "omp-harness-tui"; binaryName = "omp-harness"; };
-        default = self.packages.${pkgs.system}.pi-harness;
-      });
-      apps = forAllSystems (pkgs: {
-        pi-harness = { type = "app"; program = "${self.packages.${pkgs.system}.pi-harness}/bin/pi-harness"; };
-        omp-harness = { type = "app"; program = "${self.packages.${pkgs.system}.omp-harness}/bin/omp-harness"; };
-        default = self.apps.${pkgs.system}.pi-harness;
-      });
-      devShells = forAllSystems (pkgs: { default = pkgs.mkShell { packages = [ pkgs.rustc pkgs.cargo ]; }; });
+    ekko = {
+      url = "github:y0usaf/ekko";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
+    pi-flake = {
+      url = "github:y0usaf/pi-flake?ref=main";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = {
+    nixpkgs,
+    ekko,
+    pi-flake,
+    ...
+  }: let
+    system = "x86_64-linux";
+    pkgs = nixpkgs.legacyPackages.${system};
+    pi = "${pi-flake.packages.${system}.pi}/bin/pi";
+    env = "${pkgs.coreutils}/bin/env";
+    pi-harness = pkgs.runCommand "pi-harness" {meta.mainProgram = "pi-harness";} ''
+      mkdir -p $out/bin $out/libexec $out/share/pi-harness
+      ln -s ${ekko.packages.${system}.default}/bin/ekko $out/libexec/pi-harness
+      cp ${./status.js} $out/share/pi-harness/status.js
+      substitute ${./pi-harness.lisp} $out/share/pi-harness/pi-harness.lisp \
+        --subst-var-by env ${env} \
+        --subst-var-by pi ${pi} \
+        --subst-var-by status $out/share/pi-harness/status.js
+      substitute ${./pi-harness.sh} $out/bin/pi-harness \
+        --subst-var-by shell ${pkgs.runtimeShell} \
+        --subst-var-by ekko $out/libexec/pi-harness \
+        --subst-var-by profile $out/share/pi-harness/pi-harness.lisp \
+        --subst-var-by env ${env} \
+        --subst-var-by pi ${pi} \
+        --subst-var-by status $out/share/pi-harness/status.js
+      chmod +x $out/bin/pi-harness
+    '';
+  in {
+    packages.${system}.default = pi-harness;
+    checks.${system}.default = pkgs.runCommand "pi-harness-smoke" {} ''
+      export HOME=$TMPDIR XDG_CONFIG_HOME=$TMPDIR/config XDG_STATE_HOME=$TMPDIR/state
+      export XDG_RUNTIME_DIR=$TMPDIR/run
+      mkdir -p $XDG_CONFIG_HOME && mkdir -m 700 $XDG_RUNTIME_DIR
+      ${pi-harness}/bin/pi-harness config check
+      ${pi-harness}/bin/pi-harness run --detached sh -c 'exec sleep 600'
+      for i in $(seq 50); do
+        ${pi-harness}/bin/pi-harness inspect > inspect.json
+        grep -q '"owner":"pi-harness"' inspect.json && break
+        sleep 0.1
+      done
+      ${pi-harness}/bin/pi-harness stop
+      grep -q '"error":null' inspect.json
+      grep -q '"owner":"pi-harness"' inspect.json
+      touch $out
+    '';
+  };
 }
