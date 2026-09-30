@@ -5,7 +5,7 @@
 (defparameter *env* "@env@")
 (defparameter *pi* "@pi@")
 (defparameter *status* "@status@")
-(defparameter *hints* '("M-n new   M-r resume" "M-j/k move   M-w close" "M-o detach"))
+(defparameter *hints* '("C-n new   C-S-r resume" "C-, C-. move   C-1..9" "C-S-w close  C-S-d detach"))
 
 (defun session-argv (directory &rest arguments)
   (append (when directory (list *env* "-C" directory))
@@ -185,10 +185,10 @@
       by #'cddr
       do (register-command :component :pi-harness :name name :handler handler))
 
-(loop for (key command) on '("M-n" "new" "M-r" "resume" "M-j" "next" "M-k" "previous"
-                             "M-w" "close" "M-o" "detach")
+(loop for (key command) on '("C-n" "new" "C-R" "resume" "C-." "next" "C-," "previous"
+                             "C-W" "close" "C-D" "detach")
       by #'cddr
       do (bind-key :component :pi-harness :map :harness :key key :command command))
 (loop for n from 1 to 9
-      do (bind-key :component :pi-harness :map :harness :key (format nil "M-~D" n)
+      do (bind-key :component :pi-harness :map :harness :key (format nil "C-~D" n)
                    :command "go" :arguments (list (princ-to-string n))))

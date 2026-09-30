@@ -22,17 +22,20 @@ go to ekko: `pi-harness list`, `pi-harness stop`, `pi-harness config reload`.
 
 | Key | Action |
 | --- | --- |
-| Alt-n | New session in the focused session's directory |
-| Alt-r | `pi --resume` in that directory |
-| Alt-j / Alt-k | Next / previous session |
-| Alt-1 … Alt-9 | Session by its sidebar number |
-| Alt-w | Close the focused session |
-| Alt-o | Detach |
+| Ctrl-n | New session in the focused session's directory |
+| Ctrl-Shift-r | `pi --resume` in that directory |
+| Ctrl-, / Ctrl-. | Previous / next session |
+| Ctrl-1 … Ctrl-9 | Session by its sidebar number |
+| Ctrl-Shift-w | Close the focused session |
+| Ctrl-Shift-d | Detach |
+
+Plain Ctrl letters belong to pi (Ctrl-k, Ctrl-w, Ctrl-j…) and to the ekko you
+run pi-harness in, so only Ctrl-n is taken from them. The other keys need a
+terminal that speaks the Kitty keyboard protocol. ekko does, so pi-harness
+works inside an ekko window too.
 
 Click a session to focus it, or a project name to start a session there. The
-wheel over the sidebar moves between sessions. Alt keys need a terminal that
-speaks the Kitty keyboard protocol. ekko does, so pi-harness works inside an
-ekko window too.
+wheel over the sidebar moves between sessions.
 
 ## Sidebar marks
 
