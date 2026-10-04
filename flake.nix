@@ -7,21 +7,21 @@
       url = "github:y0usaf/ekko";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    pi-flake = {
-      url = "github:y0usaf/pi-flake?ref=main";
+    pi = {
+      url = "github:earendil-works/pi/v1.0.2";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-darwin-x64.follows = "nixpkgs";
     };
   };
 
-  outputs = {
+  outputs = inputs @ {
     nixpkgs,
     ekko,
-    pi-flake,
     ...
   }: let
     system = "x86_64-linux";
     pkgs = nixpkgs.legacyPackages.${system};
-    pi = "${pi-flake.packages.${system}.pi-full}/bin/pi";
+    pi = pkgs.lib.getExe inputs.pi.packages.${system}.default;
     env = "${pkgs.coreutils}/bin/env";
     pi-harness = pkgs.runCommand "pi-harness" {meta.mainProgram = "pi-harness";} ''
       mkdir -p $out/bin $out/libexec $out/share/pi-harness
